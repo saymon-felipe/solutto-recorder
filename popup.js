@@ -4,6 +4,42 @@ document.addEventListener("DOMContentLoaded", () => {
   const deleteVideoButton = document.getElementById("delete-recording");
   const pauseVideoButton = document.querySelector(".pause");
   const resumeVideoButton = document.querySelector(".play");
+  const cameraSelectElement = document.getElementById("camera");
+  const microphoneSelectElement = document.getElementById("microphone");
+  const recordSource = document.getElementById("video-config");
+  const waitSecondsElement = document.getElementById("wait-seconds");
+
+  waitSecondsElement.addEventListener("change", (e) => {
+    let value = e.target.value;
+
+    if (value.trim() != "") {
+      chrome.storage.local.set({ waitSeconds: value });
+    }
+  })
+
+  cameraSelectElement.addEventListener("change", (e) => {
+    let value = e.target.value;
+
+    if (value.trim() != "") {
+      chrome.storage.local.set({ cameraSelect: value });
+    }
+  })
+
+  microphoneSelectElement.addEventListener("change", (e) => {
+    let value = e.target.value;
+
+    if (value.trim() != "") {
+      chrome.storage.local.set({ microphoneSelect: value });
+    }
+  })
+
+  recordSource.addEventListener("change", (e) => {
+    let value = e.target.value;
+
+    if (value.trim() != "") {
+      chrome.storage.local.set({ optionsSelect: value });
+    }
+  })
 
   let elapsedSeconds = 0;
   let timerInterval = null;
@@ -215,6 +251,7 @@ function returnDevices(devices) {
   for (let i = 0; i < devices.length; i++) {
     let currentDevice = devices[i];
     let option = document.createElement("option");
+    console.log(currentDevice)
     option.value = currentDevice.deviceId;
     option.innerHTML = truncarTexto(currentDevice.label);
 
@@ -241,4 +278,37 @@ function fillDevices(devices) {
 
   appendElements(camera, cameraDevices);
   appendElements(microphone, microphoneDevices);
+
+  returnStoredOptions();
+}
+
+function returnStoredOptions() {
+  const cameraSelectElement = document.getElementById("camera");
+  const microphoneSelectElement = document.getElementById("microphone");
+  const recordSource = document.getElementById("video-config");
+  const waitSecondsElement = document.getElementById("wait-seconds");
+
+  chrome.storage.local.get("cameraSelect", (data) => {
+    if (data.cameraSelect) {
+      cameraSelectElement.value = data.cameraSelect;
+    }
+  })
+
+  chrome.storage.local.get("microphoneSelect", (data) => {
+    if (data.microphoneSelect) {
+      microphoneSelectElement.value = data.microphoneSelect;
+    }
+  })
+
+  chrome.storage.local.get("optionsSelect", (data) => {
+    if (data.optionsSelect) {
+      recordSource.value = data.optionsSelect;
+    }
+  })
+
+  chrome.storage.local.get("waitSeconds", (data) => {
+    if (data.optionsSelect) {
+      waitSecondsElement.value = data.optionsSelect;
+    }
+  })
 }

@@ -20,30 +20,33 @@ ffmpeg.on("progress", ({ progress, time }) => {
 
 async function transcode(file, format, timeout) {
 
-    if (ffmpeg.loaded) {
-        await ffmpeg.terminate();
-    }
+    if (!ffmpeg.loaded) {
+        const deviceMemory = navigator.deviceMemory || 4; // Padrão para 4GB se não suportado
+        const totalMemoryMB = Math.min(deviceMemory * 1024, 2048);
 
-    // load ffmpeg
-    await ffmpeg.load({
-        coreURL: coreUrl,
-        wasmURL: wasmUrl,
-        totalMemory: 512 * 1024 * 1024
-    });
+        await ffmpeg.load({
+            coreURL: coreUrl,
+            wasmURL: wasmUrl,
+            totalMemory: totalMemoryMB * 1024 * 1024
+        });
+    }
 
     const name = 'screen-recording';
 
     const commandList = [
         "-ss", timeout,
         "-i", name,
-        "-vf", "scale=1280:-1",
-        "-c:v", "libvpx",  // VP8 para WebM
+        "-c:v", format == "mp4" ? "libx264" : "libvpx",  // VP8 para WebM //libvpx (webm) //libvpx-vp9 (webm) //libx264
         "-preset", "ultrafast",
-        "-cpu-used", "4", // Máximo para acelerar
+        "-cpu-used", "8", // Máximo para acelerar
         "-deadline", "realtime",
+        "-row-mt", "1",
         "-crf", "23",
-        "-b:v", "1M",
-        "-c:a", "libopus", // Áudio compatível com WebM
+        "-b:v", "2M",       // Aumentar bitrate pode acelerar a conversão //2M (bitrate maior) //500k (bitrate menor)
+        "-maxrate", "2M",
+        "-bufsize", "4M",
+        "-threads", "0",
+        "-c:a", format == "mp4" ? "aac" : "libopus", // Áudio compatível com WebM //libopus (webm) //aac
         name + "." + format
     ];
 
@@ -53,6 +56,5 @@ async function transcode(file, format, timeout) {
     const data = await ffmpeg.readFile(name + "." + format);
     console.log("video convertido", data)
     const blob = new Blob([data.buffer]);
-    console.log(blob)
     return URL.createObjectURL(blob);
   }

@@ -6,17 +6,11 @@ chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
         const videoElement = document.getElementById("video");
         videoElement.controls = true;
 
-        videoElement.src = await transcode(data.videoUrl, "webm", videoTimeout);
+        videoElement.src = await transcode(data.videoUrl, "mp4", videoTimeout);
 
         videoElement.load();
 
-        videoElement.onerror = function () {
-            console.error("Erro ao carregar o vídeo:", videoElement.error);
-        };
-
-        console.log("Baixando vídeo...");
-
-        try {    
+        videoElement.addEventListener("loadedmetadata", () => {
             const videoElement = document.getElementById("video");
             const rangeMin = document.getElementById("rangeMin");
             const rangeMax = document.getElementById("rangeMax");
@@ -53,8 +47,14 @@ chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
     
             rangeMin.addEventListener("input", updateRange);
             rangeMax.addEventListener("input", updateRange);
-        } catch (error) {
-            console.error("Erro ao converter vídeo:", error);
-        }
+
+            updateRange();
+        });
+
+        videoElement.onerror = function () {
+            console.error("Erro ao carregar o vídeo:", videoElement.error);
+        };
+
+        console.log("Baixando vídeo...");
     }
 });
