@@ -1,0 +1,141 @@
+@import url(style.css);
+
+.slider-container {
+    position: relative;
+    width: 100%;
+    height: 30px;
+}
+
+.slider-track {
+    position: absolute;
+    width: 100%;
+    height: 8px;
+    background: #e6e6e6;
+    border-radius: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.slider-range {
+    position: absolute;
+    height: 8px;
+    background: #00979c;
+    border-radius: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+input.personalized-input-range {
+    position: absolute;
+    width: 100%;
+    -webkit-appearance: none;
+    background: none;
+    pointer-events: none;
+}
+
+input.personalized-input-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 1px solid #ccc;
+    position: relative;
+    margin-top: 5px;
+    pointer-events: auto;
+}
+
+input.personalized-input-range::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+    margin-top: 5px;
+    border: 1px solid #ccc;
+}
+
+input.personalized-input-range::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 8px;
+    background: transparent;
+    border-radius: 5px;
+}
+
+input.personalized-input-range::-moz-range-track {
+    width: 100%;
+    height: 8px;
+    background: transparent;
+    border-radius: 5px;
+}
+
+.cut-label {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: .5rem;
+}
+
+.editor {
+    max-width: 1200px;
+    width: 95vw;
+    height: 100vh;
+    background: #FAFAFA;
+    margin: auto;
+}
+
+.header-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1rem;
+    transition: color 0.4s;
+    border-bottom: 1px solid #E6E6E6;
+    padding: 1rem 2rem;
+
+    & a {
+        color: #808080;
+        text-decoration: none;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 600;
+
+        &:hover {
+            color: #4b4b4b;
+        }
+    }
+}
+
+.editor-container {
+    margin-top: 1rem;
+    padding: 1rem 2rem;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    justify-content: space-evenly;
+
+    & video {
+        max-width: 500px;
+        width: 100%;
+    }
+}
+
+.editor-side {
+    background: white;
+    border: 1px solid #e6e6e6;
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+.export-buttons {
+    display: grid;
+    gap: .5rem;
+    margin-top: 3rem;
+    place-items: center;
+
+    & button {
+        width: 100%;
+    }
+}

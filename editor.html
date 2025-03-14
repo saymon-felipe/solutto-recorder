@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Solutto Gravador</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+    <div class="editor solutto-gravador">
+        <div class="header-container">
+            <div class="header">
+                <img src="./assets/icon.png">
+                <h1 class="fontsize-2xl">Solutto gravador</h1>
+            </div>
+            <a href="https://solutto.com.br" target="_blank">solutto.com.br</a>
+        </div>
+        <div class="editor-container">
+            <video id="video" controls></video>
+            <div class="editor-side">
+                <div class="form-group">
+                    <p class="fontsize-md">Edite a sua gravação</p>
+                    <select id="export-type">
+                        <option value="webm">WEBM (Padrão)</option>
+                        <option value="mp4">MP4</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <p class="fontsize-md">Cortar video</p>
+                    <div class="cut-label">
+                        <input type="text" id="start-time" value="00:00:00" disabled>
+                        <input type="text" id="end-time" value="00:00:00" disabled>
+                        <button class="btn">Aplicar</button>
+                    </div>
+                    <div class="slider-container">
+                        <div class="slider-track"></div>
+                        <div class="slider-range" id="range"></div>
+                        <input type="range" class="personalized-input-range" id="rangeMin" min="0" max="100" value="0">
+                        <input type="range" class="personalized-input-range" id="rangeMax" min="0" max="100" value="100">
+                    </div>
+                </div>
+                <div class="form-group export-buttons">
+                    <button class="btn">
+                        <i class="fa-solid fa-download"></i>
+                        Baixar
+                    </button>
+                    <button class="btn">
+                        <i class="fa-solid fa-clone"></i>
+                        Copiar para área de transferência
+                    </button>
+                    <button class="btn btnCinza">
+                        <i class="fa-brands fa-google-drive"></i>
+                        Salvar no drive (Entrar)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="./lib/ffmpeg/umd/ffmpeg.js"></script>
+    <script src="./lib/ffmpeg/util.js"></script>
+    <script src="transcode.js"></script>
+    <script src="editor.js"></script>
+
+</body>
+</html>
