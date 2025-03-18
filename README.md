@@ -23,7 +23,7 @@
 
 ---
 
-## 🔧 Instalação no Chrome
+## 🔧 Instalação no Chrome (MODO DESENVOLVEDOR)
 
 Siga os passos abaixo para instalar a extensão no seu navegador Chrome:
 
