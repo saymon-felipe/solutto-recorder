@@ -64,11 +64,9 @@ async function transcode(file, format, timeout) {
         fileName + "." + format
     ];
 
-    console.log("ffmpeg carregado, preparando pra converter")
     await ffmpeg.writeFile(fileName, await fetchFile(file));
     await ffmpeg.exec(commandList);
     const data = await ffmpeg.readFile(fileName + "." + format);
-    console.log("video convertido", data)
     const blob = new Blob([data.buffer]);
     videoBlob = blob;
     return URL.createObjectURL(blob);
@@ -106,12 +104,9 @@ async function cutVideo(format, startTime, duration) {
         newFileName
     ];
 
-    console.log("Preparando para cortar o vídeo...");
     await ffmpeg.writeFile(fileName, await fetchFile(videoBlob));
     await ffmpeg.exec(commandList);
     const data = await ffmpeg.readFile(newFileName);
-    console.log("Vídeo cortado com sucesso!");
-
     const blob = new Blob([data.buffer]);
     videoBlob = blob;
     return URL.createObjectURL(blob);

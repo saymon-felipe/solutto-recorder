@@ -1,4 +1,4 @@
-//import { uploadToDrive } from './drive.js';
+import { uploadToDrive } from './drive.js';
 
 let added = false;
 
@@ -12,22 +12,19 @@ function addContentScript(tabId) {
         let promises = [];
 
         if (added) {
-            console.log("removeu")
             promises.push(
                 removeContentScript(tabId)
             )
         }
 
         Promise.all(promises).then(() => {
-            console.log("adicionou")
             chrome.scripting.executeScript({
                 target: {tabId},
                 files: ["./content.js"]
             }).then(() => {
-                console.log("Script de conteúdo injetado com sucesso");
                 added = true;
                 resolve();
-            }).catch(err => console.log(err, "Erro ao injetar script de conteúdo"));
+            }).catch(err => console.log(err, "Solutto Gravador: Erro ao injetar script de conteúdo"));
         })
     })
 }
@@ -35,13 +32,10 @@ function addContentScript(tabId) {
 function removeContentScript(tabId) {
     return new Promise((resolve) => {
         chrome.tabs.sendMessage(tabId, { action: "removeContentScript" }, (response) => {
-            if (chrome.runtime.lastError) {
-                console.log("Erro ao tentar remover content script:", chrome.runtime.lastError);
-            } else {
-                console.log("Content script removido com sucesso.");
+            if (!chrome.runtime.lastError) {
                 added = false;
                 resolve();
-            }
+            } 
         });
     })
 }
@@ -83,18 +77,28 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     }
 })
 
-//addContentScript();
-
-// Ouça mensagens da extensão para iniciar o upload ou outras ações
-/*chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'upload-file') {
-        const file = message.file;  // O arquivo a ser enviado para o Google Drive
-        if (file) {
-        uploadToDrive(file);
-        //uploadFileToDrive(file);
-        sendResponse({ status: 'upload-iniciado' });
-        } else {
-        sendResponse({ status: 'erro', message: 'Arquivo não encontrado' });
-        }
+chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+    if (message.action === "download") {
+        chrome.downloads.showDefaultFolder()
+        sendResponse({ status: "Download iniciado!" });
     }
-});*/
+
+    if (message.action === 'upload-file') {
+        const fileBlob = new Blob([new Uint8Array(message.file)], { type: "video/" + message.format });
+
+        if (fileBlob) {
+            const now = new Date();
+            const formattedDate = now.toLocaleDateString("pt-BR").replace(/\//g, "-"); // "18-03-2025"
+            const formattedTime = now.toTimeString().slice(0, 5).replace(":", "-"); // "00-44"
+            const fileName = `solutto-gravador-${formattedDate}_${formattedTime}.` + message.format;
+            
+            await uploadToDrive(fileBlob, fileName);
+
+            sendResponse({ status: 'upload-iniciado' });
+        } else {
+            sendResponse({ status: 'erro', message: 'Arquivo não encontrado' });
+        }
+
+        return true;
+    }
+});

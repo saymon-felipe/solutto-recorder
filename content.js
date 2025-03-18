@@ -12,22 +12,19 @@ if (!window.contentScriptInjected) {
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === "removeContentScript") {
-            console.log("Removendo content script...");
-
             delete window.contentScriptInjected; // Remove flag
             sendResponse({ success: true });
             return;
         }
     });
 
-    console.log("Content script injetado.");
     injectFontAwesome();
     injectStyles();
 }
 
 function onAccessApproved(stream, timeout) {
     if (recorder) {
-        console.log("Uma gravação já está em andamento.");
+        console.log("Solutto Gravador: Uma gravação já está em andamento.");
         return;
     }
 
@@ -36,7 +33,7 @@ function onAccessApproved(stream, timeout) {
     recorder = new MediaRecorder(stream); // Agora a gravação é armazenada corretamente
     isRecording = true;
     recorder.start();
-    console.log('Gravação iniciada...');
+    console.log('Solutto Gravador: Gravação iniciada...');
     
     recorder.onstop = (fromHandle = false) => {
         stream.getTracks().forEach(track => {
@@ -340,6 +337,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
 
                 if (message.type === "webcam") {
+                    trilhas.push(...recordOnlyWebcamStream.getAudioTracks());
                     createVideoElement(recordOnlyWebcamStream);
                 }
 
@@ -653,10 +651,10 @@ function initRecordingInterface(timeout) {
     const resumeVideoButton = document.querySelector(".play");
 
     stopVideoButton.addEventListener("click", () => {
-        console.log("Encerrando gravação");
+        console.log("Solutto Gravador: Encerrando gravação");
     
         if (!recorder) {
-            console.log("Nenhum gravador ativo");
+            console.log("Solutto Gravador: Nenhum gravador ativo");
             return;
         }
 
@@ -689,7 +687,7 @@ function initRecordingInterface(timeout) {
 
     pauseVideoButton.addEventListener("click", () => {
         if (!recorder || recorder.state !== "recording") {
-            return console.log("Não é possível pausar, pois a gravação não está ativa");
+            return console.log("Solutto Gravador: Não é possível pausar, pois a gravação não está ativa");
         }
 
         recorder.pause();
@@ -698,7 +696,7 @@ function initRecordingInterface(timeout) {
         document.querySelector(".pause").setAttribute("disabled", true);
         document.querySelector(".play").style.display = "block";
         document.querySelector(".pause").style.display = "none";
-        document.querySelector(".submit").removeAttribute("disabled");
+        document.getElementById("stop-recording").removeAttribute("disabled");
         document.querySelector(".delete").removeAttribute("disabled");
 
         pauseTimer();
@@ -706,7 +704,7 @@ function initRecordingInterface(timeout) {
 
     resumeVideoButton.addEventListener("click", () => {
         if (!recorder || recorder.state !== "paused") {
-            return console.log("Não é possível retomar, pois a gravação não está pausada");
+            return console.log("Solutto Gravador: Não é possível retomar, pois a gravação não está pausada");
         }
 
         recorder.resume();

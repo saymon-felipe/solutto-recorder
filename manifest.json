@@ -2,16 +2,17 @@
     "manifest_version": 3,
     "name": "Solutto Gravador",
     "version": "1.0",
-    "description": "Realizar gravações de tela e subir para o drive ou para o sistema Solutto",
+    "description": "Realizar gravações de tela e subir para o drive",
     "permissions": [
       "tabs",
       "scripting",
-      "identity", 
       "storage",    
       "activeTab",
       "tabCapture",
       "desktopCapture",
-      "declarativeContent"
+      "declarativeContent",
+      "downloads",
+      "identity"
     ],
     "background": {
       "service_worker": "background.js",
@@ -22,10 +23,11 @@
     },
     "host_permissions": [
       "http://*/",
-      "https://*/*"
+      "https://*/*",
+      "https://www.googleapis.com/*"
     ],
     "oauth2": {
-      "client_id": "1061159513511-ns38bbb0b0r8ri4cobfmttmab7g5ta5b.apps.googleusercontent.com", 
+      "client_id": "1061159513511-mprln06hs8ua96ia8kkh2vo6qhvgscot.apps.googleusercontent.com", 
       "scopes": [
         "https://www.googleapis.com/auth/drive.file", 
         "https://www.googleapis.com/auth/drive" 
@@ -40,7 +42,7 @@
     "content_scripts": [
       {
         "matches": ["http://*/*", "https://*/*", "<all_urls>"],
-        "js": ["content.js", "popup.js", "drive.js", "lib/ffmpeg/umd/ffmpeg.js", "lib/ffmpeg/util.js"],
+        "js": ["content.js", "popup.js", "lib/ffmpeg/umd/ffmpeg.js", "lib/ffmpeg/util.js"],
         "css": ["style.css"]
       }
     ],

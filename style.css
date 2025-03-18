@@ -127,6 +127,10 @@
     font-weight: 600 !important;
     transition: 0.2s linear background;
     cursor: pointer;
+
+    &:disabled {
+        opacity: 0.7 !important;
+    }
 }
 
 .solutto-gravador .btn:hover,

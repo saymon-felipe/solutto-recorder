@@ -156,8 +156,6 @@ function start() {
 
       chrome.tabs.sendMessage(tabs[0].id, { action: "request_recording", type: recordingType, microfoneId: microfoneId, webcamId: webcamId, timeout: recordTimeout }, (response) => {
         if (!chrome.runtime.lastError) {
-          console.log(response.message);
-
           if (response.allow) {
             document.querySelector(".wrapper").style.display = "none";
             document.querySelector(".container").style.display = "none";

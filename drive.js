@@ -1,14 +1,23 @@
-/*export async function uploadToDrive(fileBlob) {
+export async function uploadToDrive(fileBlob, fileName) {
     const folderName = 'Solutto Gravador';
 
     async function getAuthToken() {
         return new Promise((resolve, reject) => {
-            chrome.identity.getAuthToken({ interactive: true }, (token) => {
-                if (chrome.runtime.lastError || !token) {
-                    reject(chrome.runtime.lastError);
-                } else {
-                    resolve(token);
+            const clientId = chrome.runtime.getManifest().oauth2.client_id;
+            const redirectUri = chrome.identity.getRedirectURL(); // Obtém a URI correta automaticamente
+
+            const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=https://www.googleapis.com/auth/drive.file`;
+
+            chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (responseUrl) => {
+                if (chrome.runtime.lastError) {
+                    console.error("Erro na autenticação:", chrome.runtime.lastError);
+                    return;
                 }
+
+                const params = new URLSearchParams(new URL(responseUrl).hash.substring(1));
+                const token = params.get("access_token");
+                
+                resolve(token);
             });
         });
     }
@@ -55,7 +64,7 @@
 
     async function uploadFile(token, folderId) {
         const metadata = {
-            name: "recording.webm",
+            name: fileName,
             parents: [folderId]
         };
 
@@ -72,23 +81,19 @@
         });
 
         const data = await response.json();
-        console.log("Arquivo enviado para o Drive:", data);
+        console.log("Solutto Gravador: Arquivo enviado para o Drive:", data);
         return data;
     }
 
     try {
         const token = await getAuthToken();
         let folderId = await checkFolderExistence(token);
-
         if (!folderId) {
-            console.log("Pasta não encontrada. Criando...");
             folderId = await createFolder(token);
         }
 
-        console.log("Pasta encontrada:", folderId);
         await uploadFile(token, folderId);
     } catch (error) {
-        console.error("Erro no processo:", error);
+        console.error("Solutto Gravador: Erro no processo:", error);
     }
 }
-*/
