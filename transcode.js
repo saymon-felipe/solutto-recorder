@@ -85,6 +85,13 @@ async function transcode(file, format, timeout) {
         fileName + "." + format
     ];
 
+    // Remove o arquivo anterior (se existir);
+    try {
+        await ffmpeg.unlink(fileName);
+    } catch (error) {
+        console.warn(`Aviso: Nenhum arquivo anterior encontrado para remover (${fileName})`);
+    }
+
     // Escreve o arquivo de entrada para o FFmpeg
     await ffmpeg.writeFile(fileName, await fetchFile(file));
     // Executa os comandos de transcodificação
@@ -117,9 +124,6 @@ async function cutVideo(format, startTime, duration) {
             totalMemory: totalMemoryMB * 1024 * 1024
         });
     }
-
-    // Define um novo nome para o arquivo cortado
-    var newFileName = fileName + "_cortado." + format;
     
     // Define a lista de comandos para realizar o corte do vídeo
     const commandList = [
@@ -137,15 +141,22 @@ async function cutVideo(format, startTime, duration) {
         "-bufsize", "4M",
         "-threads", "0",
         "-c:a", format == "mp4" ? "aac" : "libopus", // Seleciona o codec de áudio com base no formato
-        newFileName
+        fileName + "." + format
     ];
+
+    // Remove o arquivo anterior (se existir);
+    try {
+        await ffmpeg.unlink(fileName);
+    } catch (error) {
+        console.warn(`Aviso: Nenhum arquivo anterior encontrado para remover (${fileName})`);
+    }
 
     // Escreve o blob do vídeo atual para o FFmpeg
     await ffmpeg.writeFile(fileName, await fetchFile(videoBlob));
     // Executa os comandos para cortar o vídeo
     await ffmpeg.exec(commandList);
     // Lê o arquivo de saída gerado após o corte
-    const data = await ffmpeg.readFile(newFileName);
+    const data = await ffmpeg.readFile(fileName + "." + format);
     const blob = new Blob([data.buffer]);
     videoBlob = blob; // Atualiza a variável global com o blob do vídeo cortado
     return URL.createObjectURL(blob);

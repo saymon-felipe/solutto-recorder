@@ -1,3 +1,5 @@
+var downloadRequested = false;
+
 // Recupera as configurações do vídeo armazenadas no Chrome Storage
 chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
     const videoUrl = data.videoUrl;
@@ -23,55 +25,12 @@ chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
         // Configura os controles da interface após os metadados do vídeo serem carregados
         videoElement.addEventListener("loadedmetadata", () => {
             // Obtém os elementos da interface para o controle de corte e exibição de tempo
-            const videoElement = document.getElementById("video");
             const rangeMin = document.getElementById("rangeMin");
             const rangeMax = document.getElementById("rangeMax");
-            const range = document.getElementById("range");
-            const startTimeInput = document.getElementById("start-time");
-            const endTimeInput = document.getElementById("end-time");
 
-            /**
-             * Converte um tempo em segundos para o formato "hh:mm:ss".
-             * @param {number} seconds - Tempo em segundos.
-             * @returns {string} Tempo formatado como "hh:mm:ss".
-             */
-            function formatTime(seconds) {
-                let h = Math.floor(seconds / 3600);
-                let m = Math.floor((seconds % 3600) / 60);
-                let s = Math.floor(seconds % 60);
-                return [h, m, s].map(v => v.toString().padStart(2, '0')).join(":");
-            }
-    
-            /**
-             * Atualiza a interface do controle de corte, ajustando a posição e largura da faixa (range)
-             * e definindo os tempos de início e fim com base nos valores dos inputs.
-             */
-            function updateRange() {
-                // Utiliza a duração do vídeo ou 1 para evitar divisão por zero
-                const videoDuration = videoElement.duration || 1;
-
-                // Obtém os valores mínimos e máximos dos controles deslizantes
-                const minVal = parseFloat(rangeMin.value);
-                const maxVal = parseFloat(rangeMax.value);
-
-                // Calcula as porcentagens para posicionamento da faixa
-                const percentMin = (minVal / rangeMin.max) * 100;
-                const percentMax = (maxVal / rangeMax.max) * 100;
-
-                // Atualiza os estilos da faixa visual que indica o corte selecionado
-                range.style.left = percentMin + "%";
-                range.style.width = (percentMax - percentMin) + "%";
-
-                // Calcula os tempos correspondentes para início e fim do corte
-                const startTime = (minVal / 100) * videoDuration;
-                const endTime = (maxVal / 100) * videoDuration;
-
-                // Atualiza os inputs de tempo com os valores formatados
-                startTimeInput.value = formatTime(startTime);
-                endTimeInput.value = formatTime(endTime);
-            }
-    
             // Adiciona os listeners de entrada para atualizar a faixa sempre que os valores mudam
+            rangeMin.removeEventListener("input", updateRange);
+            rangeMax.removeEventListener("input", updateRange);
             rangeMin.addEventListener("input", updateRange);
             rangeMax.addEventListener("input", updateRange);
 
@@ -84,102 +43,16 @@ chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
             updateRange();
 
             // Configura o botão de corte do vídeo
-            const cutVideoButton = document.getElementById("cut-video");
-            cutVideoButton.addEventListener("click", () => {
-                const startTime = document.getElementById("start-time").value;
-                const endTime = document.getElementById("end-time").value;
-
-                // Desabilita os botões para evitar múltiplos cliques enquanto o corte é processado
-                document.getElementById("download-video").setAttribute("disabled", "disabled");
-                document.getElementById("save-drive").setAttribute("disabled", "disabled");
-                document.getElementById("cut-video").setAttribute("disabled", "disabled");
-
-                // Realiza o corte do vídeo chamando a função cutVideo, convertendo os tempos para segundos
-                cutVideo("mp4", timeToSeconds(startTime), timeToSeconds(endTime)).then((videoUrl) => {
-                    // Atualiza a fonte do vídeo com a URL resultante do corte
-                    videoElement.src = videoUrl;
-                    // Reinicia os controles de faixa para os valores padrão
-                    rangeMin.value = 0;
-                    rangeMax.value = 100;
-
-                    // Reabilita os botões após o corte ser concluído
-                    document.getElementById("download-video").removeAttribute("disabled");
-                    document.getElementById("save-drive").removeAttribute("disabled");
-                    document.getElementById("cut-video").removeAttribute("disabled");
-                });
-            });
+            document.getElementById("cut-video").removeEventListener("click", handleCutVideo);
+            document.getElementById("cut-video").addEventListener("click", handleCutVideo);
 
             // Configura o botão de download do vídeo
-            document.getElementById("download-video").addEventListener("click", async () => {
-                const exportType = document.getElementById("export-type").value;
-                const link = document.createElement("a");
-
-                // Atualiza o botão de download para indicar que o processo está em andamento
-                document.querySelector("#download-video").setAttribute("disabled", "disabled");
-                document.querySelector("#download-video span").innerHTML = 'Baixando...';
-
-                // Se o formato de exportação não for MP4, realiza a transcodificação para WebM
-                var fileUrl = exportType != "mp4" ? await transcode(videoBlob, "webm", 0) : videoElement.src;
-                link.href = fileUrl;
-
-                // Atualiza o atributo que indica o formato do arquivo
-                videoElement.setAttribute("file-format", exportType);
-
-                // Gera um nome único para o arquivo utilizando data e hora atuais
-                const now = new Date();
-                const formattedDate = now.toLocaleDateString("pt-BR").replace(/\//g, "-");
-                const formattedTime = now.toTimeString().slice(0, 5).replace(":", "-");
-                const fileName = `solutto-gravador-${formattedDate}_${formattedTime}.`;
-
-                // Define o nome para o download conforme o formato escolhido
-                link.download = fileName + (exportType != "mp4" ? "webm" : "mp4");
-
-                // Simula o clique para iniciar o download e remove o link do DOM
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-
-                // Envia uma mensagem ao background informando o início do download
-                chrome.runtime.sendMessage({ action: "download", filename: fileName + (exportType != "mp4" ? "webm" : "mp4") });
-
-                // Atualiza a interface do botão de download e reabilita-o após alguns segundos
-                document.querySelector("#download-video").removeAttribute("disabled");
-                document.querySelector("#download-video span").innerHTML = 'Baixado';
-                setTimeout(() => {
-                    document.querySelector("#download-video span").innerHTML = "Baixar";
-                }, 5000);
-            });
+            document.getElementById("download-video").removeEventListener("click", handleDownloadFile);
+            document.getElementById("download-video").addEventListener("click", handleDownloadFile);
 
             // Configura o botão para salvar o vídeo no Google Drive
-            document.getElementById("save-drive").addEventListener("click", async () => {
-                const exportType = document.getElementById("export-type").value;
-
-                // Atualiza o botão para indicar que o envio está em andamento
-                document.querySelector("#save-drive").setAttribute("disabled", "disabled");
-                document.querySelector("#save-drive span").innerHTML = "Enviando...";
-
-                // Se o formato de exportação não for MP4, realiza a transcodificação para WebM
-                if (exportType != "mp4") {
-                    await transcode(data.videoUrl, "webm", videoTimeout);
-                    videoElement.setAttribute("file-format", "webm");
-                }
-
-                // Converte o blob do vídeo para um array serializável
-                videoBlob.arrayBuffer().then(buffer => {
-                    chrome.runtime.sendMessage({
-                        action: "upload-file",
-                        format: videoElement.getAttribute("file-format"),
-                        file: Array.from(new Uint8Array(buffer))
-                    }, (response) => {
-                        // Atualiza a interface do botão após o upload
-                        document.querySelector("#save-drive").removeAttribute("disabled");
-                        document.querySelector("#save-drive span").innerHTML = "Enviado";
-                        setTimeout(() => {
-                            document.querySelector("#save-drive span").innerHTML = "Salvar no drive";
-                        }, 5000);
-                    });
-                });
-            });
+            document.getElementById("save-drive").removeEventListener("click", uploadToDrive);
+            document.getElementById("save-drive").addEventListener("click", uploadToDrive);
         });
 
         // Trata erros no carregamento do vídeo
@@ -197,4 +70,157 @@ chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
 function timeToSeconds(time) {
     const [hours, minutes, seconds] = time.split(":").map(Number);
     return hours * 3600 + minutes * 60 + seconds;
+}
+
+/**
+ * Converte um tempo em segundos para o formato "hh:mm:ss".
+ * @param {number} seconds - Tempo em segundos.
+ * @returns {string} Tempo formatado como "hh:mm:ss".
+ */
+function formatTime(seconds) {
+    let h = Math.floor(seconds / 3600);
+    let m = Math.floor((seconds % 3600) / 60);
+    let s = Math.floor(seconds % 60);
+    return [h, m, s].map(v => v.toString().padStart(2, '0')).join(":");
+}
+
+/**
+ * Atualiza a interface do controle de corte, ajustando a posição e largura da faixa (range)
+ * e definindo os tempos de início e fim com base nos valores dos inputs.
+ */
+function updateRange() {
+    const videoElement = document.getElementById("video");
+    const startTimeInput = document.getElementById("start-time");
+    const endTimeInput = document.getElementById("end-time");
+    const range = document.getElementById("range");
+    
+    // Utiliza a duração do vídeo ou 1 para evitar divisão por zero
+    const videoDuration = videoElement.duration || 1;
+
+    // Obtém os valores mínimos e máximos dos controles deslizantes
+    const minVal = parseFloat(rangeMin.value);
+    const maxVal = parseFloat(rangeMax.value);
+
+    // Calcula as porcentagens para posicionamento da faixa
+    const percentMin = (minVal / rangeMin.max) * 100;
+    const percentMax = (maxVal / rangeMax.max) * 100;
+
+    // Atualiza os estilos da faixa visual que indica o corte selecionado
+    range.style.left = percentMin + "%";
+    range.style.width = (percentMax - percentMin) + "%";
+
+    // Calcula os tempos correspondentes para início e fim do corte
+    const startTime = (minVal / 100) * videoDuration;
+    const endTime = (maxVal / 100) * videoDuration;
+
+    // Atualiza os inputs de tempo com os valores formatados
+    startTimeInput.value = formatTime(startTime);
+    endTimeInput.value = formatTime(endTime);
+}
+
+// Função para cortar o video
+function handleCutVideo() {
+    const videoElement = document.getElementById("video");
+    const startTime = document.getElementById("start-time").value;
+    const endTime = document.getElementById("end-time").value;
+
+    // Desabilita os botões para evitar múltiplos cliques enquanto o corte é processado
+    document.getElementById("download-video").setAttribute("disabled", "disabled");
+    document.getElementById("save-drive").setAttribute("disabled", "disabled");
+    document.getElementById("cut-video").setAttribute("disabled", "disabled");
+
+    // Realiza o corte do vídeo chamando a função cutVideo, convertendo os tempos para segundos
+    cutVideo("mp4", timeToSeconds(startTime), timeToSeconds(endTime)).then((videoUrl) => {
+        // Atualiza a fonte do vídeo com a URL resultante do corte
+        videoElement.src = videoUrl;
+        // Reinicia os controles de faixa para os valores padrão
+        rangeMin.value = 0;
+        rangeMax.value = 100;
+
+        // Reabilita os botões após o corte ser concluído
+        document.getElementById("download-video").removeAttribute("disabled");
+        document.getElementById("save-drive").removeAttribute("disabled");
+        document.getElementById("cut-video").removeAttribute("disabled");
+    });
+}
+
+// Função para fazer upload no drive
+async function uploadToDrive() {
+    const videoElement = document.getElementById("video");
+    const exportType = document.getElementById("export-type").value;
+
+    // Atualiza o botão para indicar que o envio está em andamento
+    document.querySelector("#save-drive").setAttribute("disabled", "disabled");
+    document.querySelector("#save-drive span").innerHTML = "Enviando...";
+
+    // Se o formato de exportação não for MP4, realiza a transcodificação para WebM
+    if (exportType != "mp4") {
+        await transcode(data.videoUrl, "webm", videoTimeout);
+        videoElement.setAttribute("file-format", "webm");
+    }
+
+    // Converte o blob do vídeo para um array serializável
+    videoBlob.arrayBuffer().then(buffer => {
+        chrome.runtime.sendMessage({
+            action: "upload-file",
+            format: videoElement.getAttribute("file-format"),
+            file: Array.from(new Uint8Array(buffer))
+        }, (response) => {
+            // Atualiza a interface do botão após o upload
+            document.querySelector("#save-drive").removeAttribute("disabled");
+            document.querySelector("#save-drive span").innerHTML = "Enviado";
+            setTimeout(() => {
+                document.querySelector("#save-drive span").innerHTML = "Salvar no drive";
+            }, 5000);
+        });
+    });
+}
+
+// Função de download do arquivo
+async function handleDownloadFile() {
+    if (downloadRequested) return;
+
+    downloadRequested = true;
+
+    const videoElement = document.getElementById("video");
+    const exportType = document.getElementById("export-type").value;
+    const link = document.createElement("a");
+
+    // Atualiza o botão de download para indicar que o processo está em andamento
+    document.querySelector("#download-video").setAttribute("disabled", "disabled");
+    document.querySelector("#download-video span").innerHTML = 'Baixando...';
+
+    // Se o formato de exportação não for MP4, realiza a transcodificação para WebM
+    var fileUrl = exportType != "mp4" ? await transcode(videoBlob, "webm", 0) : videoElement.src;
+    link.href = fileUrl;
+
+    // Atualiza o atributo que indica o formato do arquivo
+    videoElement.setAttribute("file-format", exportType);
+
+    // Gera um nome único para o arquivo utilizando data e hora atuais
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString("pt-BR").replace(/\//g, "-");
+    const formattedTime = now.toTimeString().slice(0, 5).replace(":", "-");
+    const fileName = `solutto-gravador-${formattedDate}_${formattedTime}.`;
+
+    // Define o nome para o download conforme o formato escolhido
+    link.download = fileName + (exportType != "mp4" ? "webm" : "mp4");
+
+    // Simula o clique para iniciar o download e remove o link do DOM
+    document.body.appendChild(link);
+    console.log("link", link)
+    link.click();
+    document.body.removeChild(link);
+
+    // Envia uma mensagem ao background informando o início do download
+    chrome.runtime.sendMessage({ action: "download", filename: fileName + (exportType != "mp4" ? "webm" : "mp4") });
+
+    downloadRequested = false;
+
+    // Atualiza a interface do botão de download e reabilita-o após alguns segundos
+    document.querySelector("#download-video").removeAttribute("disabled");
+    document.querySelector("#download-video span").innerHTML = 'Baixado';
+    setTimeout(() => {
+        document.querySelector("#download-video span").innerHTML = "Baixar";
+    }, 5000);
 }

@@ -448,6 +448,10 @@ function kill() {
             stopExistingStreams()
         )
 
+        if (recorder) {
+            recorder.stop(true);
+        }
+
         // Remove o iframe do gravador, se existir
         Promise.all(promises).then(() => {
             const iframe = document.querySelector("#solutto-gravador-iframe");
