@@ -1,28 +1,46 @@
 export async function uploadToDrive(fileBlob, fileName) {
+    // Nome da pasta onde os arquivos serão salvos no Google Drive
     const folderName = 'Solutto Gravador';
 
+    /**
+     * Obtém o token de autenticação OAuth2 necessário para acessar a API do Google Drive.
+     * Utiliza chrome.identity.launchWebAuthFlow para iniciar o fluxo de autenticação.
+     *
+     * @returns {Promise<string>} Token de acesso.
+     */
     async function getAuthToken() {
         return new Promise((resolve, reject) => {
+            // Obtém o client_id do manifesto da extensão
             const clientId = chrome.runtime.getManifest().oauth2.client_id;
-            const redirectUri = chrome.identity.getRedirectURL(); // Obtém a URI correta automaticamente
+            // Obtém a URI de redirecionamento configurada automaticamente
+            const redirectUri = chrome.identity.getRedirectURL();
 
+            // Monta a URL de autenticação com os parâmetros necessários
             const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=https://www.googleapis.com/auth/drive.file`;
 
             chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (responseUrl) => {
                 if (chrome.runtime.lastError) {
                     console.error("Erro na autenticação:", chrome.runtime.lastError);
+                    reject(chrome.runtime.lastError);
                     return;
                 }
 
+                // Extrai o token de acesso da URL de resposta
                 const params = new URLSearchParams(new URL(responseUrl).hash.substring(1));
                 const token = params.get("access_token");
-                
                 resolve(token);
             });
         });
     }
 
+    /**
+     * Verifica se a pasta especificada já existe no Google Drive.
+     *
+     * @param {string} token - Token de acesso.
+     * @returns {Promise<string|null>} ID da pasta, se encontrada, ou null caso não exista.
+     */
     async function checkFolderExistence(token) {
+        // Cria uma query para buscar a pasta com o nome definido e que não esteja na lixeira
         const query = encodeURIComponent(`name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
         const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`;
 
@@ -35,13 +53,20 @@ export async function uploadToDrive(fileBlob, fileName) {
         });
 
         const data = await response.json();
+        // Se a pasta existir, retorna seu ID
         if (data.files && data.files.length > 0) {
-            return data.files[0].id; // Retorna o ID da pasta existente
+            return data.files[0].id;
         } else {
-            return null; // Indica que a pasta não existe
+            return null;
         }
     }
 
+    /**
+     * Cria uma nova pasta no Google Drive com o nome especificado.
+     *
+     * @param {string} token - Token de acesso.
+     * @returns {Promise<string>} ID da nova pasta criada.
+     */
     async function createFolder(token) {
         const url = "https://www.googleapis.com/drive/v3/files";
         const metadata = {
@@ -59,15 +84,23 @@ export async function uploadToDrive(fileBlob, fileName) {
         });
 
         const data = await response.json();
-        return data.id; // Retorna o ID da nova pasta
+        return data.id;
     }
 
+    /**
+     * Realiza o upload do arquivo para o Google Drive dentro da pasta especificada.
+     *
+     * @param {string} token - Token de acesso.
+     * @param {string} folderId - ID da pasta onde o arquivo será salvo.
+     * @returns {Promise<Object>} Resposta da API do Google Drive.
+     */
     async function uploadFile(token, folderId) {
         const metadata = {
             name: fileName,
             parents: [folderId]
         };
 
+        // Prepara os dados para envio utilizando FormData
         const formData = new FormData();
         formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
         formData.append("file", fileBlob);
@@ -85,13 +118,13 @@ export async function uploadToDrive(fileBlob, fileName) {
         return data;
     }
 
+    // Fluxo principal: obtém o token, verifica ou cria a pasta e realiza o upload do arquivo
     try {
         const token = await getAuthToken();
         let folderId = await checkFolderExistence(token);
         if (!folderId) {
             folderId = await createFolder(token);
         }
-
         await uploadFile(token, folderId);
     } catch (error) {
         console.error("Solutto Gravador: Erro no processo:", error);

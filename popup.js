@@ -1,15 +1,26 @@
+// Aguarda o carregamento do DOM para iniciar a aplicação
 document.addEventListener("DOMContentLoaded", () => {
   showDocument();
-})
+});
 
+// Listener para mensagens enviadas pelo runtime do Chrome
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "openEditor") {
-    chrome.storage.local.set({ videoUrl: message.videoUrl, videoTimeout: message.videoTimeout }, () => {
-        chrome.tabs.create({ url: chrome.runtime.getURL("editor.html") });
+    // Armazena as configurações do vídeo e abre a página do editor
+    chrome.storage.local.set({
+      videoUrl: message.videoUrl,
+      videoTimeout: message.videoTimeout
+    }, () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL("editor.html") });
     });
   }
 });
 
+/**
+ * Cria elementos <option> para cada dispositivo recebido.
+ * @param {Array} devices - Lista de dispositivos (câmeras ou microfones).
+ * @returns {Array} Array de elementos <option>.
+ */
 function returnDevices(devices) {
   let devicesOptions = [];
 
@@ -26,14 +37,31 @@ function returnDevices(devices) {
   return devicesOptions;
 }
 
+/**
+ * Trunca o texto se ele exceder o limite especificado.
+ * @param {string} texto - Texto a ser truncado.
+ * @param {number} limite - Número máximo de caracteres permitidos (padrão: 40).
+ * @returns {string} Texto possivelmente truncado com "..." ao final.
+ */
 function truncarTexto(texto, limite = 40) {
   return texto.length > limite ? texto.slice(0, limite) + "..." : texto;
 }
 
+/**
+ * Adiciona um array de elementos como filhos de um elemento pai.
+ * @param {HTMLElement} parent - Elemento pai.
+ * @param {Array} elements - Array de elementos a serem adicionados.
+ */
 function appendElements(parent, elements) {
   elements.forEach(element => parent.appendChild(element));
 }
 
+/**
+ * Preenche os campos de seleção com as listas de dispositivos disponíveis.
+ * @param {Object} devices - Objeto contendo arrays de dispositivos:
+ *                           - cameras: lista de câmeras.
+ *                           - microfones: lista de microfones.
+ */
 function fillDevices(devices) {
   let camera = document.getElementById("camera");
   let microphone = document.getElementById("microphone");
@@ -44,9 +72,13 @@ function fillDevices(devices) {
   appendElements(camera, cameraDevices);
   appendElements(microphone, microphoneDevices);
 
+  // Após preencher as opções, retorna os valores armazenados anteriormente
   returnStoredOptions();
 }
 
+/**
+ * Recupera as configurações armazenadas e define os valores dos campos correspondentes.
+ */
 function returnStoredOptions() {
   const cameraSelectElement = document.getElementById("camera");
   const microphoneSelectElement = document.getElementById("microphone");
@@ -58,43 +90,49 @@ function returnStoredOptions() {
     if (data.cameraSelect) {
       cameraSelectElement.value = data.cameraSelect;
     }
-  })
+  });
 
   chrome.storage.local.get("microphoneSelect", (data) => {
     if (data.microphoneSelect) {
       microphoneSelectElement.value = data.microphoneSelect;
     }
-  })
+  });
 
   chrome.storage.local.get("optionsSelect", (data) => {
     if (data.optionsSelect) {
       recordSource.value = data.optionsSelect;
     }
-  })
+  });
 
   chrome.storage.local.get("timeoutCheckbox", (data) => {
     if (data.timeoutCheckbox != undefined) {
       timeoutCheckboxElement.checked = data.timeoutCheckbox;
     }
-  })
+  });
 
   chrome.storage.local.get("waitSeconds", (data) => {
     if (data.waitSeconds) {
       waitSecondsElement.value = data.waitSeconds;
     }
-  })
+  });
 }
 
+/**
+ * Exibe o documento com efeito de fade-in e inicia a aplicação após um pequeno atraso.
+ */
 function showDocument() {
   setTimeout(() => {
     document.querySelector(".solutto-gravador").style.opacity = "1";
 
     setTimeout(() => {
       start();
-    }, 400)
-  }, 10)
+    }, 400);
+  }, 10);
 }
 
+/**
+ * Inicializa os listeners e configurações dos elementos da interface.
+ */
 function start() {
   const startVideoButton = document.getElementById("start-recording");
   const cameraSelectElement = document.getElementById("camera");
@@ -103,77 +141,93 @@ function start() {
   const waitSecondsElement = document.getElementById("wait-seconds");
   const timeoutCheckboxElement = document.getElementById("use-wait-seconds");
 
+  // Atualiza o valor de "waitSeconds" no armazenamento local quando alterado
   waitSecondsElement.addEventListener("change", (e) => {
     let value = e.target.value;
-
-    if (value.trim() != "") {
+    if (value.trim() !== "") {
       chrome.storage.local.set({ waitSeconds: value });
     }
-  })
+  });
 
+  // Atualiza o valor do checkbox de timeout no armazenamento local quando alterado
   timeoutCheckboxElement.addEventListener("change", (e) => {
     chrome.storage.local.set({ timeoutCheckbox: e.target.checked });
-  })
+  });
 
+  // Atualiza a seleção de câmera no armazenamento local quando alterada
   cameraSelectElement.addEventListener("change", (e) => {
     let value = e.target.value;
-
-    if (value.trim() != "") {
+    if (value.trim() !== "") {
       chrome.storage.local.set({ cameraSelect: value });
     }
-  })
+  });
 
+  // Atualiza a seleção de microfone no armazenamento local quando alterada
   microphoneSelectElement.addEventListener("change", (e) => {
     let value = e.target.value;
-
-    if (value.trim() != "") {
+    if (value.trim() !== "") {
       chrome.storage.local.set({ microphoneSelect: value });
     }
-  })
+  });
 
+  // Atualiza a opção de configuração de vídeo no armazenamento local quando alterada
   recordSource.addEventListener("change", (e) => {
     let value = e.target.value;
-
-    if (value.trim() != "") {
+    if (value.trim() !== "") {
       chrome.storage.local.set({ optionsSelect: value });
     }
-  })
+  });
 
+  // Inicia a gravação ao clicar no botão
   startVideoButton.addEventListener("click", () => {
     triggerRecording();
-  })
+  });
 
+  /**
+   * Função para disparar o processo de gravação.
+   * Coleta as configurações atuais e envia uma mensagem para a aba ativa solicitando a gravação.
+   */
   function triggerRecording() {
     const recordingType = document.getElementById("video-config").value;
     const useTimeout = document.getElementById("use-wait-seconds").checked;
     const timeoutSeconds = document.getElementById("wait-seconds").value;
 
+    // Define o timeout de gravação conforme a escolha do usuário
     let recordTimeout = useTimeout ? timeoutSeconds : 0;
 
-    chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
+    // Consulta a aba ativa para enviar a solicitação de gravação
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       let microfoneId = document.getElementById("microphone").value || null;
       let webcamId = document.getElementById("camera").value || null;
 
-      chrome.tabs.sendMessage(tabs[0].id, { action: "request_recording", type: recordingType, microfoneId: microfoneId, webcamId: webcamId, timeout: recordTimeout }, (response) => {
+      chrome.tabs.sendMessage(tabs[0].id, {
+        action: "request_recording",
+        type: recordingType,
+        microfoneId: microfoneId,
+        webcamId: webcamId,
+        timeout: recordTimeout
+      }, (response) => {
         if (!chrome.runtime.lastError) {
           if (response.allow) {
+            // Esconde os elementos da interface após iniciar a gravação
             document.querySelector(".wrapper").style.display = "none";
             document.querySelector(".container").style.display = "none";
-          }          
+          }
         } else {
           console.log(chrome.runtime.lastError, "Erro na linha 71");
         }
-      })
-    })
+      });
+    });
   }
 
-  chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
+  // Solicita a lista de dispositivos disponíveis da aba ativa e preenche os selects
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     chrome.tabs.sendMessage(tabs[0].id, { action: "request_devices" }, (response) => {
       if (!chrome.runtime.lastError) {
         fillDevices(response.devices);
       } else {
         console.log(chrome.runtime.lastError, "Erro na linha 82");
       }
-    })
-  })
+    });
+  });
 }
