@@ -6,52 +6,52 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="solutto-gravador">
-    <div class="wrapper"></div>
-    <div class="container">
-      <div class="header">
-        <img src="./assets/icon.png">
-        <h1 class="fontsize-2xl">Solutto gravador</h1>
-      </div>
-      <div class="configurations">
-        <div class="form-group">
-          <label for="video-config" class="fontsize-md">Fonte de gravação</label>
-          <select id="video-config">
-            <option value="screen">Tela ou aba (Guia)</option>
-            <option value="webcam">Câmera</option>
-          </select>
+<body>
+    <div class="solutto-gravador">
+      <div class="wrapper"></div>
+      <div class="container">
+        <div class="header">
+          <img src="./assets/icon.png">
+          <h1 class="fontsize-2xl">Solutto gravador</h1>
         </div>
-        <div class="form-group">
-          <label class="fontsize-md ">Configurações de gravação</label>
-          <span class="fontsize-sm">Câmera</span>
-          <select id="camera">
-            <option value="">Sem câmera</option>
-          </select>
-          <span class="fontsize-sm">Microfone</span>
-          <select id="microphone">
-            <option value="">Sem microfone</option>
-          </select>
+        <div class="configurations">
+          <div class="form-group">
+            <label for="video-config" class="fontsize-md">Fonte de gravação</label>
+            <select id="video-config">
+              <option value="screen">Tela ou aba (Guia)</option>
+              <option value="webcam">Câmera</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="fontsize-md ">Configurações de gravação</label>
+            <span class="fontsize-sm">Câmera</span>
+            <select id="camera">
+              <option value="">Sem câmera</option>
+            </select>
+            <span class="fontsize-sm">Microfone</span>
+            <select id="microphone">
+              <option value="">Sem microfone</option>
+            </select>
+          </div>
+          <div class="form-group radio-group">
+            <input type="checkbox" id="use-wait-seconds" checked>
+            <select id="wait-seconds">
+              <option value="3">3 segundos</option>
+              <option value="5">5 segundos</option>
+              <option value="10">10 segundos</option>
+            </select>
+            <span>de contagem regressiva</span>
+          </div>
         </div>
-        <div class="form-group radio-group">
-          <input type="checkbox" id="use-wait-seconds" checked>
-          <select id="wait-seconds">
-            <option value="3">3 segundos</option>
-            <option value="5">5 segundos</option>
-            <option value="10">10 segundos</option>
-          </select>
-          <span>de contagem regressiva</span>
+        <div class="footer">
+          <button class="btn" id="start-recording">
+            <i class="fa-solid fa-circle"></i>
+            Iniciar gravação
+          </button>
         </div>
-      </div>
-      <div class="footer">
-        <button class="btn" id="start-recording">
-          <i class="fa-solid fa-circle"></i>
-          Iniciar gravação
-        </button>
-        <span class="fontsize-sm">Shift + F9</span>
       </div>
     </div>
-    <video id="camera-preview" src="" playsinline></video>
-    <div class="controls">
+    <!--<div class="solutto-gravador-controls">
       <i class="fa-solid fa-grip-vertical" id="grab-control"></i>
       <div class="elapsed-time">
         <span id="elapsed-time">00:00:00</span>
@@ -67,7 +67,7 @@
           <i class="fa-solid fa-trash"></i>
         </button>
       </div>
-    </div>
+    </div>-->
 
   <script src="popup.js" type="module"></script>
 

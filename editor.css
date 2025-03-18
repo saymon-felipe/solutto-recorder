@@ -112,6 +112,7 @@ input.personalized-input-range::-moz-range-track {
     margin-top: 1rem;
     padding: 1rem 2rem;
     display: flex;
+    flex-wrap: wrap;
     gap: 1rem;
     align-items: center;
     justify-content: space-evenly;
@@ -119,7 +120,15 @@ input.personalized-input-range::-moz-range-track {
     & video {
         max-width: 500px;
         width: 100%;
+        border-radius: 8px;
     }
+}
+
+.editor-logs {
+    display: grid;
+    max-height: 100px;
+    min-height: 100px;
+    overflow-y: auto;
 }
 
 .editor-side {
@@ -127,6 +136,7 @@ input.personalized-input-range::-moz-range-track {
     border: 1px solid #e6e6e6;
     border-radius: 8px;
     padding: 1rem;
+    max-width: 530px;
 }
 
 .export-buttons {

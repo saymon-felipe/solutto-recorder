@@ -1,249 +1,14 @@
 document.addEventListener("DOMContentLoaded", () => {
-  const startVideoButton = document.getElementById("start-recording");
-  const stopVideoButton = document.getElementById("stop-recording");
-  const deleteVideoButton = document.getElementById("delete-recording");
-  const pauseVideoButton = document.querySelector(".pause");
-  const resumeVideoButton = document.querySelector(".play");
-  const cameraSelectElement = document.getElementById("camera");
-  const microphoneSelectElement = document.getElementById("microphone");
-  const recordSource = document.getElementById("video-config");
-  const waitSecondsElement = document.getElementById("wait-seconds");
-
-  waitSecondsElement.addEventListener("change", (e) => {
-    let value = e.target.value;
-
-    if (value.trim() != "") {
-      chrome.storage.local.set({ waitSeconds: value });
-    }
-  })
-
-  cameraSelectElement.addEventListener("change", (e) => {
-    let value = e.target.value;
-
-    if (value.trim() != "") {
-      chrome.storage.local.set({ cameraSelect: value });
-    }
-  })
-
-  microphoneSelectElement.addEventListener("change", (e) => {
-    let value = e.target.value;
-
-    if (value.trim() != "") {
-      chrome.storage.local.set({ microphoneSelect: value });
-    }
-  })
-
-  recordSource.addEventListener("change", (e) => {
-    let value = e.target.value;
-
-    if (value.trim() != "") {
-      chrome.storage.local.set({ optionsSelect: value });
-    }
-  })
-
-  let elapsedSeconds = 0;
-  let timerInterval = null;
-  let isPaused = false;
-
-  function formatTime(seconds) {
-      const hrs = String(Math.floor(seconds / 3600)).padStart(2, "0");
-      const mins = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
-      const secs = String(seconds % 60).padStart(2, "0");
-      return `${hrs}:${mins}:${secs}`;
-  }
-
-  function startTimer() {
-      if (timerInterval) return; // Evita iniciar múltiplos intervalos
-
-      isPaused = false;
-      document.getElementById("elapsed-time").textContent = formatTime(elapsedSeconds);
-
-      timerInterval = setInterval(() => {
-          if (!isPaused) {
-              elapsedSeconds++;
-              document.getElementById("elapsed-time").textContent = formatTime(elapsedSeconds);
-          }
-      }, 1000);
-  }
-
-  function pauseTimer() {
-      isPaused = true;
-  }
-
-  function resumeTimer() {
-      if (isPaused) {
-          isPaused = false;
-      }
-  }
-
-  // Para parar completamente o temporizador
-  function stopTimer() {
-      clearInterval(timerInterval);
-      timerInterval = null;
-      elapsedSeconds = 0;
-      isPaused = false;
-      document.getElementById("elapsed-time").textContent = "00:00:00";
-  }
-
-  startVideoButton.addEventListener("click", () => {
-    triggerRecording();
-  })
-
-  function triggerRecording() {
-    const recordingType = document.getElementById("video-config").value;
-    const useTimeout = document.getElementById("use-wait-seconds").checked;
-    const timeoutSeconds = document.getElementById("wait-seconds").value;
-
-    let recordTimeout = useTimeout ? timeoutSeconds : 0;
-
-    chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
-      let microfoneId = document.getElementById("microphone").value || null;
-      let webcamId = document.getElementById("camera").value || null;
-
-      chrome.tabs.sendMessage(tabs[0].id, { action: "request_recording", type: recordingType, microfoneId: microfoneId, webcamId: webcamId, timeout: recordTimeout }, (response) => {
-        if (!chrome.runtime.lastError) {
-          console.log(response);
-
-          setTimeout(() => {
-            initRecordingInterface();
-          }, recordTimeout * 1000)
-        } else {
-          console.log(chrome.runtime.lastError, "Erro na linha 16");
-        }
-      })
-    })
-  }
-
-  function initRecordingInterface() {
-    document.querySelector(".play").setAttribute("disabled", true);
-    document.querySelector(".pause").removeAttribute("disabled");
-    document.querySelector(".submit").setAttribute("disabled", true);
-    document.querySelector(".delete").setAttribute("disabled", true);
-    document.querySelector(".wrapper").style.display = "none";
-    document.querySelector(".container").style.display = "none";
-
-    startTimer();
-  }
-
-  stopVideoButton.addEventListener("click", () => {
-    chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
-      chrome.tabs.sendMessage(tabs[0].id, { action: "stopvideo" }, (response) => {
-        if (!chrome.runtime.lastError) {
-          console.log(response);
-          document.querySelector(".play").setAttribute("disabled", true);
-          document.querySelector(".pause").setAttribute("disabled", true);
-          document.querySelector(".submit").setAttribute("disabled", true);
-          document.querySelector(".delete").setAttribute("disabled", true);
-
-          stopTimer();
-
-          chrome.storage.local.set({ videoUrl: response.videoBlobUrl, videoTimeout: response.timeout }, () => {
-            console.log("URL do vídeo salva no storage");
-
-            // Criar a nova aba com editor.html
-            chrome.tabs.create({ url: chrome.runtime.getURL("editor.html") });
-          });
-        } else {
-          console.log(chrome.runtime.lastError, "Erro na linha 30");
-        }
-      })
-    })
-  })
-
-  deleteVideoButton.addEventListener("click", () => {
-    if (confirm("Tem certeza que deseja excluir a gravação?")) {
-      chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
-        chrome.tabs.sendMessage(tabs[0].id, { action: "deletevideo" }, (response) => {
-          if (!chrome.runtime.lastError) {
-            console.log(response);
-            console.log("Saindo...");
-          } else {
-            console.log(chrome.runtime.lastError, "Erro na linha 30");
-          }
-        })
-      })
-    }
-  })
-
-  pauseVideoButton.addEventListener("click", () => {
-    chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
-      chrome.tabs.sendMessage(tabs[0].id, { action: "pausevideo" }, (response) => {
-        if (!chrome.runtime.lastError) {
-          console.log(response);
-          document.querySelector(".play").removeAttribute("disabled");
-          document.querySelector(".pause").setAttribute("disabled", true);
-          document.querySelector(".play").style.display = "block";
-          document.querySelector(".pause").style.display = "none";
-          document.querySelector(".submit").removeAttribute("disabled");
-          document.querySelector(".delete").removeAttribute("disabled");
-
-          pauseTimer();
-        } else {
-          console.log(chrome.runtime.lastError, "Erro na linha 30");
-        }
-      })
-    })
-  })
-
-  resumeVideoButton.addEventListener("click", () => {
-    chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
-      chrome.tabs.sendMessage(tabs[0].id, { action: "resumevideo" }, (response) => {
-        if (!chrome.runtime.lastError) {
-          console.log(response);
-          document.querySelector(".play").setAttribute("disabled", true);
-          document.querySelector(".pause").removeAttribute("disabled");
-          document.querySelector(".play").style.display = "none";
-          document.querySelector(".pause").style.display = "block";
-          document.querySelector(".submit").setAttribute("disabled", true);
-          document.querySelector(".delete").setAttribute("disabled", true);
-
-          resumeTimer();
-        } else {
-          console.log(chrome.runtime.lastError, "Erro na linha 30");
-        }
-      })
-    })
-  })
-
-  chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
-    chrome.tabs.sendMessage(tabs[0].id, { action: "request_devices" }, (response) => {
-      if (!chrome.runtime.lastError) {
-        fillDevices(response.devices);
-      } else {
-        console.log(chrome.runtime.lastError, "Erro na linha 160");
-      }
-    })
-  })
-
-  const myElement = document.querySelector(".controls");
-  makeDraggable(myElement);
+  showDocument();
 })
 
-function makeDraggable(element) {
-  let offsetX, offsetY, isDragging = false;
-
-  element.style.position = "absolute"; // Garante que pode ser movido
-  document.getElementById("grab-control").style.cursor = "grab";
-
-  document.getElementById("grab-control").addEventListener("mousedown", (event) => {
-      isDragging = true;
-      offsetX = event.clientX - element.getBoundingClientRect().left;
-      offsetY = event.clientY - element.getBoundingClientRect().top;
-      document.getElementById("grab-control").style.cursor = "grabbing";
-  });
-
-  document.addEventListener("mousemove", (event) => {
-      if (isDragging) {
-          element.style.left = event.clientX - offsetX + "px";
-          element.style.top = event.clientY - offsetY + "px";
-      }
-  });
-
-  document.addEventListener("mouseup", () => {
-      isDragging = false;
-      document.getElementById("grab-control").style.cursor = "grab";
-  });
-}
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "openEditor") {
+    chrome.storage.local.set({ videoUrl: message.videoUrl, videoTimeout: message.videoTimeout }, () => {
+        chrome.tabs.create({ url: chrome.runtime.getURL("editor.html") });
+    });
+  }
+});
 
 function returnDevices(devices) {
   let devicesOptions = [];
@@ -251,7 +16,7 @@ function returnDevices(devices) {
   for (let i = 0; i < devices.length; i++) {
     let currentDevice = devices[i];
     let option = document.createElement("option");
-    console.log(currentDevice)
+
     option.value = currentDevice.deviceId;
     option.innerHTML = truncarTexto(currentDevice.label);
 
@@ -287,6 +52,7 @@ function returnStoredOptions() {
   const microphoneSelectElement = document.getElementById("microphone");
   const recordSource = document.getElementById("video-config");
   const waitSecondsElement = document.getElementById("wait-seconds");
+  const timeoutCheckboxElement = document.getElementById("use-wait-seconds");
 
   chrome.storage.local.get("cameraSelect", (data) => {
     if (data.cameraSelect) {
@@ -306,9 +72,110 @@ function returnStoredOptions() {
     }
   })
 
-  chrome.storage.local.get("waitSeconds", (data) => {
-    if (data.optionsSelect) {
-      waitSecondsElement.value = data.optionsSelect;
+  chrome.storage.local.get("timeoutCheckbox", (data) => {
+    if (data.timeoutCheckbox != undefined) {
+      timeoutCheckboxElement.checked = data.timeoutCheckbox;
     }
+  })
+
+  chrome.storage.local.get("waitSeconds", (data) => {
+    if (data.waitSeconds) {
+      waitSecondsElement.value = data.waitSeconds;
+    }
+  })
+}
+
+function showDocument() {
+  setTimeout(() => {
+    document.querySelector(".solutto-gravador").style.opacity = "1";
+
+    setTimeout(() => {
+      start();
+    }, 400)
+  }, 10)
+}
+
+function start() {
+  const startVideoButton = document.getElementById("start-recording");
+  const cameraSelectElement = document.getElementById("camera");
+  const microphoneSelectElement = document.getElementById("microphone");
+  const recordSource = document.getElementById("video-config");
+  const waitSecondsElement = document.getElementById("wait-seconds");
+  const timeoutCheckboxElement = document.getElementById("use-wait-seconds");
+
+  waitSecondsElement.addEventListener("change", (e) => {
+    let value = e.target.value;
+
+    if (value.trim() != "") {
+      chrome.storage.local.set({ waitSeconds: value });
+    }
+  })
+
+  timeoutCheckboxElement.addEventListener("change", (e) => {
+    chrome.storage.local.set({ timeoutCheckbox: e.target.checked });
+  })
+
+  cameraSelectElement.addEventListener("change", (e) => {
+    let value = e.target.value;
+
+    if (value.trim() != "") {
+      chrome.storage.local.set({ cameraSelect: value });
+    }
+  })
+
+  microphoneSelectElement.addEventListener("change", (e) => {
+    let value = e.target.value;
+
+    if (value.trim() != "") {
+      chrome.storage.local.set({ microphoneSelect: value });
+    }
+  })
+
+  recordSource.addEventListener("change", (e) => {
+    let value = e.target.value;
+
+    if (value.trim() != "") {
+      chrome.storage.local.set({ optionsSelect: value });
+    }
+  })
+
+  startVideoButton.addEventListener("click", () => {
+    triggerRecording();
+  })
+
+  function triggerRecording() {
+    const recordingType = document.getElementById("video-config").value;
+    const useTimeout = document.getElementById("use-wait-seconds").checked;
+    const timeoutSeconds = document.getElementById("wait-seconds").value;
+
+    let recordTimeout = useTimeout ? timeoutSeconds : 0;
+
+    chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
+      let microfoneId = document.getElementById("microphone").value || null;
+      let webcamId = document.getElementById("camera").value || null;
+
+      chrome.tabs.sendMessage(tabs[0].id, { action: "request_recording", type: recordingType, microfoneId: microfoneId, webcamId: webcamId, timeout: recordTimeout }, (response) => {
+        if (!chrome.runtime.lastError) {
+          console.log(response.message);
+
+          if (response.allow) {
+            document.querySelector(".wrapper").style.display = "none";
+            document.querySelector(".container").style.display = "none";
+          }          
+        } else {
+          console.log(chrome.runtime.lastError, "Erro na linha 71");
+        }
+      })
+    })
+  }
+
+  chrome.tabs.query({ active: true, currentWindow: true}, (tabs) => {
+    chrome.tabs.sendMessage(tabs[0].id, { action: "request_devices" }, (response) => {
+      if (!chrome.runtime.lastError) {
+        fillDevices(response.devices);
+      } else {
+        console.log(chrome.runtime.lastError, "Erro na linha 82");
+      }
+    })
   })
 }

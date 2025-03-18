@@ -3,12 +3,17 @@ var isRecording = false;
 var recordStream = null;
 var recordTimeout = 0;
 
+var elapsedSeconds = 0;
+var timerInterval = null;
+var isPaused = false;
+
 if (!window.contentScriptInjected) {
     window.contentScriptInjected = true;
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === "removeContentScript") {
             console.log("Removendo content script...");
+
             delete window.contentScriptInjected; // Remove flag
             sendResponse({ success: true });
             return;
@@ -16,6 +21,8 @@ if (!window.contentScriptInjected) {
     });
 
     console.log("Content script injetado.");
+    injectFontAwesome();
+    injectStyles();
 }
 
 function onAccessApproved(stream, timeout) {
@@ -31,7 +38,7 @@ function onAccessApproved(stream, timeout) {
     recorder.start();
     console.log('Gravação iniciada...');
     
-    recorder.onstop = () => {
+    recorder.onstop = (fromHandle = false) => {
         stream.getTracks().forEach(track => {
             if (track.readyState == 'live') {
                 track.stop();
@@ -41,6 +48,11 @@ function onAccessApproved(stream, timeout) {
         window.isRequestingScreen = false;
         isRecording = false;
         recordTimeout = 0;
+
+        if (!fromHandle) {
+            document.querySelector(".pause").click();
+            document.getElementById("stop-recording").click();
+        }
     };
 }
 
@@ -77,10 +89,16 @@ function createVideoElement(stream) {
         background: "white",
         padding: "2rem",
         border: "1px solid #E6E6E6",
-        zIndex: "9999"
+        zIndex: "9999",
+        transition: "opacity 0.4s ease-in-out",
+        opacity: "0"
     });
     document.body.appendChild(previewVideo);
     previewVideo.play();
+
+    setTimeout(() => {
+        previewVideo.style.opacity = "1";
+    }, 10)
 }
 
 function createWebcamElement(stream) {
@@ -98,15 +116,25 @@ function createWebcamElement(stream) {
         width: "200px",
         objectFit: "cover",
         borderRadius: "50%",
-        zIndex: "9999"
+        zIndex: "9999",
+        transition: "opacity 0.4s ease-in-out",
+        opacity: "0"
     });
     document.body.appendChild(previewVideo);
     previewVideo.play();
 
     makeDraggable(previewVideo);
+
+    setTimeout(() => {
+        previewVideo.style.opacity = "1";
+    }, 10)
 }
 
 function createTimeoutElement(timeoutSeconds) {
+    if (document.getElementById("recorder-timeout")) {
+        document.getElementById("recorder-timeout").remove();
+    }
+
     const timeoutDiv = document.createElement("div");
     timeoutDiv.setAttribute("id", "recorder-timeout");
     timeoutDiv.style.width = "300px";
@@ -123,7 +151,8 @@ function createTimeoutElement(timeoutSeconds) {
     timeoutDiv.style.margin = "auto";
     timeoutDiv.style.background = "#00aab3";
     timeoutDiv.style.color = "white";
-    timeoutDiv.style.display = "none";
+    timeoutDiv.style.transition = "opacity 0.4s ease-in-out";
+    timeoutDiv.style.opacity = "0";
 
     const timeoutSpan = document.createElement("span");
     timeoutSpan.style.fontSize = "104px";
@@ -133,6 +162,10 @@ function createTimeoutElement(timeoutSeconds) {
     timeoutDiv.appendChild(timeoutSpan);
 
     document.body.appendChild(timeoutDiv);
+
+    setTimeout(() => {
+        timeoutDiv.style.opacity = "1";
+    }, 10)
 
     if (timeoutSeconds > 0) {
         document.getElementById("recorder-timeout").style.display = "grid";
@@ -150,36 +183,11 @@ function createTimeoutElement(timeoutSeconds) {
             } else {
                 clearInterval(interval);
                 document.getElementById("recorder-timeout").style.display = "none";
+                startTimer();
             }
         }, 1000)
     }
 }
-
-function makeDraggable(element) {
-    let offsetX, offsetY, isDragging = false;
-  
-    element.style.position = "absolute"; // Garante que pode ser movido
-    element.style.cursor = "grab";
-  
-    element.addEventListener("mousedown", (event) => {
-        isDragging = true;
-        offsetX = event.clientX - element.getBoundingClientRect().left;
-        offsetY = event.clientY - element.getBoundingClientRect().top;
-        element.style.cursor = "grabbing";
-    });
-  
-    document.addEventListener("mousemove", (event) => {
-        if (isDragging) {
-            element.style.left = event.clientX - offsetX + "px";
-            element.style.top = event.clientY - offsetY + "px";
-        }
-    });
-  
-    document.addEventListener("mouseup", () => {
-        isDragging = false;
-        element.style.cursor = "grab";
-    });
-  }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   async function stopExistingStreams() {
@@ -206,7 +214,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     async function pedirPermissaoMidia() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            console.log("✅ Permissão concedida para câmera e microfone!");
             return stream;
         } catch (error) {
             console.error("❌ Permissão negada ou erro ao acessar dispositivos:", error);
@@ -227,7 +234,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
     }
 
+    if (message.action == "kill") {
+        kill().then(() => {
+            sendResponse("Killed");
+        })
+
+        return true;
+    }
+
     if (message.action === "request_devices") {
+        createRecorderControls();
+
         listarDispositivosMidia().then(dispositivos => {
             let devices = {
                 cameras: dispositivos.cameras,
@@ -253,13 +270,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 recordTimeout = message.timeout;
                 createTimeoutElement(message.timeout);
             }
+
+            initRecordingInterface(message.timeout);
+            sendResponse({ message: `Processed recording: ${message.action}`, allow: true });
+        }).catch((error) => {
+            sendResponse(error);
         })
 
         return true;
     }
 
     function initRecording() {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             let mediaPromise = [];
 
             let screenStream, microfoneStream, webcamStream, recordOnlyWebcamStream;
@@ -305,7 +327,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
 
             Promise.all(mediaPromise).then(() => {
-                const trilhas = [...screenStream.getVideoTracks()];
+                let trilhas = message.type == "screen" ? [...screenStream.getVideoTracks()] : [...recordOnlyWebcamStream.getVideoTracks()];
 
                 if (message.type == "screen") {
                     if (microfoneStream) {
@@ -317,138 +339,443 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     }
                 }
 
+                if (message.type === "webcam") {
+                    createVideoElement(recordOnlyWebcamStream);
+                }
+
                 const streamCombinado = new MediaStream(trilhas);
 
                 onAccessApproved(streamCombinado, message.timeout);
 
-                if (message.type === "webcam") {
-                    createVideoElement(recordOnlyWebcamStream);
-                }
-                
-                sendResponse(`Processed recording: ${message.action}`);
-
                 resolve();
             }).catch((error) => {
-                console.error("Erro ao acessar a mídia:", error);
                 window.isRequestingScreen = false;
-                sendResponse(`Error: ${error.message}`);
+                reject({ message: `Error: ${error.message}`, allow: false });
             })
         })
     }
+});
 
-    if (message.action === "stopvideo") {
+function kill() {
+    return new Promise((resolveMaster) => {
+        let promises = [];
+
+        if (document.getElementById("solutto-gravador-camera-preview")) {
+            document.getElementById("solutto-gravador-camera-preview").style.opacity = 0; 
+        }
+
+        promises.push(
+            new Promise((resolve) => {
+                setTimeout(() => {
+                    if (document.getElementById("solutto-gravador-camera-preview")) {
+                        document.getElementById("solutto-gravador-camera-preview").remove();
+                    }
+                    
+                    resolve();
+                }, 400)
+            })
+        )
+
+        if (document.getElementById("solutto-gravador-webcam-preview")) {
+            document.getElementById("solutto-gravador-webcam-preview").style.opacity = 0;
+
+            promises.push(
+                new Promise((resolve) => {
+                    setTimeout(() => {
+                        if (document.getElementById("solutto-gravador-webcam-preview")) {
+                            document.getElementById("solutto-gravador-webcam-preview").remove();
+                        }
+                        
+                        resolve();
+                    }, 400)
+                })
+            )
+        }
+
+        if (document.querySelector(".solutto-gravador-controls")) {
+            document.querySelector(".solutto-gravador-controls").style.opacity = "0";
+
+            promises.push(
+                new Promise((resolve) => {
+                    setTimeout(() => {
+                        if (document.querySelector(".solutto-gravador-controls")) {
+                            document.querySelector(".solutto-gravador-controls").remove();
+                        }
+                        
+                        resolve();
+                    }, 400)
+                })
+            )
+        }
+
+        Promise.all(promises).then(() => {
+            if (document.querySelector("#solutto-gravador-iframe")) {
+                document.querySelector("#solutto-gravador-iframe").remove();
+            }
+
+            recorder = null;
+            isRecording = false;
+            recordStream = null;
+            recordTimeout = 0;
+            elapsedSeconds = 0;
+            clearInterval(timerInterval);
+            timerInterval = null;
+            isPaused = false;
+
+            resolveMaster();
+        })
+    })
+}
+
+function injectFontAwesome() {
+    if (document.getElementById("font-awesome-injected")) return; // Evita injeção duplicada
+
+    const link = document.createElement("link");
+    link.id = "font-awesome-injected"; // ID para evitar múltiplas injeções
+    link.rel = "stylesheet";
+    link.href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css";
+    link.integrity = "sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==";
+    link.crossOrigin = "anonymous";
+    link.referrerpolicy = "no-referrer"
+
+    document.head.appendChild(link);
+}
+
+function injectStyles() {
+    const style = document.createElement("style");
+    style.textContent = `
+        .solutto-gravador-controls {
+            position: fixed;
+            bottom: 1rem;
+            left: 3rem;
+            background: #FAFAFA;
+            border-radius: 8px;
+            border: 1px solid #E6E6E6;
+            padding: 7px 20px;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            height: 59px;
+            transition: opacity 0.4s ease-in-out;
+            oapcity: 0;
+        }
+
+        .solutto-gravador-controls i {
+            font-size: 23px;
+            cursor: pointer;
+        }
+
+        .solutto-gravador-controls .elapsed-time {
+            border-radius: 8px;
+            background: #E6E6E6;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 10px;
+            color: #4D4D4D;
+        }
+
+        .solutto-gravador-controls .elapsed-time .play {
+            display: none;
+        }
+
+        .solutto-gravador-controls .actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .solutto-gravador-controls .space {
+            height: 22px;
+            width: 2px;
+            background: #E6E6E6;
+        }
+
+        .solutto-gravador-controls #grab-control {
+            color: #999999;
+        }
+
+        .solutto-gravador-controls .rounded-btn {
+            background: none;
+            border: none;
+        }
+
+        .solutto-gravador-controls .rounded-btn:disabled i {
+            color: #999999;
+            cursor: default;
+        }
+
+        .solutto-gravador-controls .submit {
+            color: #00AAB3;
+        }
+
+        .solutto-gravador-controls .delete {
+            color: #FF0000;
+        }
+    `;
+
+    document.head.appendChild(style);
+}
+
+function createRecorderControls() {
+    if (document.querySelector(".solutto-gravador-controls")) {
+        document.querySelector(".solutto-gravador-controls").remove();
+    }
+
+    const container = document.createElement("div");
+    container.className = "solutto-gravador-controls";
+
+    // Ícone de movimentação
+    const grabControl = document.createElement("i");
+    grabControl.className = "fa-solid fa-grip-vertical";
+    grabControl.id = "grab-control";
+    container.appendChild(grabControl);
+
+    // Tempo decorrido
+    const elapsedTime = document.createElement("div");
+    elapsedTime.className = "elapsed-time";
+    
+    const timeSpan = document.createElement("span");
+    timeSpan.id = "elapsed-time";
+    timeSpan.innerHTML = "00:00:00";
+    elapsedTime.appendChild(timeSpan);
+
+    const playButton = document.createElement("button");
+    playButton.className = "rounded-btn play";
+    playButton.disabled = true;
+    playButton.innerHTML = '<i class="fa-solid fa-circle-play"></i>';
+    elapsedTime.appendChild(playButton);
+
+    const pauseButton = document.createElement("button");
+    pauseButton.className = "rounded-btn pause";
+    pauseButton.disabled = true;
+    pauseButton.innerHTML = '<i class="fa-solid fa-circle-pause"></i>';
+    elapsedTime.appendChild(pauseButton);
+
+    container.appendChild(elapsedTime);
+
+    // Espaço
+    const spaceDiv = document.createElement("div");
+    spaceDiv.className = "space";
+    container.appendChild(spaceDiv);
+
+    // Ações
+    const actionsDiv = document.createElement("div");
+    actionsDiv.className = "actions";
+
+    const stopButton = document.createElement("button");
+    stopButton.className = "rounded-btn submit";
+    stopButton.id = "stop-recording";
+    stopButton.disabled = true;
+    stopButton.innerHTML = '<i class="fa-solid fa-circle-check"></i>';
+    actionsDiv.appendChild(stopButton);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "rounded-btn delete";
+    deleteButton.id = "delete-recording";
+    deleteButton.disabled = true;
+    deleteButton.innerHTML = '<i class="fa-solid fa-trash"></i>';
+    actionsDiv.appendChild(deleteButton);
+
+    container.appendChild(actionsDiv);
+
+    document.body.appendChild(container);
+
+    container.style.opacity = "1";
+
+    makeControlDraggable(container);
+}
+
+function formatTime(seconds) {
+    const hrs = String(Math.floor(seconds / 3600)).padStart(2, "0");
+    const mins = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
+    const secs = String(seconds % 60).padStart(2, "0");
+    return `${hrs}:${mins}:${secs}`;
+}
+
+function startTimer() {
+    if (timerInterval) return;
+    
+    isPaused = false;
+    document.getElementById("elapsed-time").innerHTML = formatTime(elapsedSeconds);
+
+    timerInterval = setInterval(() => {
+        if (document.getElementById("elapsed-time")) {
+            if (!isPaused) {
+                elapsedSeconds++;
+    
+                let elapsedTimeElement = document.getElementById("elapsed-time");
+    
+                elapsedTimeElement.innerHTML = formatTime(elapsedSeconds);
+            }
+        } 
+    }, 1000)
+}
+
+function pauseTimer() {
+    isPaused = true;
+}
+
+function resumeTimer() {
+    if (isPaused) {
+        isPaused = false;
+    }
+}
+
+function stopTimer() {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    elapsedSeconds = 0;
+    isPaused = false;
+    document.getElementById("elapsed-time").innerHTML = "00:00:00";
+}
+
+function openEditorTab(videoBlobUrl, recordTimeout, url) {
+    chrome.runtime.sendMessage({ action: "openEditor", videoUrl: videoBlobUrl, videoTimeout: recordTimeout });
+}
+
+function initRecordingInterface(timeout) {
+    document.getElementById("solutto-gravador-iframe").style.display = "none";
+
+    setTimeout(() => {
+      document.querySelector(".play").setAttribute("disabled", true);
+      document.querySelector(".pause").removeAttribute("disabled");
+      document.querySelector(".submit").setAttribute("disabled", true);
+      document.querySelector(".delete").setAttribute("disabled", true);
+
+      startTimer();
+    }, timeout * 1000)
+
+    const stopVideoButton = document.getElementById("stop-recording");
+    const deleteVideoButton = document.getElementById("delete-recording");
+    const pauseVideoButton = document.querySelector(".pause");
+    const resumeVideoButton = document.querySelector(".play");
+
+    stopVideoButton.addEventListener("click", () => {
         console.log("Encerrando gravação");
     
         if (!recorder) {
-            sendResponse({ error: "Nenhum gravador ativo" });
+            console.log("Nenhum gravador ativo");
             return;
         }
 
-        recorder.stop();
+        recorder.stop(true);
 
         recorder.ondataavailable = async (event) => {
             const blob = new Blob([event.data], { type: "video/webm" });
             const videoBlobUrl = URL.createObjectURL(blob);
     
-            setTimeout(() => {
-                console.log("Killing...");
-                kill();
-            }, 1500);
-    
-            sendResponse({ videoBlobUrl: videoBlobUrl, timeout: recordTimeout });
+            openEditorTab(videoBlobUrl, recordTimeout, "editor.html");
+
+            document.querySelector(".play").setAttribute("disabled", true);
+            document.querySelector(".pause").setAttribute("disabled", true);
+            document.querySelector(".submit").setAttribute("disabled", true);
+            document.querySelector(".delete").setAttribute("disabled", true);
+
+            stopTimer();
+
+            kill();
         };
-        
-        return true;
-    }
+    })
 
-    if (message.action === "deletevideo") {
-        recorder.stop();
+    deleteVideoButton.addEventListener("click", () => {
+        if (confirm("Tem certeza que deseja excluir a gravação?")) {
+            recorder.stop(true);
 
-        kill();
+            kill();
+        }
+    })
 
-        sendResponse(`Processed: ${message.action}`);
-    }
-
-    if (message.action === "pausevideo") {
-        sendResponse(`Processed: ${message.action}`);
-
+    pauseVideoButton.addEventListener("click", () => {
         if (!recorder || recorder.state !== "recording") {
             return console.log("Não é possível pausar, pois a gravação não está ativa");
         }
 
         recorder.pause();
-        console.log("Gravação pausada...");
-    }
 
-    if (message.action === "resumevideo") {
-        sendResponse(`Processed: ${message.action}`);
+        document.querySelector(".play").removeAttribute("disabled");
+        document.querySelector(".pause").setAttribute("disabled", true);
+        document.querySelector(".play").style.display = "block";
+        document.querySelector(".pause").style.display = "none";
+        document.querySelector(".submit").removeAttribute("disabled");
+        document.querySelector(".delete").removeAttribute("disabled");
 
+        pauseTimer();
+    })
+
+    resumeVideoButton.addEventListener("click", () => {
         if (!recorder || recorder.state !== "paused") {
             return console.log("Não é possível retomar, pois a gravação não está pausada");
         }
 
         recorder.resume();
-        console.log("Gravação retomada...");
-    }
-});
 
-function kill() {
-    if (document.getElementById("solutto-gravador-camera-preview")) {
-        document.getElementById("solutto-gravador-camera-preview").remove();
-    }
+        document.querySelector(".play").setAttribute("disabled", true);
+        document.querySelector(".pause").removeAttribute("disabled");
+        document.querySelector(".play").style.display = "none";
+        document.querySelector(".pause").style.display = "block";
+        document.querySelector(".submit").setAttribute("disabled", true);
+        document.querySelector(".delete").setAttribute("disabled", true);
 
-    if (document.getElementById("solutto-gravador-webcam-preview")) {
-        document.getElementById("solutto-gravador-webcam-preview").remove();
-    }
+        resumeTimer();
+    })
+  }
 
-    if (document.querySelector("#solutto-gravador-iframe")) {
-        document.querySelector("#solutto-gravador-iframe").remove();
-    }
-}
-
-async function cortarInicioDoVideo(blob, segundosParaRemover = 3) {
-    return new Promise((resolve, reject) => {
-        console.log("Auto editing before send...")
-        const video = document.createElement("video");
-        video.src = URL.createObjectURL(blob);
-        video.muted = true;
-        video.play();
-
-        video.onloadedmetadata = () => {
-            const canvas = document.createElement("canvas");
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext("2d");
-
-            const mediaStream = canvas.captureStream();
-            const recorder = new MediaRecorder(mediaStream, { mimeType: 'video/webm' });
-            let trimmedChunks = [];
-
-            recorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    trimmedChunks.push(event.data);
-                }
-            };
-
-            recorder.onstop = () => {
-                const trimmedBlob = new Blob(trimmedChunks, { type: 'video/webm' });
-                console.log("Edited, sending...")
-                resolve(trimmedBlob);
-            };
-
-            recorder.start();
-
-            setTimeout(() => {
-                video.currentTime = segundosParaRemover; // Avança 3 segundos
-                const drawInterval = setInterval(() => {
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                }, 33); // Desenha no canvas a cada frame (~30 FPS)
-
-                setTimeout(() => {
-                    clearInterval(drawInterval);
-                    recorder.stop();
-                }, (video.duration - segundosParaRemover) * 1000);
-            }, 100);
-        };
+  function makeDraggable(element) {
+    let offsetX, offsetY, isDragging = false;
+  
+    element.style.position = "fixed"; // Garante que pode ser movido
+    element.style.cursor = "grab";
+  
+    element.addEventListener("mousedown", (event) => {
+        isDragging = true;
+        offsetX = event.clientX - element.getBoundingClientRect().left;
+        offsetY = event.clientY - element.getBoundingClientRect().top;
+        element.style.cursor = "grabbing";
     });
-}
+  
+    document.addEventListener("mousemove", (event) => {
+        if (isDragging) {
+            element.style.left = event.clientX - offsetX + "px";
+            element.style.top = event.clientY - offsetY + "px";
+        }
+    });
+  
+    document.addEventListener("mouseup", () => {
+        isDragging = false;
+        element.style.cursor = "grab";
+    });
+  }  
+
+  function makeControlDraggable(element) {
+    let offsetX, offsetY, isDragging = false;
+  
+    element.style.position = "fixed"; // Garante que pode ser movido
+    document.getElementById("grab-control").style.cursor = "grab";
+  
+    document.addEventListener("mousedown", (event) => {
+        const grabControl = event.target.closest("#grab-control");
+        if (grabControl) {
+            isDragging = true;
+            offsetX = event.clientX - element.getBoundingClientRect().left;
+            offsetY = event.clientY - element.getBoundingClientRect().top;
+            grabControl.style.cursor = "grabbing";
+        }
+    });
+  
+    document.addEventListener("mousemove", (event) => {
+        if (isDragging) {
+            element.style.left = event.clientX - offsetX + "px";
+            element.style.top = event.clientY - offsetY + "px";
+        }
+    });
+  
+    document.addEventListener("mouseup", () => {
+        isDragging = false;
+
+        if (document.getElementById("grab-control")) {
+            document.getElementById("grab-control").style.cursor = "grab";
+        }
+    });
+  }
