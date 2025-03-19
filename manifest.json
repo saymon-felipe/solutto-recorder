@@ -31,7 +31,7 @@
       "https://www.googleapis.com/*"
     ],
     "oauth2": {
-      "client_id": "251081527348-jvml84rdjkf9ah12ajbq9l73rul7cvt7.apps.googleusercontent.com", 
+      "client_id": "615054796738-tao2gbin8lns2cn7tdbcltc40h4lokfr.apps.googleusercontent.com", 
       "scopes": [
         "https://www.googleapis.com/auth/drive.file", 
         "https://www.googleapis.com/auth/drive" 
