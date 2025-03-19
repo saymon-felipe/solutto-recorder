@@ -325,7 +325,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (message.microfoneId) {
                     mediaPromise.push(
                         navigator.mediaDevices.getUserMedia({
-                            audio: { deviceId: { exact: message.microfoneId } }
+                            audio: message.microfoneId ? { deviceId: { exact: message.microfoneId } } : false
                         }).then((stream) => { microfoneStream = stream; })
                     );
                 }
@@ -333,7 +333,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (message.webcamId) {
                     mediaPromise.push(
                         navigator.mediaDevices.getUserMedia({
-                            video: { deviceId: { exact: message.webcamId } }
+                            video: message.webcamId ? { deviceId: { exact: message.webcamId } } : true
                         }).then((stream) => { webcamStream = stream; })
                     );
                 }
@@ -342,8 +342,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 mediaPromise.push(
                     stopExistingStreams().then(() => {
                         return navigator.mediaDevices.getUserMedia({
-                            video: true,
-                            audio: true
+                            video: message.webcamId ? { deviceId: { exact: message.webcamId } } : true,
+                            audio: message.microfoneId ? { deviceId: { exact: message.microfoneId } } : false
                         }).then((stream) => { recordOnlyWebcamStream = stream; });
                     })
                 );

@@ -113,6 +113,10 @@ function returnStoredOptions() {
   chrome.storage.local.get("optionsSelect", (data) => {
     if (data.optionsSelect) {
       recordSource.value = data.optionsSelect;
+
+      if (data.optionsSelect == "webcam") {
+        setDefaultCameraOptions();
+      }
     }
   });
 
@@ -127,6 +131,27 @@ function returnStoredOptions() {
       waitSecondsElement.value = data.waitSeconds;
     }
   });
+}
+
+/**
+ * Exibe a opção default da webcam para gravação de câmera.
+ */
+function setDefaultCameraOptions(callback) {
+  const cameraSelectElement = document.getElementById("camera");
+
+  if (cameraSelectElement.value == "") {
+    const firstValidOption = Array.from(cameraSelectElement.options).find(option => option.value.trim() !== "");
+    
+    if (!firstValidOption) {
+      if (confirm("Opção de gravação inválida. \n\n Nenhum dispositivo de vídeo encontrado.")) {
+        cameraSelectElement.value = "";
+        document.getElementById("video-config").value = "screen";
+      }
+    } else {
+      cameraSelectElement.value = firstValidOption.value;
+      callback();
+    }
+  }
 }
 
 /**
@@ -186,7 +211,11 @@ function start() {
   recordSource.addEventListener("change", (e) => {
     let value = e.target.value;
     if (value.trim() !== "") {
-      chrome.storage.local.set({ optionsSelect: value });
+      if (value == "webcam") {
+        setDefaultCameraOptions(() => { chrome.storage.local.set({ optionsSelect: value }) });
+      } else {
+        chrome.storage.local.set({ optionsSelect: value });
+      }      
     }
   });
 
