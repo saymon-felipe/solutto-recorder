@@ -7,7 +7,7 @@ let added = false;
  * Evento acionado quando a extensão é instalada.
  */
 chrome.runtime.onInstalled.addListener(() => {
-    console.log('Solutto Gravador instalado');
+    console.log('Solutto Recorder instalado');
 });
 
 /**
@@ -33,7 +33,7 @@ function addContentScript(tabId) {
             }).then(() => {
                 added = true;
                 resolve();
-            }).catch(err => console.log(err, "Solutto Gravador: Erro ao injetar script de conteúdo"));
+            }).catch(err => console.log(err, "Solutto Recorder: Erro ao injetar script de conteúdo"));
         });
     });
 }
@@ -69,11 +69,32 @@ chrome.action.onClicked.addListener(async function (tab) {
         chrome.scripting.executeScript({
             target: { tabId: tab.id },
             func: () => {
-                const oldIframe = document.getElementById('solutto-gravador-iframe');
+                /**
+                 * Remove os elementos solicitados.
+                 *
+                 * @param {string} selector - Seletor do elemento que será removido.
+                 */
+                function removeElements(selector) {
+                    const elements = document.querySelectorAll(selector);
+                    elements.forEach((element) => {
+                        element.style.opacity = "0";
+                        setTimeout(() => {
+                            element.remove();
+                        }, 400)
+                    });
+                }
+
+                const existingIframe = document.querySelectorAll("#solutto-gravador-iframe");
+                
+                let haveNew = existingIframe.length > 0;
 
                 // Se o iframe já existir, remove-o
-                if (oldIframe) {
-                    oldIframe.remove();
+                if (haveNew) {
+                    // Oculta e remove os elementos necessários
+                    removeElements("#solutto-gravador-iframe");
+                    removeElements("#solutto-gravador-camera-preview");
+                    removeElements("#solutto-gravador-webcam-preview");
+                    removeElements("#solutto-gravador-controls");
                     return;
                 }
 
@@ -87,6 +108,7 @@ chrome.action.onClicked.addListener(async function (tab) {
                 iframe.style.height = "100vh";
                 iframe.style.border = "none";
                 iframe.style.zIndex = "9999";
+                iframe.style.transition = "opacity 0.4s ease-in-out";
                 iframe.setAttribute("id", "solutto-gravador-iframe");
 
                 document.body.appendChild(iframe);

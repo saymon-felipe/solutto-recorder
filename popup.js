@@ -214,7 +214,7 @@ function start() {
             document.querySelector(".container").style.display = "none";
           }
         } else {
-          console.log(chrome.runtime.lastError, "Erro na linha 71");
+          console.log(chrome.runtime.lastError, "Erro na linha 217");
         }
       });
     });
@@ -226,7 +226,7 @@ function start() {
       if (!chrome.runtime.lastError) {
         fillDevices(response.devices);
       } else {
-        console.log(chrome.runtime.lastError, "Erro na linha 82");
+        console.log(chrome.runtime.lastError, "Erro na linha 229");
       }
     });
   });

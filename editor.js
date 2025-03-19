@@ -208,7 +208,6 @@ async function handleDownloadFile() {
 
     // Simula o clique para iniciar o download e remove o link do DOM
     document.body.appendChild(link);
-    console.log("link", link)
     link.click();
     document.body.removeChild(link);
 

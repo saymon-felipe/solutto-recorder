@@ -43,7 +43,7 @@ if (!window.contentScriptInjected) {
  */
 function onAccessApproved(stream) {
     if (recorder) {
-        console.log("Solutto Gravador: Uma gravação já está em andamento.");
+        console.log("Solutto Recorder: Uma gravação já está em andamento.");
         return;
     }
 
@@ -51,7 +51,7 @@ function onAccessApproved(stream) {
     recorder = new MediaRecorder(stream);
     isRecording = true;
     recorder.start();
-    console.log('Solutto Gravador: Gravação iniciada...');
+    console.log('Solutto Recorder: Gravação iniciada...');
 
     // Quando a gravação for parada, interrompe todas as tracks da stream
     recorder.onstop = (fromHandle = false) => {
@@ -77,6 +77,11 @@ function onAccessApproved(stream) {
  * @param {MediaStream} stream - Stream de mídia para exibição.
  */
 function createVideoElement(stream) {
+    const existingControls = document.querySelectorAll("#solutto-gravador-camera-preview");
+    existingControls.forEach((element) => {
+        element.remove();
+    });
+
     let previewVideo = document.createElement("video");
     previewVideo.srcObject = stream;
     previewVideo.setAttribute("id", "solutto-gravador-camera-preview");
@@ -90,7 +95,8 @@ function createVideoElement(stream) {
         bottom: "0",
         left: "0",
         margin: "auto",
-        height: "80vh",
+        width: "90vw",
+        maxWidth: "1200px",
         borderRadius: "1rem",
         background: "white",
         padding: "2rem",
@@ -113,6 +119,11 @@ function createVideoElement(stream) {
  * @param {MediaStream} stream - Stream da webcam.
  */
 function createWebcamElement(stream) {
+    const existingControls = document.querySelectorAll("#solutto-gravador-webcam-preview");
+    existingControls.forEach((element) => {
+        element.remove();
+    });
+
     let previewVideo = document.createElement("video");
     previewVideo.srcObject = stream;
     previewVideo.setAttribute("id", "solutto-gravador-webcam-preview");
@@ -148,9 +159,10 @@ function createWebcamElement(stream) {
  */
 function createTimeoutElement(timeoutSeconds) {
     // Remove elemento existente, se houver
-    if (document.getElementById("recorder-timeout")) {
-        document.getElementById("recorder-timeout").remove();
-    }
+    const existingControls = document.querySelectorAll("#recorder-timeout");
+    existingControls.forEach((element) => {
+        element.remove();
+    });
 
     const timeoutDiv = document.createElement("div");
     timeoutDiv.setAttribute("id", "recorder-timeout");
@@ -281,6 +293,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 recordTimeout = message.timeout;
                 createTimeoutElement(message.timeout);
             }
+
             initRecordingInterface(message.timeout);
             sendResponse({ message: `Processed recording: ${message.action}`, allow: true });
         }).catch((error) => {
@@ -401,68 +414,42 @@ function kill() {
     return new Promise((resolveMaster) => {
         let promises = [];
 
-        // Oculta e remove o preview da tela
-        const cameraPreview = document.getElementById("solutto-gravador-camera-preview");
-        if (cameraPreview) {
-            cameraPreview.style.opacity = "0";
-            promises.push(
-                new Promise((resolve) => {
-                    setTimeout(() => {
-                        if (document.getElementById("solutto-gravador-camera-preview")) {
-                            document.getElementById("solutto-gravador-camera-preview").remove();
-                        }
-                        resolve();
-                    }, 400);
-                })
-            );
+        // Função auxiliar para ocultar e remover múltiplos elementos
+        function removeElements(selector) {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach((element) => {
+                element.style.opacity = "0";
+                promises.push(
+                    new Promise((resolve) => {                        
+                        setTimeout(() => {
+                            element.remove();
+
+                            resolve();
+                        }, 400);
+                    })
+                );
+            });
         }
 
-        // Oculta e remove o preview da webcam
-        const webcamPreview = document.getElementById("solutto-gravador-webcam-preview");
-        if (webcamPreview) {
-            webcamPreview.style.opacity = "0";
-            promises.push(
-                new Promise((resolve) => {
-                    setTimeout(() => {
-                        if (document.getElementById("solutto-gravador-webcam-preview")) {
-                            document.getElementById("solutto-gravador-webcam-preview").remove();
-                        }
-                        resolve();
-                    }, 400);
-                })
-            );
-        }
+        // Oculta e remove os elementos necessários
+        removeElements("#solutto-gravador-camera-preview");
+        removeElements("#solutto-gravador-webcam-preview");
+        removeElements("#solutto-gravador-controls");
 
-        // Oculta e remove os controles de gravação
-        const controls = document.querySelector(".solutto-gravador-controls");
-        if (controls) {
-            controls.style.opacity = "0";
-            promises.push(
-                new Promise((resolve) => {
-                    setTimeout(() => {
-                        if (document.querySelector(".solutto-gravador-controls")) {
-                            document.querySelector(".solutto-gravador-controls").remove();
-                        }
-                        resolve();
-                    }, 400);
-                })
-            );
-        }
-
-        promises.push(
-            stopExistingStreams()
-        )
+        // Interrompe os streams existentes
+        promises.push(stopExistingStreams());
 
         if (recorder) {
             recorder.stop(true);
         }
 
-        // Remove o iframe do gravador, se existir
+        // Aguarda todas as promessas serem resolvidas antes de concluir
         Promise.all(promises).then(() => {
-            const iframe = document.querySelector("#solutto-gravador-iframe");
-            if (iframe) {
-                iframe.remove();
-            }
+            const existingIframe = document.querySelectorAll("#solutto-gravador-iframe");
+            existingIframe.forEach((element) => {
+                element.remove();
+            });
+
             // Reseta variáveis globais e limpa intervalos
             recorder = null;
             isRecording = false;
@@ -502,7 +489,7 @@ function injectFontAwesome() {
 function injectStyles() {
     const style = document.createElement("style");
     style.textContent = `
-        .solutto-gravador-controls {
+        #solutto-gravador-controls {
             position: fixed;
             bottom: 1rem;
             left: 3rem;
@@ -518,11 +505,11 @@ function injectStyles() {
             transition: opacity 0.4s ease-in-out;
             opacity: 0;
         }
-        .solutto-gravador-controls i {
+        #solutto-gravador-controls i {
             font-size: 23px;
             cursor: pointer;
         }
-        .solutto-gravador-controls .elapsed-time {
+        #solutto-gravador-controls .elapsed-time {
             border-radius: 8px;
             background: #E6E6E6;
             display: flex;
@@ -531,34 +518,34 @@ function injectStyles() {
             padding: 10px;
             color: #4D4D4D;
         }
-        .solutto-gravador-controls .elapsed-time .play {
+        #solutto-gravador-controls .elapsed-time .play {
             display: none;
         }
-        .solutto-gravador-controls .actions {
+        #solutto-gravador-controls .actions {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
-        .solutto-gravador-controls .space {
+        #solutto-gravador-controls .space {
             height: 22px;
             width: 2px;
             background: #E6E6E6;
         }
-        .solutto-gravador-controls #grab-control {
+        #solutto-gravador-controls #grab-control {
             color: #999999;
         }
-        .solutto-gravador-controls .rounded-btn {
+        #solutto-gravador-controls .rounded-btn {
             background: none;
             border: none;
         }
-        .solutto-gravador-controls .rounded-btn:disabled i {
+        #solutto-gravador-controls .rounded-btn:disabled i {
             color: #999999;
             cursor: default;
         }
-        .solutto-gravador-controls .submit {
+        #solutto-gravador-controls .submit {
             color: #00AAB3;
         }
-        .solutto-gravador-controls .delete {
+        #solutto-gravador-controls .delete {
             color: #FF0000;
         }
     `;
@@ -572,13 +559,13 @@ function injectStyles() {
  * Cria e insere na página os controles para manipulação da gravação.
  */
 function createRecorderControls() {
-    const existingControls = document.querySelector(".solutto-gravador-controls");
-    if (existingControls) {
-        existingControls.remove();
-    }
+    const existingControls = document.querySelectorAll("#solutto-gravador-controls");
+    existingControls.forEach((element) => {
+        element.remove();
+    });
 
     const container = document.createElement("div");
-    container.className = "solutto-gravador-controls";
+    container.id = "solutto-gravador-controls";
 
     // Ícone para mover os controles
     const grabControl = document.createElement("i");
@@ -718,14 +705,20 @@ function openEditorTab(videoBlobUrl, recordTimeout, url) {
  */
 function initRecordingInterface(timeout) {
     // Esconde o iframe do gravador
-    document.getElementById("solutto-gravador-iframe").style.display = "none";
+    const existingIframe = document.querySelectorAll("#solutto-gravador-iframe");
+    existingIframe.forEach((element) => {
+        element.style.display = "none";
+    });
 
     setTimeout(() => {
         document.querySelector(".play").setAttribute("disabled", true);
         document.querySelector(".pause").removeAttribute("disabled");
         document.querySelector(".submit").setAttribute("disabled", true);
         document.querySelector(".delete").setAttribute("disabled", true);
-        startTimer();
+
+        if (timeout == 0) {
+            startTimer();
+        }
     }, timeout * 1000);
 
     const stopVideoButton = document.getElementById("stop-recording");
@@ -735,9 +728,9 @@ function initRecordingInterface(timeout) {
 
     // Listener para encerrar a gravação
     stopVideoButton.addEventListener("click", () => {
-        console.log("Solutto Gravador: Encerrando gravação");
+        console.log("Solutto Recorder: Encerrando gravação");
         if (!recorder) {
-            console.log("Solutto Gravador: Nenhum gravador ativo");
+            console.log("Solutto Recorder: Nenhum gravador ativo");
             return;
         }
         recorder.stop(true);
@@ -767,7 +760,7 @@ function initRecordingInterface(timeout) {
     // Listener para pausar a gravação
     pauseVideoButton.addEventListener("click", () => {
         if (!recorder || recorder.state !== "recording") {
-            return console.log("Solutto Gravador: Não é possível pausar, pois a gravação não está ativa");
+            return console.log("Solutto Recorder: Não é possível pausar, pois a gravação não está ativa");
         }
         recorder.pause();
         document.querySelector(".play").removeAttribute("disabled");
@@ -782,7 +775,7 @@ function initRecordingInterface(timeout) {
     // Listener para retomar a gravação pausada
     resumeVideoButton.addEventListener("click", () => {
         if (!recorder || recorder.state !== "paused") {
-            return console.log("Solutto Gravador: Não é possível retomar, pois a gravação não está pausada");
+            return console.log("Solutto Recorder: Não é possível retomar, pois a gravação não está pausada");
         }
         recorder.resume();
         document.querySelector(".play").setAttribute("disabled", true);

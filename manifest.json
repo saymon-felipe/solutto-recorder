@@ -1,6 +1,6 @@
 {
     "manifest_version": 3,
-    "name": "Solutto Gravador",
+    "name": "Solutto Recorder",
     "version": "1.0",
     "description": "Realizar gravações de tela e subir para o drive",
     "permissions": [

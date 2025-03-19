@@ -1,6 +1,6 @@
 export async function uploadToDrive(fileBlob, fileName) {
     // Nome da pasta onde os arquivos serão salvos no Google Drive
-    const folderName = 'Solutto Gravador';
+    const folderName = 'Solutto Recorder';
 
     /**
      * Obtém o token de autenticação OAuth2 necessário para acessar a API do Google Drive.
@@ -114,7 +114,7 @@ export async function uploadToDrive(fileBlob, fileName) {
         });
 
         const data = await response.json();
-        console.log("Solutto Gravador: Arquivo enviado para o Drive:", data);
+        console.log("Solutto Recorder: Arquivo enviado para o Drive:", data);
         return data;
     }
 
@@ -127,6 +127,6 @@ export async function uploadToDrive(fileBlob, fileName) {
         }
         await uploadFile(token, folderId);
     } catch (error) {
-        console.error("Solutto Gravador: Erro no processo:", error);
+        console.error("Solutto Recorder: Erro no processo:", error);
     }
 }

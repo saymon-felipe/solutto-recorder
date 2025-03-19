@@ -1,6 +1,6 @@
-# Solutto Gravador
+# Solutto Recorder
 
-**Solutto Gravador** é uma extensão para o Chrome que permite gravar vídeos de forma simples e intuitiva. Com ela, você pode capturar a tela, a webcam e o áudio, editar clipes e salvar ou enviar os vídeos para o Google Drive. A extensão foi desenvolvida para facilitar a criação e o gerenciamento de gravações de vídeo, integrando-se perfeitamente ao ambiente web e ao fluxo de trabalho da **Solutto - ERP para franquias**.
+**Solutto Recorder** é uma extensão para o Chrome que permite gravar vídeos de forma simples e intuitiva. Com ela, você pode capturar a tela, a webcam e o áudio, editar clipes e salvar ou enviar os vídeos para o Google Drive. A extensão foi desenvolvida para facilitar a criação e o gerenciamento de gravações de vídeo, integrando-se perfeitamente ao ambiente web e ao fluxo de trabalho da **Solutto - ERP para franquias**.
 
 ---
 
