@@ -40,9 +40,8 @@ if (!window.contentScriptInjected) {
  * Inicia a gravação com a stream combinada.
  *
  * @param {MediaStream} stream - Stream de mídia combinada (vídeo, áudio e/ou webcam).
- * @param {number} timeout - Tempo (em segundos) para iniciar a contagem de timeout, se aplicável.
  */
-function onAccessApproved(stream, timeout) {
+function onAccessApproved(stream) {
     if (recorder) {
         console.log("Solutto Gravador: Uma gravação já está em andamento.");
         return;
@@ -56,11 +55,7 @@ function onAccessApproved(stream, timeout) {
 
     // Quando a gravação for parada, interrompe todas as tracks da stream
     recorder.onstop = (fromHandle = false) => {
-        stream.getTracks().forEach(track => {
-            if (track.readyState === 'live') {
-                track.stop();
-            }
-        });
+        stream.getTracks().forEach(track => track.stop());
 
         window.isRequestingScreen = false;
         isRecording = false;
@@ -222,6 +217,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     async function pedirPermissaoMidia() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            stream.getTracks().forEach(track => track.stop());
             return stream;
         } catch (error) {
             console.error("❌ Permissão negada ou erro ao acessar dispositivos:", error);
@@ -230,8 +226,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     async function listarDispositivosMidia() {
         try {
-            // Solicita permissão antes de listar dispositivos
-            pedirPermissaoMidia();
+            // Verifica se já há permissão para câmera ou microfone
+            const cameraPerm = await navigator.permissions.query({ name: "camera" });
+            const micPerm = await navigator.permissions.query({ name: "microphone" });
+
+            let precisaPermissao = cameraPerm.state !== "granted" || micPerm.state !== "granted";
+
+            // Se precisar da permissão, solicita e encerra imediatamente
+            if (precisaPermissao) {
+                await pedirPermissaoMidia();
+            }
+
             const dispositivos = await navigator.mediaDevices.enumerateDevices();
             const cameras = dispositivos.filter(device => device.kind === "videoinput");
             const microfones = dispositivos.filter(device => device.kind === "audioinput");
@@ -351,7 +356,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
 
                 const streamCombinado = new MediaStream(trilhas);
-                onAccessApproved(streamCombinado, message.timeout);
+                onAccessApproved(streamCombinado);
                 resolve();
             }).catch((error) => {
                 window.isRequestingScreen = false;
