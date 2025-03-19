@@ -103,7 +103,7 @@ function returnStoredOptions() {
       const optionExists = Array.from(microphoneSelectElement.options).some(option => option.value === data.microphoneSelect);
 
       if (optionExists) {
-        microphoneSelectElement.value = data.cameraSelect;
+        microphoneSelectElement.value = data.microphoneSelect;
       } else {
         microphoneSelectElement.value = "";
       }
