@@ -115,6 +115,7 @@ export async function uploadToDrive(fileBlob, fileName) {
 
         const data = await response.json();
         console.log("Solutto Recorder: Arquivo enviado para o Drive:", data);
+        chrome.tabs.create({ url: "https://drive.google.com/drive/u/0/folders/" + folderId });
         return data;
     }
 

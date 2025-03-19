@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "Solutto Recorder",
     "version": "1.0",
-    "description": "Realizar gravações de tela e subir para o drive",
+    "description": "O Solutto Recorder é uma extensão completa para gravação de tela e webcam. Com ele, você pode gravar, baixar, converter e editar vídeos facilmente, além de salvá-los diretamente no Google Drive.",
     "permissions": [
       "tabs",
       "scripting",
@@ -19,7 +19,11 @@
       "type": "module"
     },
     "action": {
-      "default_icon": "assets/icon.png"
+      "default_icon": {
+        "16": "assets/icon.png",
+        "48": "assets/icon.png",
+        "128": "assets/icon.png"
+      }
     },
     "host_permissions": [
       "http://*/",
@@ -27,7 +31,7 @@
       "https://www.googleapis.com/*"
     ],
     "oauth2": {
-      "client_id": "1061159513511-mprln06hs8ua96ia8kkh2vo6qhvgscot.apps.googleusercontent.com", 
+      "client_id": "251081527348-jvml84rdjkf9ah12ajbq9l73rul7cvt7.apps.googleusercontent.com", 
       "scopes": [
         "https://www.googleapis.com/auth/drive.file", 
         "https://www.googleapis.com/auth/drive" 

@@ -155,7 +155,7 @@ async function uploadToDrive() {
 
     // Se o formato de exportação não for MP4, realiza a transcodificação para WebM
     if (exportType != "mp4") {
-        await transcode(data.videoUrl, "webm", videoTimeout);
+        await transcode(videoBlob, "webm", 0);
         videoElement.setAttribute("file-format", "webm");
     }
 
