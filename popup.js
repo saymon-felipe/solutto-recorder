@@ -88,13 +88,25 @@ function returnStoredOptions() {
 
   chrome.storage.local.get("cameraSelect", (data) => {
     if (data.cameraSelect) {
-      cameraSelectElement.value = data.cameraSelect;
+      const optionExists = Array.from(cameraSelectElement.options).some(option => option.value === data.cameraSelect);
+
+      if (optionExists) {
+          cameraSelectElement.value = data.cameraSelect;
+      } else {
+        cameraSelectElement.value = "";
+      }
     }
   });
 
   chrome.storage.local.get("microphoneSelect", (data) => {
     if (data.microphoneSelect) {
-      microphoneSelectElement.value = data.microphoneSelect;
+      const optionExists = Array.from(microphoneSelectElement.options).some(option => option.value === data.microphoneSelect);
+
+      if (optionExists) {
+        microphoneSelectElement.value = data.cameraSelect;
+      } else {
+        microphoneSelectElement.value = "";
+      }
     }
   });
 
@@ -214,7 +226,7 @@ function start() {
             document.querySelector(".container").style.display = "none";
           }
         } else {
-          console.log(chrome.runtime.lastError, "Erro na linha 217");
+          console.log(chrome.runtime.lastError, "Erro na linha 229");
         }
       });
     });
@@ -226,7 +238,7 @@ function start() {
       if (!chrome.runtime.lastError) {
         fillDevices(response.devices);
       } else {
-        console.log(chrome.runtime.lastError, "Erro na linha 229");
+        console.log(chrome.runtime.lastError, "Erro na linha 241");
       }
     });
   });
