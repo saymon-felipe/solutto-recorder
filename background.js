@@ -107,7 +107,7 @@ chrome.action.onClicked.addListener(async function (tab) {
                 iframe.style.width = "100vw";
                 iframe.style.height = "100vh";
                 iframe.style.border = "none";
-                iframe.style.zIndex = "9999";
+                iframe.style.zIndex = "99999";
                 iframe.style.transition = "opacity 0.4s ease-in-out";
                 iframe.setAttribute("id", "solutto-gravador-iframe");
 

@@ -480,7 +480,7 @@ function injectFontAwesome() {
     link.integrity = "sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==";
     link.crossOrigin = "anonymous";
     link.referrerpolicy = "no-referrer";
-    document.head.appendChild(link);
+    document.head.prepend(link);
 }
 
 /**
@@ -497,7 +497,7 @@ function injectStyles() {
             border-radius: 8px;
             border: 1px solid #E6E6E6;
             padding: 7px 20px;
-            z-index: 9999;
+            z-index: 999999;
             display: flex;
             align-items: center;
             gap: 1rem;
@@ -508,6 +508,9 @@ function injectStyles() {
         #solutto-gravador-controls i {
             font-size: 23px;
             cursor: pointer;
+            font-family: "Font Awesome 6 Free" !important; 
+            font-weight: 900; 
+            content: attr(data-icon);
         }
         #solutto-gravador-controls .elapsed-time {
             border-radius: 8px;
