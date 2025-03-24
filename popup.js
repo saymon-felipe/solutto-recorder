@@ -82,7 +82,6 @@ function fillDevices(devices) {
 function returnStoredOptions() {
   const cameraSelectElement = document.getElementById("camera");
   const microphoneSelectElement = document.getElementById("microphone");
-  const recordSource = document.getElementById("video-config");
   const waitSecondsElement = document.getElementById("wait-seconds");
   const timeoutCheckboxElement = document.getElementById("use-wait-seconds");
 
@@ -112,7 +111,8 @@ function returnStoredOptions() {
 
   chrome.storage.local.get("optionsSelect", (data) => {
     if (data.optionsSelect) {
-      recordSource.value = data.optionsSelect;
+      let button = document.querySelector(".solutto-gravador .source[source='" + data.optionsSelect + "']");
+      addEventListenerSelectTab(button);
 
       if (data.optionsSelect == "webcam") {
         setDefaultCameraOptions();
@@ -136,7 +136,7 @@ function returnStoredOptions() {
 /**
  * Exibe a opção default da webcam para gravação de câmera.
  */
-function setDefaultCameraOptions(callback) {
+function setDefaultCameraOptions(callback = null) {
   const cameraSelectElement = document.getElementById("camera");
 
   if (cameraSelectElement.value == "") {
@@ -149,7 +149,10 @@ function setDefaultCameraOptions(callback) {
       }
     } else {
       cameraSelectElement.value = firstValidOption.value;
-      callback();
+
+      if (callback) {
+        callback();
+      }
     }
   }
 }
@@ -168,13 +171,30 @@ function showDocument() {
 }
 
 /**
+ * Função para inciar o event listener de seleção das abas de source de gravação.
+ */
+function addEventListenerSelectTab(button) {
+  document.querySelectorAll(".solutto-gravador .source").forEach(button2 => {
+    button2.classList.remove("selected");
+  })
+
+  button.classList.add("selected");
+  let selector = document.querySelector(".solutto-gravador .selector-tab");
+
+  let leftPosition = button.offsetLeft;
+  let width = button.offsetWidth;
+
+  selector.style.width = `${width}px`;
+  selector.style.left = `${leftPosition}px`;
+}
+
+/**
  * Inicializa os listeners e configurações dos elementos da interface.
  */
 function start() {
   const startVideoButton = document.getElementById("start-recording");
   const cameraSelectElement = document.getElementById("camera");
   const microphoneSelectElement = document.getElementById("microphone");
-  const recordSource = document.getElementById("video-config");
   const waitSecondsElement = document.getElementById("wait-seconds");
   const timeoutCheckboxElement = document.getElementById("use-wait-seconds");
 
@@ -208,15 +228,19 @@ function start() {
   });
 
   // Atualiza a opção de configuração de vídeo no armazenamento local quando alterada
-  recordSource.addEventListener("change", (e) => {
-    let value = e.target.value;
-    if (value.trim() !== "") {
-      if (value == "webcam") {
-        setDefaultCameraOptions(() => { chrome.storage.local.set({ optionsSelect: value }) });
-      } else {
-        chrome.storage.local.set({ optionsSelect: value });
-      }      
-    }
+  document.querySelectorAll(".solutto-gravador .source").forEach(button => {
+    button.addEventListener("click", () => {
+      addEventListenerSelectTab(button);
+
+      let value = button.getAttribute("source");
+      if (value.trim() !== "") {
+        if (value == "webcam") {
+          setDefaultCameraOptions(() => { chrome.storage.local.set({ optionsSelect: value }) });
+        } else {
+          chrome.storage.local.set({ optionsSelect: value });
+        }      
+      }
+    });
   });
 
   // Inicia a gravação ao clicar no botão
@@ -229,7 +253,7 @@ function start() {
    * Coleta as configurações atuais e envia uma mensagem para a aba ativa solicitando a gravação.
    */
   function triggerRecording() {
-    const recordingType = document.getElementById("video-config").value;
+    const recordingType = document.querySelector(".source.selected").getAttribute("source");
     const useTimeout = document.getElementById("use-wait-seconds").checked;
     const timeoutSeconds = document.getElementById("wait-seconds").value;
 

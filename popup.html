@@ -16,11 +16,21 @@
         </div>
         <div class="configurations">
           <div class="form-group">
-            <label for="video-config" class="fontsize-md">Fonte de gravação</label>
-            <select id="video-config">
-              <option value="screen">Tela ou aba (Guia)</option>
-              <option value="webcam">Câmera</option>
-            </select>
+            <div class="select-source">
+              <div class="source" source="tab">
+                <i class="fa-solid fa-table-columns"></i>
+                <span>Aba</span>
+              </div>
+              <div class="source selected" source="screen">
+                <i class="fa-solid fa-display"></i>
+                <span>Tela</span>
+              </div>              
+              <div class="source" source="webcam">
+                <i class="fa-solid fa-camera"></i>  
+                <span>Camera</span>
+              </div>              
+              <div class="selector-tab"></div>
+            </div>
           </div>
           <div class="form-group">
             <label class="fontsize-md ">Configurações de gravação</label>
@@ -50,23 +60,6 @@
         </div>
       </div>
     </div>
-    <!--<div class="solutto-gravador-controls">
-      <i class="fa-solid fa-grip-vertical" id="grab-control"></i>
-      <div class="elapsed-time">
-        <span id="elapsed-time">00:00:00</span>
-        <button class="rounded-btn play" disabled><i class="fa-solid fa-circle-play"></i></button>
-        <button class="rounded-btn pause" disabled><i class="fa-solid fa-circle-pause"></i></button>
-      </div>
-      <div class="space"></div>
-      <div class="actions">
-        <button class="rounded-btn submit" id="stop-recording" disabled>
-          <i class="fa-solid fa-circle-check"></i>
-        </button>
-        <button class="rounded-btn delete" id="delete-recording" disabled>
-          <i class="fa-solid fa-trash"></i>
-        </button>
-      </div>
-    </div>-->
 
   <script src="popup.js" type="module"></script>
 

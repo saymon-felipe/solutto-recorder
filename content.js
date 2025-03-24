@@ -313,12 +313,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             let mediaPromise = [];
             let screenStream, microfoneStream, webcamStream, recordOnlyWebcamStream;
 
-            if (message.type === "screen") {
+            if (message.type === "screen" || message.type === "tab") {
+                let options;
+
+                if (message.type === "tab") {
+                    options = {
+                        displaySurface: "browser",
+                        preferCurrentTab: true
+                    }
+                } else {
+                    options = {
+                        displaySurface: "monitor"
+                    }
+                }
+
                 // Solicita a captura da tela
                 mediaPromise.push(
                     navigator.mediaDevices.getDisplayMedia({
                         audio: true,
-                        video: { width: 999999999, height: 999999999 }
+                        video: { 
+                            width: 999999999, 
+                            height: 999999999,
+                            ...options
+                        }
                     }).then((stream) => { screenStream = stream; })
                 );
                 // Se o ID do microfone foi informado, solicita a captura do áudio
