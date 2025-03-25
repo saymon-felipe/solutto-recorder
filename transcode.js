@@ -29,14 +29,8 @@ ffmpeg.on("progress", ({ progress, time }) => {
  *
  * @param {string} message - Mensagem a ser exibida.
  */
-function logger(message) {
-    let log = document.createElement("span");
-    log.innerHTML = message;
-
-    const editorLogs = document.querySelector(".editor-logs");
-    editorLogs.appendChild(log);
-    // Rola o container de logs para mostrar as mensagens mais recentes
-    editorLogs.scrollTop = 9999999;
+function logger(message) {    
+    console.log(message);
 }
 
 /**

@@ -34,6 +34,14 @@
     font-weight: 600;
 }
 
+.solutto-gravador .fontsize-lg,
+.editor .fontsize-lg {
+    color: #222222;
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0;
+}
+
 .solutto-gravador .fontsize-md,
 .editor .fontsize-md {
     color: #222222;

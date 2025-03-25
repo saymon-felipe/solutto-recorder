@@ -17,17 +17,21 @@
                 <a href="https://solutto.com.br" target="_blank">solutto.com.br</a>
             </div>
             <div class="editor-container">
-                <video id="video" controls></video>
-                <div class="editor-side">
-                    <div class="editor-logs">
-                        <span>Iniciando conversão...</span>
+                <div class="video-container">
+                    <video id="video" controls></video>
+                    <div class="loading">
+                        <div class="system-loading loading-medium">
+                            <svg>
+                                <circle cx="70" cy="70" r="70"></circle>
+                            </svg>
+                            <p>Aguarde, convertendo vídeo</p>
+                        </div>
                     </div>
+                </div>
+                <div class="editor-side">
                     <div class="form-group">
-                        <p class="fontsize-md">Edite a sua gravação</p>
-                        <select id="export-type">
-                            <option value="mp4">MP4 (Padrão)</option>
-                            <option value="webm">WEBM</option>
-                        </select>
+                        <p class="fontsize-md">Formato de saída</p>
+                        <p class="fontsize-lg">MP4</p>
                     </div>
                     <div class="form-group">
                         <p class="fontsize-md">Cortar video</p>
@@ -50,7 +54,7 @@
                         </button>
                         <button class="btn btnCinza" id="save-drive" disabled>
                             <i class="fa-brands fa-google-drive"></i>
-                            <span>Salvar no drive</span>
+                            <span>Salvar no drive e copiar URL</span>
                         </button>
                     </div>
                 </div>

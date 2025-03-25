@@ -129,14 +129,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 /**
  * Listener para mensagens enviadas ao background.
- * Trata ações de download e upload de arquivos.
  */
 chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
-    // Ação para iniciar o download
-    if (message.action === "download") {
-        chrome.downloads.showDefaultFolder();
-        sendResponse({ status: "Download iniciado!" });
-    }
 
     // Ação para upload de arquivo
     if (message.action === 'upload-file') {
@@ -150,9 +144,11 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
             const formattedTime = now.toTimeString().slice(0, 5).replace(":", "-"); // Ex: "00-44"
             const fileName = `solutto-gravador-${formattedDate}_${formattedTime}.` + message.format;
             
+            sendResponse({ status: 'upload-iniciado' });
+            
             // Realiza o upload para o Google Drive
             await uploadToDrive(fileBlob, fileName);
-            sendResponse({ status: 'upload-iniciado' });
+            
         } else {
             sendResponse({ status: 'erro', message: 'Arquivo não encontrado' });
         }

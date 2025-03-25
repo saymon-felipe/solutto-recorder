@@ -71,6 +71,11 @@ input.personalized-input-range::-moz-range-track {
     border-radius: 5px;
 }
 
+video {
+    min-width: 500;
+    min-height: 282px;
+}
+
 .cut-label {
     display: flex;
     gap: 1rem;
@@ -124,13 +129,6 @@ input.personalized-input-range::-moz-range-track {
     }
 }
 
-.editor-logs {
-    display: grid;
-    max-height: 100px;
-    min-height: 100px;
-    overflow-y: auto;
-}
-
 .editor-side {
     background: white;
     border: 1px solid #e6e6e6;
@@ -148,4 +146,119 @@ input.personalized-input-range::-moz-range-track {
     & button {
         width: 100%;
     }
+}
+
+.system-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    width: 300px;
+    margin-top: -38px;
+}
+
+    .system-loading p {
+        font-size: 30px;
+        color: #00aab3;
+        font-family: Arial, Helvetica, sans-serif;
+        margin-top: 2rem;
+    }
+
+.system-loading svg {
+    position: relative;
+    width: 150px;
+    height: 150px;
+    animation: rotate 2s linear infinite;
+    border-radius: 50%;
+    box-shadow: 0 0 0 10px #ddd inset;
+}
+
+.system-loading-inline svg {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    animation: rotate 2s linear infinite;
+    border-radius: 50%;
+    box-shadow: 0 0 0 5px #ddd inset;
+}
+
+.system-loading svg circle, .system-loading-inline svg circle {
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke-width: 10;
+    stroke: #00aab3;
+    transform: translate(5px, 5px);
+    stroke-linecap: round;
+    stroke-dasharray: 440;
+    stroke-dashoffset: 440;
+    animation: spin 4s ease-in-out infinite;
+}
+
+    .system-loading-inline svg circle {
+        stroke-width: 5;
+        stroke-dasharray: 100;
+        animation: spin-small 4s ease-in-out infinite;
+        /*animation: none;*/
+    }
+
+@keyframes spin {
+    0%, 100% {
+        stroke-dashoffset: 440;
+    }
+
+    50% {
+        stroke-dashoffset: 0;
+    }
+
+    50.00000000001% {
+        stroke-dashoffset: 880;
+    }
+}
+
+@keyframes spin-small {
+    0%, 100% {
+        stroke-dashoffset: 100;
+    }
+
+    50.00000000001% {
+        stroke-dashoffset: 45;
+    }
+}
+
+@keyframes rotate {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.loading-small, .loading-medium, .loading-large {
+    justify-content: center !important;
+}
+
+.loading-medium {
+    transform: scale(0.4) !important;
+}
+
+.loading-small {
+    transform: scale(0.2) !important;
+}
+
+.loading-large {
+    transform: scale(0.7) !important;
+}
+
+.loading {
+    border: 2px dashed #00aab3;
+    border-radius: 8px;
+    height: 200px;
+    display: grid;
+    place-items: center;
+    margin-top: 1rem;
+    display: none;
 }

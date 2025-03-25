@@ -557,6 +557,7 @@ function injectStyles() {
         #solutto-gravador-controls .rounded-btn {
             background: none;
             border: none;
+            display: grid;
         }
         #solutto-gravador-controls .rounded-btn:disabled i {
             color: #999999;
@@ -785,7 +786,7 @@ function initRecordingInterface(timeout) {
         recorder.pause();
         document.querySelector(".play").removeAttribute("disabled");
         document.querySelector(".pause").setAttribute("disabled", true);
-        document.querySelector(".play").style.display = "block";
+        document.querySelector(".play").style.display = "grid";
         document.querySelector(".pause").style.display = "none";
         document.getElementById("stop-recording").removeAttribute("disabled");
         document.querySelector(".delete").removeAttribute("disabled");
@@ -801,7 +802,7 @@ function initRecordingInterface(timeout) {
         document.querySelector(".play").setAttribute("disabled", true);
         document.querySelector(".pause").removeAttribute("disabled");
         document.querySelector(".play").style.display = "none";
-        document.querySelector(".pause").style.display = "block";
+        document.querySelector(".pause").style.display = "grid";
         document.querySelector(".submit").setAttribute("disabled", true);
         document.querySelector(".delete").setAttribute("disabled", true);
         resumeTimer();

@@ -12,7 +12,8 @@
       "desktopCapture",
       "declarativeContent",
       "downloads",
-      "identity"
+      "identity",
+      "clipboardWrite"
     ],
     "background": {
       "service_worker": "background.js",

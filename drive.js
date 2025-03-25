@@ -99,12 +99,13 @@ export async function uploadToDrive(fileBlob, fileName) {
             name: fileName,
             parents: [folderId]
         };
-
+    
         // Prepara os dados para envio utilizando FormData
         const formData = new FormData();
         formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
         formData.append("file", fileBlob);
-
+    
+        // Faz o upload do arquivo
         const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
             method: "POST",
             headers: {
@@ -112,12 +113,56 @@ export async function uploadToDrive(fileBlob, fileName) {
             },
             body: formData
         });
-
+    
         const data = await response.json();
+        
+        if (!data.id) {
+            console.error("Erro ao enviar arquivo:", data);
+            return;
+        }
+    
         console.log("Solutto Recorder: Arquivo enviado para o Drive:", data);
-        chrome.tabs.create({ url: "https://drive.google.com/drive/u/0/folders/" + folderId });
+    
+        // Torna o arquivo público
+        await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                role: "reader",
+                type: "anyone"
+            })
+        });
+    
+        console.log("Permissão pública aplicada!");
+    
+        // URL pública do arquivo
+        const fileUrl = `https://drive.google.com/file/d/${data.id}/view`;
+    
+        // Abre a pasta e o link do arquivo
+        //chrome.tabs.create({ url: `https://drive.google.com/drive/u/0/folders/${folderId}` });
+        chrome.tabs.create({ url: fileUrl }, (tab) => {
+            chrome.tabs.update(tab.id, { active: true }, () => {
+                setTimeout(() => {
+                    chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        function: copyToClipboard,
+                        args: [fileUrl]
+                    });
+                }, 1000); // Pequeno delay para garantir que a aba foi carregada
+            });
+        });
+    
         return data;
     }
+
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text)
+            .then(() => console.log("📋 Link copiado com sucesso!"))
+            .catch(err => console.error("Erro ao copiar: ", err));
+    }    
 
     // Fluxo principal: obtém o token, verifica ou cria a pasta e realiza o upload do arquivo
     try {
