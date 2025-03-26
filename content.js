@@ -280,7 +280,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (isRecording || recorder || window.isRequestingScreen) {
             return;
         }
-        
+
         window.isRequestingScreen = true;
 
         initRecording().then(() => {
@@ -560,12 +560,12 @@ function injectStyles() {
         #solutto-gravador-controls #grab-control {
             color: #999999;
         }
-        #solutto-gravador-controls .rounded-btn {
+        #solutto-gravador-controls .solutto-rounded-btn {
             background: none;
             border: none;
             display: grid;
         }
-        #solutto-gravador-controls .rounded-btn:disabled i {
+        #solutto-gravador-controls .solutto-rounded-btn:disabled i {
             color: #999999;
             cursor: default;
         }
@@ -610,13 +610,13 @@ function createRecorderControls() {
 
     // Botões para pausar e retomar a gravação
     const playButton = document.createElement("button");
-    playButton.className = "rounded-btn play";
+    playButton.className = "solutto-rounded-btn play";
     playButton.disabled = true;
     playButton.innerHTML = '<i class="fa-solid fa-circle-play"></i>';
     elapsedTime.appendChild(playButton);
 
     const pauseButton = document.createElement("button");
-    pauseButton.className = "rounded-btn pause";
+    pauseButton.className = "solutto-rounded-btn pause";
     pauseButton.disabled = true;
     pauseButton.innerHTML = '<i class="fa-solid fa-circle-pause"></i>';
     elapsedTime.appendChild(pauseButton);
@@ -633,14 +633,14 @@ function createRecorderControls() {
     actionsDiv.className = "actions";
 
     const stopButton = document.createElement("button");
-    stopButton.className = "rounded-btn submit";
+    stopButton.className = "solutto-rounded-btn submit";
     stopButton.id = "stop-recording";
     stopButton.disabled = true;
     stopButton.innerHTML = '<i class="fa-solid fa-circle-check"></i>';
     actionsDiv.appendChild(stopButton);
 
     const deleteButton = document.createElement("button");
-    deleteButton.className = "rounded-btn delete";
+    deleteButton.className = "solutto-rounded-btn delete";
     deleteButton.id = "delete-recording";
     deleteButton.disabled = true;
     deleteButton.innerHTML = '<i class="fa-solid fa-trash"></i>';

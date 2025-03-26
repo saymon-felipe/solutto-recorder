@@ -231,6 +231,7 @@
     align-items: center;
     margin-bottom: 1.3rem;
     position: relative;
+    border-bottom: 1px solid #e6e6e6;
 
     & .source {
         flex: 1;
