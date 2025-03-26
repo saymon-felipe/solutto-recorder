@@ -260,10 +260,17 @@ function start() {
     // Define o timeout de gravação conforme a escolha do usuário
     let recordTimeout = useTimeout ? timeoutSeconds : 0;
 
+    let microfoneId = document.getElementById("microphone").value || null;
+    let webcamId = document.getElementById("camera").value || null;
+
+    if (recordingType === "webcam" && !webcamId) {
+      alert("Selecione uma câmera para gravar");
+      return;
+    }
+
     // Consulta a aba ativa para enviar a solicitação de gravação
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      let microfoneId = document.getElementById("microphone").value || null;
-      let webcamId = document.getElementById("camera").value || null;
+      
 
       chrome.tabs.sendMessage(tabs[0].id, {
         action: "request_recording",

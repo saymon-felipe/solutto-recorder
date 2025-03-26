@@ -280,6 +280,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (isRecording || recorder || window.isRequestingScreen) {
             return;
         }
+        
         window.isRequestingScreen = true;
 
         initRecording().then(() => {
@@ -371,6 +372,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     if (microfoneStream) {
                         trilhas.push(...microfoneStream.getAudioTracks());
                     }
+                    
                     if (webcamStream) {
                         createWebcamElement(webcamStream);
                     }
