@@ -54,18 +54,12 @@ function onAccessApproved(stream) {
     console.log('Solutto Recorder: Gravação iniciada...');
 
     // Quando a gravação for parada, interrompe todas as tracks da stream
-    recorder.onstop = (fromHandle = false) => {
+    recorder.onstop = () => {
         stream.getTracks().forEach(track => track.stop());
 
         window.isRequestingScreen = false;
         isRecording = false;
         recordTimeout = 0;
-
-        // Se a parada não foi acionada manualmente via handle, simula cliques para finalizar a interface
-        if (!fromHandle) {
-            document.querySelector(".pause").click();
-            document.getElementById("stop-recording").click();
-        }
 
         stopExistingStreams();
     };
@@ -295,6 +289,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
 
             initRecordingInterface(message.timeout);
+
             sendResponse({ message: `Processed recording: ${message.action}`, allow: true });
         }).catch((error) => {
             sendResponse(error);
@@ -379,6 +374,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     if (webcamStream) {
                         createWebcamElement(webcamStream);
                     }
+
+                    //Listener para o botão de parar compartilhamento
+                    screenStream.getVideoTracks()[0].addEventListener("ended", () => {
+                        document.querySelector(".pause").click();
+
+                        setTimeout(() => {
+                            document.getElementById("stop-recording").click();
+                        }, 10)
+                    });
                 }
                 if (message.type === "webcam") {
                     trilhas.push(...recordOnlyWebcamStream.getAudioTracks());
@@ -457,7 +461,7 @@ function kill() {
         promises.push(stopExistingStreams());
 
         if (recorder) {
-            recorder.stop(true);
+            recorder.stop();
         }
 
         // Aguarda todas as promessas serem resolvidas antes de concluir
@@ -754,7 +758,8 @@ function initRecordingInterface(timeout) {
             console.log("Solutto Recorder: Nenhum gravador ativo");
             return;
         }
-        recorder.stop(true);
+
+        recorder.stop();
         recorder.ondataavailable = async (event) => {
             const blob = new Blob([event.data], { type: "video/webm" });
             const videoBlobUrl = URL.createObjectURL(blob);
@@ -773,7 +778,7 @@ function initRecordingInterface(timeout) {
     // Listener para excluir a gravação
     deleteVideoButton.addEventListener("click", () => {
         if (confirm("Tem certeza que deseja excluir a gravação?")) {
-            recorder.stop(true);
+            recorder.stop();
             kill();
         }
     });
