@@ -197,6 +197,8 @@ async function handleDownloadFile() {
 
     link.href = videoElement.src;
 
+    let exportType = "mp4";
+
     // Atualiza o atributo que indica o formato do arquivo
     videoElement.setAttribute("file-format", exportType);
 
