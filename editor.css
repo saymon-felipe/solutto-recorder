@@ -135,6 +135,7 @@ video {
     border-radius: 8px;
     padding: 1rem;
     max-width: 530px;
+    position: relative;
 }
 
 .export-buttons {
@@ -256,9 +257,22 @@ video {
 .loading {
     border: 2px dashed #00aab3;
     border-radius: 8px;
-    height: 200px;
+    height: 100%;
+    width: 100%;
+    backdrop-filter: blur(2px);
+    position: relative;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    left: 0;
     display: grid;
     place-items: center;
-    margin-top: 1rem;
     display: none;
+    z-index: 3;
+    background: rgba(255, 255, 255, 0.5);
+
+    & .system-loading {
+        margin-top: 6px;
+    }
 }
