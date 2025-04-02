@@ -1,4 +1,5 @@
 var downloadRequested = false;
+var videoFileName = "";
 
 // Recupera as configurações do vídeo armazenadas no Chrome Storage
 chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
@@ -16,8 +17,14 @@ chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
 
         loadingElement.style.display = "block";
 
+        //Nomeia o arquivo com a data e hora que ele foi gravado
+        const now = new Date();
+        const formattedDate = now.toLocaleDateString("en-CA");
+        const formattedTime = now.toTimeString().slice(0, 5).replace(":", "-");
+        videoFileName = `solutto-recorder-${formattedDate}_${formattedTime}`;
+
         // Transcodifica o vídeo para o formato MP4, aplicando o timeout, e define a URL resultante como fonte do vídeo
-        videoElement.src = await transcode(videoUrl, "mp4", videoTimeout);
+        videoElement.src = await transcode(videoUrl, "mp4", videoTimeout, videoFileName);
 
         // Define um atributo customizado para indicar o formato do arquivo
         videoElement.setAttribute("file-format", "mp4");
@@ -167,7 +174,8 @@ async function uploadToDrive() {
         chrome.runtime.sendMessage({
             action: "upload-file",
             format: videoElement.getAttribute("file-format"),
-            file: Array.from(new Uint8Array(buffer))
+            file: Array.from(new Uint8Array(buffer)),
+            fileName: videoFileName
         }, (response) => {
             console.log(response)
 
@@ -204,12 +212,10 @@ async function handleDownloadFile() {
 
     // Gera um nome único para o arquivo utilizando data e hora atuais
     const now = new Date();
-    const formattedDate = now.toLocaleDateString("pt-BR").replace(/\//g, "-");
-    const formattedTime = now.toTimeString().slice(0, 5).replace(":", "-");
-    const fileName = `solutto-recorder-${formattedDate}_${formattedTime}.`;
+    const formattedTime = now.getMilliseconds();
 
     // Define o nome para o download conforme o formato escolhido
-    link.download = fileName + (exportType != "mp4" ? "webm" : "mp4");
+    link.download = videoFileName + "_" + formattedTime + "." + (exportType != "mp4" ? "webm" : "mp4");
 
     // Simula o clique para iniciar o download e remove o link do DOM
     document.body.appendChild(link);

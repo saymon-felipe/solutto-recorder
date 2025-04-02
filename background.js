@@ -138,16 +138,10 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         const fileBlob = new Blob([new Uint8Array(message.file)], { type: "video/" + message.format });
 
         if (fileBlob) {
-            // Formata a data e hora para criar um nome único para o arquivo
-            const now = new Date();
-            const formattedDate = now.toLocaleDateString("pt-BR").replace(/\//g, "-"); // Ex: "18-03-2025"
-            const formattedTime = now.toTimeString().slice(0, 5).replace(":", "-"); // Ex: "00-44"
-            const fileName = `solutto-gravador-${formattedDate}_${formattedTime}.` + message.format;
-            
             sendResponse({ status: 'upload-iniciado' });
             
             // Realiza o upload para o Google Drive
-            await uploadToDrive(fileBlob, fileName);
+            await uploadToDrive(fileBlob, message.fileName);
             
         } else {
             sendResponse({ status: 'erro', message: 'Arquivo não encontrado' });

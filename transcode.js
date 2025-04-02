@@ -42,7 +42,7 @@ function logger(message) {
  * @param {number} timeout - Tempo (em segundos) a partir do qual a transcodificação deve iniciar.
  * @returns {Promise<string>} - URL do objeto Blob resultante da transcodificação.
  */
-async function transcode(file, format, timeout) {
+async function transcode(file, format, timeout, videoFileName) {
     // Carrega o FFmpeg se ainda não estiver carregado
     if (!ffmpeg.loaded) {
         const deviceMemory = navigator.deviceMemory || 4; // Utiliza 4GB como padrão se não suportado
@@ -55,11 +55,7 @@ async function transcode(file, format, timeout) {
         });
     }
 
-    // Gera um nome único para o arquivo com base na data e hora atual
-    const now = new Date();
-    const formattedDate = now.toLocaleDateString("pt-BR").replace(/\//g, "-"); // Ex: "18-03-2025"
-    const formattedTime = now.toTimeString().slice(0, 5).replace(":", "-");
-    fileName = `solutto-gravador-${formattedDate}_${formattedTime}`;
+    fileName = videoFileName;
 
     // Define a lista de comandos para a transcodificação
     const commandList = [

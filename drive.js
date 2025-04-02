@@ -2,6 +2,12 @@ export async function uploadToDrive(fileBlob, fileName) {
     // Nome da pasta onde os arquivos serão salvos no Google Drive
     const folderName = 'Solutto Recorder';
 
+    //Adiciona ao nome do arquivo o milissegundo da solicitação de upload
+    const now = new Date();
+    const formattedTime = now.getMilliseconds();
+    
+    fileName += "_" + formattedTime;
+
     /**
      * Obtém o token de autenticação OAuth2 necessário para acessar a API do Google Drive.
      * Utiliza chrome.identity.launchWebAuthFlow para iniciar o fluxo de autenticação.
