@@ -14,6 +14,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       chrome.tabs.create({ url: chrome.runtime.getURL("editor.html") });
     });
   }
+
+  if (message.action === "requestStream") {
+    chrome.tabCapture.getMediaStreamId({ consumerTabId: message.tabId }, (streamId) => {
+      sendResponse(streamId);
+    })    
+
+    return true;
+  }
 });
 
 /**
@@ -277,7 +285,8 @@ function start() {
         type: recordingType,
         microfoneId: microfoneId,
         webcamId: webcamId,
-        timeout: recordTimeout
+        timeout: recordTimeout,
+        tabId: tabs[0].id
       }, (response) => {
         if (!chrome.runtime.lastError) {
           if (response.allow) {

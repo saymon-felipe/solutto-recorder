@@ -305,35 +305,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
      * @returns {Promise} Resolvida quando as streams são obtidas e combinadas.
      */
     function initRecording() {
-        return new Promise((resolve, reject) => {
+        return new Promise(async (resolve, reject) => {
             let mediaPromise = [];
             let screenStream, microfoneStream, webcamStream, recordOnlyWebcamStream;
 
             if (message.type === "screen" || message.type === "tab") {
-                let options;
-
                 if (message.type === "tab") {
-                    options = {
-                        displaySurface: "browser",
-                        preferCurrentTab: true
-                    }
-                } else {
-                    options = {
-                        displaySurface: "monitor"
-                    }
-                }
+                    let streamId = await chrome.runtime.sendMessage({ action: "requestStream", tabId: message.tabId });
 
-                // Solicita a captura da tela
-                mediaPromise.push(
-                    navigator.mediaDevices.getDisplayMedia({
-                        audio: true,
-                        video: { 
-                            width: 999999999, 
-                            height: 999999999,
-                            ...options
+                    let constraints = {
+                        audio: {
+                            mandatory: {
+                            chromeMediaSource: "tab",
+                            chromeMediaSourceId: streamId,
+                            },
+                        },
+                        video: {
+                            mandatory: {
+                                chromeMediaSource: "tab",
+                                chromeMediaSourceId: streamId,
+                                maxWidth: 1280,
+                                maxHeight: 720,
+                                maxFrameRate: 30
+                            }
                         }
-                    }).then((stream) => { screenStream = stream; })
-                );
+                    }
+
+                    screenStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+                    mediaPromise.push( new Promise((resolve) => { resolve() }) );
+                } else {
+                    mediaPromise.push(
+                        navigator.mediaDevices.getDisplayMedia({
+                            audio: true,
+                            video: { 
+                                width: 999999999, 
+                                height: 999999999,
+                                displaySurface: "monitor"
+                            }
+                        }).then((stream) => { screenStream = stream; })
+                    )
+                }                
+
                 // Se o ID do microfone foi informado, solicita a captura do áudio
                 if (message.microfoneId) {
                     mediaPromise.push(
@@ -367,8 +380,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             Promise.all(mediaPromise).then(() => {
                 // Combina as tracks de vídeo (e áudio, se houver) conforme o tipo de gravação
-                let trilhas = message.type === "screen" ? [...screenStream.getVideoTracks()] : [...recordOnlyWebcamStream.getVideoTracks()];
-                if (message.type === "screen") {
+                let trilhas = message.type === "screen" || message.type === "tab" ? [...screenStream.getVideoTracks()] : [...recordOnlyWebcamStream.getVideoTracks()];
+                if (message.type === "screen" || message.type === "tab") {
                     if (microfoneStream) {
                         trilhas.push(...microfoneStream.getAudioTracks());
                     }
