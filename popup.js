@@ -205,6 +205,13 @@ function start() {
   const microphoneSelectElement = document.getElementById("microphone");
   const waitSecondsElement = document.getElementById("wait-seconds");
   const timeoutCheckboxElement = document.getElementById("use-wait-seconds");
+  const wrapper = document.getElementById("solutto-recorder-wrapper");
+
+  wrapper.addEventListener("click", () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      chrome.tabs.sendMessage(tabs[0].id, { action: "kill" });
+    });
+  })
 
   // Atualiza o valor de "waitSeconds" no armazenamento local quando alterado
   waitSecondsElement.addEventListener("change", (e) => {
