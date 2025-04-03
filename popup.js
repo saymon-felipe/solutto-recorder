@@ -9,7 +9,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Armazena as configurações do vídeo e abre a página do editor
     chrome.storage.local.set({
       videoUrl: message.videoUrl,
-      videoTimeout: message.videoTimeout
+      videoTimeout: message.videoTimeout,
+      blobBase64: message.blobBase64
     }, () => {
       chrome.tabs.create({ url: chrome.runtime.getURL("editor.html") });
     });

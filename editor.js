@@ -1,11 +1,44 @@
 var downloadRequested = false;
 var videoFileName = "";
+var fileExtension = "webm";
+
+async function getCorrectVideoDuration(videoElement) {
+    return new Promise((resolve) => {
+        if (videoElement.duration !== Infinity) {
+            return resolve(videoElement.duration);
+        }
+
+        videoElement.currentTime = 99999999; // Força a carregar o último frame
+        videoElement.ontimeupdate = () => {
+            videoElement.ontimeupdate = null; // Remove o listener depois de executar
+            videoElement.currentTime = 0; // Reseta o tempo para o início
+            resolve(videoElement.duration);
+        };
+    });
+}
+
+function base64ToBlob(base64, mimeType) {
+    const byteCharacters = atob(base64);
+    const byteArrays = [];
+
+    for (let i = 0; i < byteCharacters.length; i += 512) {
+        const slice = byteCharacters.slice(i, i + 512);
+        const byteNumbers = new Array(slice.length);
+        for (let j = 0; j < slice.length; j++) {
+            byteNumbers[j] = slice.charCodeAt(j);
+        }
+        byteArrays.push(new Uint8Array(byteNumbers));
+    }
+
+    return new Blob(byteArrays, { type: mimeType });
+}
 
 // Recupera as configurações do vídeo armazenadas no Chrome Storage
-chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
+chrome.storage.local.get(["videoUrl", "videoTimeout", "blobBase64"], async (data) => {
     const videoUrl = data.videoUrl;
     // Define o tempo de espera (timeout) com valor padrão 0 se não estiver definido
     const videoTimeout = data.videoTimeout || 0;
+    const blobBase64 = data.blobBase64;
 
     // Se houver uma URL de vídeo armazenada, inicia o carregamento e configuração do player
     if (videoUrl) {
@@ -24,16 +57,24 @@ chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
         videoFileName = `solutto-recorder-${formattedDate}_${formattedTime}`;
 
         // Transcodifica o vídeo para o formato MP4, aplicando o timeout, e define a URL resultante como fonte do vídeo
-        videoElement.src = await transcode(videoUrl, "mp4", videoTimeout, videoFileName);
+
+        //videoElement.src = await transcode(videoUrl, "mp4", videoTimeout, videoFileName);
+        videoElement.preload = "metadata";
+        videoElement.src = videoUrl;
+
+        insertInitialBlob(base64ToBlob(blobBase64), videoFileName);
 
         // Define um atributo customizado para indicar o formato do arquivo
-        videoElement.setAttribute("file-format", "mp4");
+        videoElement.setAttribute("file-format", fileExtension);
 
         // Carrega o vídeo
         videoElement.load();
 
         // Configura os controles da interface após os metadados do vídeo serem carregados
-        videoElement.addEventListener("loadedmetadata", () => {
+        videoElement.addEventListener("loadedmetadata", async () => {
+            let newDuration = await getCorrectVideoDuration(videoElement);
+
+            videoElement.duration = newDuration;
             loadingElement.style.display = "none";
 
             // Obtém os elementos da interface para o controle de corte e exibição de tempo
@@ -144,8 +185,10 @@ function handleCutVideo() {
 
     loadingElement.style.display = "block";
 
+    fileExtension = "mp4";
+
     // Realiza o corte do vídeo chamando a função cutVideo, convertendo os tempos para segundos
-    cutVideo("mp4", timeToSeconds(startTime), timeToSeconds(endTime)).then((videoUrl) => {
+    cutVideo(fileExtension, timeToSeconds(startTime), timeToSeconds(endTime)).then((videoUrl) => {
         // Atualiza a fonte do vídeo com a URL resultante do corte
         videoElement.src = videoUrl;
         // Reinicia os controles de faixa para os valores padrão
@@ -205,17 +248,15 @@ async function handleDownloadFile() {
 
     link.href = videoElement.src;
 
-    let exportType = "mp4";
-
     // Atualiza o atributo que indica o formato do arquivo
-    videoElement.setAttribute("file-format", exportType);
+    videoElement.setAttribute("file-format", fileExtension);
 
     // Gera um nome único para o arquivo utilizando data e hora atuais
     const now = new Date();
     const formattedTime = now.getMilliseconds();
 
     // Define o nome para o download conforme o formato escolhido
-    link.download = videoFileName + "_" + formattedTime + "." + (exportType != "mp4" ? "webm" : "mp4");
+    link.download = videoFileName + "_" + formattedTime + "." + (fileExtension != "mp4" ? "webm" : "mp4");
 
     // Simula o clique para iniciar o download e remove o link do DOM
     document.body.appendChild(link);

@@ -33,6 +33,11 @@ function logger(message) {
     console.log(message);
 }
 
+function insertInitialBlob(blob, videoFileName) {
+    videoBlob = blob;
+    fileName = videoFileName;
+}
+
 /**
  * Transcodifica um arquivo de vídeo para o formato especificado.
  * Se o FFmpeg não estiver carregado, ele é carregado com a quantidade de memória apropriada.
@@ -141,13 +146,17 @@ async function cutVideo(format, startTime, duration) {
         console.warn(`Aviso: Nenhum arquivo anterior encontrado para remover (${fileName})`);
     }
 
-    // Escreve o blob do vídeo atual para o FFmpeg
-    await ffmpeg.writeFile(fileName, await fetchFile(videoBlob));
-    // Executa os comandos para cortar o vídeo
-    await ffmpeg.exec(commandList);
-    // Lê o arquivo de saída gerado após o corte
-    const data = await ffmpeg.readFile(fileName + "." + format);
-    const blob = new Blob([data.buffer]);
-    videoBlob = blob; // Atualiza a variável global com o blob do vídeo cortado
-    return URL.createObjectURL(blob);
+    try {
+        // Escreve o blob do vídeo atual para o FFmpeg
+        await ffmpeg.writeFile(fileName, await fetchFile(videoBlob));
+        // Executa os comandos para cortar o vídeo
+        await ffmpeg.exec(commandList);
+        // Lê o arquivo de saída gerado após o corte
+        const data = await ffmpeg.readFile(fileName + "." + format);
+        const blob = new Blob([data.buffer]);
+        videoBlob = blob; // Atualiza a variável global com o blob do vídeo cortado
+        return URL.createObjectURL(blob);
+    } catch (error) {
+        console.error(`Erro: (${error})`);
+    }
 }

@@ -41,7 +41,7 @@ if (!window.contentScriptInjected) {
  *
  * @param {MediaStream} stream - Stream de mídia combinada (vídeo, áudio e/ou webcam).
  */
-function onAccessApproved(stream) {
+function onAccessApproved(stream, timeout) {
     if (recorder) {
         console.log("Solutto Recorder: Uma gravação já está em andamento.");
         return;
@@ -49,9 +49,12 @@ function onAccessApproved(stream) {
 
     recordStream = stream;
     recorder = new MediaRecorder(stream);
-    isRecording = true;
-    recorder.start();
-    console.log('Solutto Recorder: Gravação iniciada...');
+   
+    setTimeout(() => {
+        recorder.start();
+        isRecording = true;
+        console.log('Solutto Recorder: Gravação iniciada...');
+    }, timeout * 1000)
 
     // Quando a gravação for parada, interrompe todas as tracks da stream
     recorder.onstop = () => {
@@ -283,7 +286,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         window.isRequestingScreen = true;
 
-        initRecording().then(() => {
+        initRecording(message.timeout).then(() => {
             if (message.timeout > 0) {
                 recordTimeout = message.timeout;
                 createTimeoutElement(message.timeout);
@@ -304,7 +307,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
      *
      * @returns {Promise} Resolvida quando as streams são obtidas e combinadas.
      */
-    function initRecording() {
+    function initRecording(timeout) {
         return new Promise(async (resolve, reject) => {
             let mediaPromise = [];
             let screenStream, microfoneStream, webcamStream, recordOnlyWebcamStream;
@@ -405,7 +408,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
 
                 const streamCombinado = new MediaStream(trilhas);
-                onAccessApproved(streamCombinado);
+                onAccessApproved(streamCombinado, timeout);
                 resolve();
             }).catch((error) => {
                 window.isRequestingScreen = false;
@@ -724,6 +727,15 @@ function stopTimer() {
     document.getElementById("elapsed-time").innerHTML = "00:00:00";
 }
 
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(",")[1]); // Remove "data:mime;base64,"
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
 /*************************************
  * Funções para Ações na Interface
  *************************************/
@@ -734,8 +746,10 @@ function stopTimer() {
  * @param {number} recordTimeout - Timeout definido.
  * @param {string} url - URL do editor (geralmente "editor.html").
  */
-function openEditorTab(videoBlobUrl, recordTimeout, url) {
-    chrome.runtime.sendMessage({ action: "openEditor", videoUrl: videoBlobUrl, videoTimeout: recordTimeout });
+async function openEditorTab(videoBlobUrl, recordTimeout, blob) {
+    let blobBase64 = await blobToBase64(blob);
+
+    chrome.runtime.sendMessage({ action: "openEditor", videoUrl: videoBlobUrl, videoTimeout: recordTimeout, blobBase64: blobBase64 });
 }
 
 /**
@@ -778,7 +792,7 @@ function initRecordingInterface(timeout) {
         recorder.ondataavailable = async (event) => {
             const blob = new Blob([event.data], { type: "video/webm" });
             const videoBlobUrl = URL.createObjectURL(blob);
-            openEditorTab(videoBlobUrl, recordTimeout, "editor.html");
+            openEditorTab(videoBlobUrl, recordTimeout, blob);
 
             // Desabilita controles após finalizar
             document.querySelector(".play").setAttribute("disabled", true);

@@ -148,7 +148,7 @@ export async function uploadToDrive(fileBlob, fileName) {
         const fileUrl = `https://drive.google.com/file/d/${data.id}/view`;
     
         // Abre a pasta e o link do arquivo
-        //chrome.tabs.create({ url: `https://drive.google.com/drive/u/0/folders/${folderId}` });
+        chrome.tabs.create({ url: `https://drive.google.com/drive/u/0/folders/${folderId}` });
         chrome.tabs.create({ url: fileUrl }, (tab) => {
             chrome.tabs.update(tab.id, { active: true }, () => {
                 setTimeout(() => {
