@@ -121,12 +121,11 @@ chrome.action.onClicked.addListener(async function (tab) {
  * Listener para atualizações nas abas.
  * Quando a aba é carregada completamente e a URL é válida, injeta o script de conteúdo.
  */
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status === "complete" && /^http/.test(tab.url)) {
-        addContentScript(tabId);
+chrome.webNavigation.onCompleted.addListener(details => {
+    if (details.frameId === 0 && /^http/.test(details.url)) {
+        addContentScript(details.tabId);
     }
 });
-
 /**
  * Listener para mensagens enviadas ao background.
  */
