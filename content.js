@@ -21,6 +21,7 @@ if (!window.contentScriptInjected) {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === "removeContentScript") {
             delete window.contentScriptInjected; // Remove a flag de injeção
+            
             sendResponse({ success: true });
             return;
         }
@@ -310,7 +311,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     function initRecording(timeout) {
         return new Promise(async (resolve, reject) => {
             let mediaPromise = [];
-            let screenStream, microfoneStream, webcamStream, recordOnlyWebcamStream;
+            let screenStream, microfoneStream, webcamStream, recordOnlyWebcamStream, screenAudioStream;
 
             if (message.type === "screen" || message.type === "tab") {
                 if (message.type === "tab") {
@@ -319,8 +320,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     let constraints = {
                         audio: {
                             mandatory: {
-                            chromeMediaSource: "tab",
-                            chromeMediaSourceId: streamId,
+                                chromeMediaSource: "tab",
+                                chromeMediaSourceId: streamId,
                             },
                         },
                         video: {
@@ -334,7 +335,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         }
                     }
 
-                    screenStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    
+
+                    let stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+                    screenStream = stream;
+                    screenAudioStream = stream.getAudioTracks();
 
                     mediaPromise.push( new Promise((resolve) => { resolve() }) );
                 } else {
@@ -346,7 +352,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                                 height: 999999999,
                                 displaySurface: "monitor"
                             }
-                        }).then((stream) => { screenStream = stream; })
+                        }).then((stream) => { 
+                            screenStream = stream; 
+                            screenAudioStream = stream.getAudioTracks();
+                        })
                     )
                 }                
 
@@ -385,6 +394,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // Combina as tracks de vídeo (e áudio, se houver) conforme o tipo de gravação
                 let trilhas = message.type === "screen" || message.type === "tab" ? [...screenStream.getVideoTracks()] : [...recordOnlyWebcamStream.getVideoTracks()];
                 if (message.type === "screen" || message.type === "tab") {
+                    if (screenAudioStream) {
+                        trilhas.push(...screenAudioStream);
+                    }
+                    
                     if (microfoneStream) {
                         trilhas.push(...microfoneStream.getAudioTracks());
                     }
@@ -792,6 +805,7 @@ function initRecordingInterface(timeout) {
         recorder.ondataavailable = async (event) => {
             const blob = new Blob([event.data], { type: "video/webm" });
             const videoBlobUrl = URL.createObjectURL(blob);
+
             openEditorTab(videoBlobUrl, recordTimeout, blob);
 
             // Desabilita controles após finalizar

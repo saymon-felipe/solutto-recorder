@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Solutto Recorder",
-    "version": "3.0.1",
+    "version": "3.0.3",
     "description": "Solutto Recorder faz gravação da tela ou webcam. Após gravar, baixe o MP4 ou envie rapidamente para o seu Google Drive.",
     "permissions": [
       "tabs",
@@ -12,7 +12,8 @@
       "desktopCapture",
       "downloads",
       "identity",
-      "clipboardWrite"
+      "clipboardWrite",
+      "webNavigation"
     ],
     "background": {
       "service_worker": "background.js",
