@@ -840,12 +840,9 @@ function blobToBase64(blob) {
  *
  * @param {string} videoBlobUrl - URL do blob do vídeo.
  * @param {number} recordTimeout - Timeout definido.
- * @param {string} url - URL do editor (geralmente "editor.html").
  */
-async function openEditorTab(videoBlobUrl, recordTimeout, blob) {
-    let blobBase64 = await blobToBase64(blob);
-    
-    chrome.runtime.sendMessage({ action: "openEditor", videoUrl: videoBlobUrl, videoTimeout: recordTimeout, blobBase64: blobBase64 });
+async function openEditorTab(videoBlobUrl, recordTimeout) {    
+    chrome.runtime.sendMessage({ action: "openEditor", videoUrl: videoBlobUrl, videoTimeout: recordTimeout });
 
     closePlaybackTab();
 }

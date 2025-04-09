@@ -17,28 +17,18 @@ async function getCorrectVideoDuration(videoElement) {
     });
 }
 
-function base64ToBlob(base64, mimeType) {
-    const byteCharacters = atob(base64);
-    const byteArrays = [];
-
-    for (let i = 0; i < byteCharacters.length; i += 512) {
-        const slice = byteCharacters.slice(i, i + 512);
-        const byteNumbers = new Array(slice.length);
-        for (let j = 0; j < slice.length; j++) {
-            byteNumbers[j] = slice.charCodeAt(j);
-        }
-        byteArrays.push(new Uint8Array(byteNumbers));
-    }
-
-    return new Blob(byteArrays, { type: mimeType });
+async function blobFromBlobUrl(blobUrl) {
+    const response = await fetch(blobUrl);
+    const blob = await response.blob();
+    return blob;
 }
 
 // Recupera as configurações do vídeo armazenadas no Chrome Storage
-chrome.storage.local.get(["videoUrl", "videoTimeout", "blobBase64"], async (data) => {
+chrome.storage.local.get(["videoUrl", "videoTimeout"], async (data) => {
     const videoUrl = data.videoUrl;
     // Define o tempo de espera (timeout) com valor padrão 0 se não estiver definido
-    const videoTimeout = data.videoTimeout || 0;
-    const blobBase64 = data.blobBase64;
+    //const videoTimeout = data.videoTimeout || 0;
+    const blob = await blobFromBlobUrl(videoUrl);
 
     // Se houver uma URL de vídeo armazenada, inicia o carregamento e configuração do player
     if (videoUrl) {
@@ -62,7 +52,7 @@ chrome.storage.local.get(["videoUrl", "videoTimeout", "blobBase64"], async (data
         videoElement.preload = "metadata";
         videoElement.src = videoUrl;
 
-        insertInitialBlob(base64ToBlob(blobBase64), videoFileName);
+        insertInitialBlob(blob, videoFileName);
 
         // Define um atributo customizado para indicar o formato do arquivo
         videoElement.setAttribute("file-format", fileExtension);
