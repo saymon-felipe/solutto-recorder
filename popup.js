@@ -16,10 +16,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
   }
 
+  if (message.action === "closePlaybackTab") {
+    chrome.tabs.remove(message.playbackTab);
+
+    sendResponse(`Processed: ` + message.action);
+  }
+
   if (message.action === "requestStream") {
     chrome.tabCapture.getMediaStreamId({ consumerTabId: message.tabId }, (streamId) => {
       sendResponse(streamId);
     })    
+
+    return true;
+  }
+
+  if (message.action === "openPlaybackTab") {
+    chrome.storage.local.set({
+      tabId:  message.tabId
+    }, () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL("playback.html"), active: false }, (tab) => { 
+        sendResponse({ message: "Processed: " + message.action, playbackTab: tab.id  });
+      });      
+    });
 
     return true;
   }

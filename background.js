@@ -1,4 +1,4 @@
-import { uploadToDrive } from './drive.js';
+importScripts('drive.js')
 
 // Flag para indicar se o content script já foi injetado
 let added = false;
@@ -126,10 +126,14 @@ chrome.webNavigation.onCompleted.addListener(details => {
         addContentScript(details.tabId);
     }
 });
+
+let ports = [];
+
 /**
  * Listener para mensagens enviadas ao background.
  */
 chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+    ports.push({ sender, message });
 
     // Ação para upload de arquivo
     if (message.action === 'upload-file') {
@@ -145,8 +149,31 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         } else {
             sendResponse({ status: 'erro', message: 'Arquivo não encontrado' });
         }
-
-        // Indica que a resposta será enviada de forma assíncrona
-        return true;
     }
+
+    if (message.action === 'ready-to-receive') {
+        ports.forEach(p => {
+            if (p.message.action === 'offer') {
+            chrome.tabs.sendMessage(sender.tab.id, { action: 'offer', offer: p.message.offer });
+            }
+        });
+    }
+
+    if (message.action === 'answer') {
+        ports.forEach(p => {
+            if (p.message.action === 'offer') {
+            chrome.tabs.sendMessage(p.sender.tab.id, { action: 'answer', answer: message.answer });
+            }
+        });
+    }
+
+    if (message.action === 'candidate') {
+        ports.forEach(p => {
+            if (p.sender.tab.id !== sender.tab.id) {
+            chrome.tabs.sendMessage(p.sender.tab.id, { action: 'candidate', candidate: message.candidate });
+            }
+        });
+    }
+
+    return true;
 });

@@ -1,4 +1,4 @@
-export async function uploadToDrive(fileBlob, fileName) {
+async function uploadToDrive(fileBlob, fileName) {
     // Nome da pasta onde os arquivos serão salvos no Google Drive
     const folderName = 'Solutto Recorder';
 

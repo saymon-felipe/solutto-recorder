@@ -9,6 +9,12 @@ var recordTimeout = 0;
 var elapsedSeconds = 0;
 var timerInterval = null;
 var isPaused = false;
+var playbackTab = null;
+
+var pc;
+var localStream = null;
+var pendingAnswer = null;
+var recordType = null;
 
 /*************************************
  * Injeção Única do Content Script
@@ -18,13 +24,30 @@ if (!window.contentScriptInjected) {
     window.contentScriptInjected = true;
 
     // Listener para remover o content script quando solicitado
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         if (message.action === "removeContentScript") {
             delete window.contentScriptInjected; // Remove a flag de injeção
             
             sendResponse({ success: true });
+
             return;
         }
+
+        try {
+            if (message.action === 'answer') {
+                if (pc && pc.signalingState === 'have-local-offer') {
+                    await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                } else {
+                    pendingAnswer = message.answer; // salva pra aplicar depois
+                }
+            }
+        
+            if (message.action === 'candidate') {
+                if (pc) {
+                    await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+                }
+            }
+        } catch (error) {}
     });
 
     // Injeta dependências visuais: FontAwesome e estilos customizados
@@ -60,6 +83,12 @@ function onAccessApproved(stream, timeout) {
     // Quando a gravação for parada, interrompe todas as tracks da stream
     recorder.onstop = () => {
         stream.getTracks().forEach(track => track.stop());
+
+        const localAudioClone = stream.clone();
+        const localAudioElement = new Audio();
+        localAudioElement.srcObject = localAudioClone;
+        localAudioElement.volume = 1;
+        localAudioElement.play();
 
         window.isRequestingScreen = false;
         isRecording = false;
@@ -302,6 +331,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
+    function initPlaybackRTC(stream) {
+        pc = new RTCPeerConnection();
+
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+        localStream = stream;
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                chrome.runtime.sendMessage({ action: 'candidate', candidate: event.candidate });
+            }
+        };
+
+        (async () => {
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                chrome.runtime.sendMessage({ action: 'offer', offer });
+
+                // Se já tiver uma answer recebida antes do offer, aplica agora
+                if (pendingAnswer) {
+                    await pc.setRemoteDescription(new RTCSessionDescription(pendingAnswer));
+                    pendingAnswer = null;
+                }
+            } catch (err) {
+                console.error("Erro ao iniciar WebRTC:", err);
+            }
+        })();
+    }
+
     /**
      * Inicia a gravação com base no tipo solicitado.
      * Suporta gravação de tela (screen) ou apenas da webcam.
@@ -315,6 +375,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             if (message.type === "screen" || message.type === "tab") {
                 if (message.type === "tab") {
+                    recordType = message.type;
+                    let openedPlaybackObj = await chrome.runtime.sendMessage({ action: "openPlaybackTab" });
                     let streamId = await chrome.runtime.sendMessage({ action: "requestStream", tabId: message.tabId });
 
                     let constraints = {
@@ -322,7 +384,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             mandatory: {
                                 chromeMediaSource: "tab",
                                 chromeMediaSourceId: streamId,
-                            },
+                            }
                         },
                         video: {
                             mandatory: {
@@ -333,14 +395,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                                 maxFrameRate: 30
                             }
                         }
-                    }
+                    }    
 
-                    
+                    screenStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    screenAudioStream = screenStream.getAudioTracks();
 
-                    let stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    initPlaybackRTC(screenStream);
 
-                    screenStream = stream;
-                    screenAudioStream = stream.getAudioTracks();
+                    playbackTab = openedPlaybackObj.playbackTab;
 
                     mediaPromise.push( new Promise((resolve) => { resolve() }) );
                 } else {
@@ -390,15 +452,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 return false;
             }
 
-            Promise.all(mediaPromise).then(() => {
+            async function mixAudioStreams(stream1, stream2) {
+                const context = new AudioContext();
+                const destination = context.createMediaStreamDestination();
+                
+                [stream1, stream2].forEach((stream) => {
+                    const source = context.createMediaStreamSource(stream);
+                    source.connect(destination);
+                });
+                
+                return destination.stream;
+            }
+
+            Promise.all(mediaPromise).then(async () => {
                 // Combina as tracks de vídeo (e áudio, se houver) conforme o tipo de gravação
                 let trilhas = message.type === "screen" || message.type === "tab" ? [...screenStream.getVideoTracks()] : [...recordOnlyWebcamStream.getVideoTracks()];
                 if (message.type === "screen" || message.type === "tab") {
-                    if (screenAudioStream) {
+                    if (screenAudioStream && microfoneStream) {
+                        const audioMix = await mixAudioStreams(
+                            new MediaStream(screenAudioStream),
+                            microfoneStream
+                        );
+                        trilhas.push(...audioMix.getAudioTracks());
+                    } else if (screenAudioStream) {
                         trilhas.push(...screenAudioStream);
-                    }
-                    
-                    if (microfoneStream) {
+                    } else if (microfoneStream) {
                         trilhas.push(...microfoneStream.getAudioTracks());
                     }
                     
@@ -466,6 +544,10 @@ function kill() {
     return new Promise((resolveMaster) => {
         let promises = [];
 
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+        }
+
         // Função auxiliar para ocultar e remover múltiplos elementos
         function removeElements(selector) {
             const elements = document.querySelectorAll(selector);
@@ -493,6 +575,7 @@ function kill() {
 
         if (recorder) {
             recorder.stop();
+            recorder = null;
         }
 
         // Aguarda todas as promessas serem resolvidas antes de concluir
@@ -761,8 +844,16 @@ function blobToBase64(blob) {
  */
 async function openEditorTab(videoBlobUrl, recordTimeout, blob) {
     let blobBase64 = await blobToBase64(blob);
-
+    
     chrome.runtime.sendMessage({ action: "openEditor", videoUrl: videoBlobUrl, videoTimeout: recordTimeout, blobBase64: blobBase64 });
+
+    closePlaybackTab();
+}
+
+function closePlaybackTab() {
+    if (recordType == "tab") {
+        chrome.runtime.sendMessage({ action: "closePlaybackTab", playbackTab: playbackTab });
+    }
 }
 
 /**
@@ -801,7 +892,6 @@ function initRecordingInterface(timeout) {
             return;
         }
 
-        recorder.stop();
         recorder.ondataavailable = async (event) => {
             const blob = new Blob([event.data], { type: "video/webm" });
             const videoBlobUrl = URL.createObjectURL(blob);
@@ -816,6 +906,8 @@ function initRecordingInterface(timeout) {
             stopTimer();
             kill();
         };
+
+        recorder.stop();
     });
 
     // Listener para excluir a gravação

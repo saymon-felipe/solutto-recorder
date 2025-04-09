@@ -16,8 +16,7 @@
       "webNavigation"
     ],
     "background": {
-      "service_worker": "background.js",
-      "type": "module"
+      "service_worker": "background.js"
     },
     "action": {
       "default_icon": {
@@ -39,7 +38,7 @@
     },
     "web_accessible_resources": [
       {
-        "resources": ["assets/*", "popup.html", "popup.js", "content.js", "style.css", "lib/*"],
+        "resources": ["assets/*", "popup.html", "popup.js", "content.js", "style.css", "playback.html", "playback.js", "lib/*"],
         "matches": ["<all_urls>"]
       }
     ],
