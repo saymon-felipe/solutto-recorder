@@ -892,6 +892,8 @@ function initRecordingInterface(timeout) {
             return;
         }
 
+        recorder.stop();
+
         recorder.ondataavailable = async (event) => {
             const blob = new Blob([event.data], { type: "video/webm" });
             const videoBlobUrl = URL.createObjectURL(blob);
@@ -903,11 +905,10 @@ function initRecordingInterface(timeout) {
             document.querySelector(".pause").setAttribute("disabled", true);
             document.querySelector(".submit").setAttribute("disabled", true);
             document.querySelector(".delete").setAttribute("disabled", true);
+
             stopTimer();
             kill();
         };
-
-        recorder.stop();
     });
 
     // Listener para excluir a gravação

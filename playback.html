@@ -2,11 +2,67 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Playback</title>
+    <title>Reprodução Ativa - Solutto Recorder</title>
+    <link rel="shortcut icon" href="/assets/icon.png" type="image/png">
+    <link rel="stylesheet" href="editor.css">
+
+    <style>
+        .pulse-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        margin: 4rem auto;
+        }
+
+        .recording-indicator {
+        width: 30px;
+        height: 30px;
+        background-color: red;
+        border-radius: 50%;
+        box-shadow: 0 0 0 rgba(255, 0, 0, 0.7);
+        animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+        0% {
+            box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7);
+        }
+        70% {
+            box-shadow: 0 0 0 15px rgba(255, 0, 0, 0);
+        }
+        100% {
+            box-shadow: 0 0 0 0 rgba(255, 0, 0, 0);
+        }
+        }
+
+        .pulse-container p {
+        font-size: 1.5rem;
+        color: #333;
+        font-family: Arial, sans-serif;
+        text-align: center;
+        }
+    </style>
 </head>
 <body>
-    
-    <script src="playback.js"></script>
+  <div class="editor">
+    <div class="container">
+      <div class="header-container">
+        <div class="header">
+          <img src="./assets/icon.png" alt="Ícone Solutto" />
+          <h1 class="fontsize-2xl">Solutto Recorder</h1>
+        </div>
+        <a href="https://solutto.com.br" target="_blank">solutto.com.br</a>
+      </div>
+
+      <div class="editor-container">
+        <div class="pulse-container">
+            <div class="recording-indicator"></div>
+            <p>Esta aba está reproduzindo o áudio da gravação</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="playback.js"></script>
 </body>
 </html>
