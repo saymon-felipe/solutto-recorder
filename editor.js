@@ -195,7 +195,7 @@ function handleCutVideo() {
 }
 
 // Função para fazer upload no drive
-async function uploadToDrive() {
+function uploadToDrive() {
     const videoElement = document.getElementById("video");
 
     // Atualiza o botão para indicar que o envio está em andamento
@@ -203,23 +203,23 @@ async function uploadToDrive() {
     document.querySelector("#save-drive span").innerHTML = "Enviando...";
 
     // Converte o blob do vídeo para um array serializável
-    videoBlob.arrayBuffer().then(buffer => {
-        chrome.runtime.sendMessage({
+    videoBlob.arrayBuffer().then(async (buffer) => {
+        let response = await chrome.runtime.sendMessage({
             action: "upload-file",
             format: videoElement.getAttribute("file-format"),
             file: Array.from(new Uint8Array(buffer)),
             fileName: videoFileName
-        }, (response) => {
-            console.log(response)
-
-            // Atualiza a interface do botão após o upload
-            document.querySelector("#save-drive").removeAttribute("disabled");
-            document.querySelector("#save-drive span").innerHTML = "Enviado";
-
-            setTimeout(() => {
-                document.querySelector("#save-drive span").innerHTML = "Salvar no drive e copiar URL";
-            }, 5000);
         });
+
+        console.log(response)
+
+        // Atualiza a interface do botão após o upload
+        document.querySelector("#save-drive").removeAttribute("disabled");
+        document.querySelector("#save-drive span").innerHTML = "Enviado";
+
+        setTimeout(() => {
+            document.querySelector("#save-drive span").innerHTML = "Salvar no drive e copiar URL";
+        }, 5000);
     });
 }
 

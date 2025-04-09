@@ -132,23 +132,24 @@ let ports = [];
 /**
  * Listener para mensagens enviadas ao background.
  */
-chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     ports.push({ sender, message });
 
     // Ação para upload de arquivo
     if (message.action === 'upload-file') {
         // Cria um blob a partir dos dados do arquivo
-        const fileBlob = new Blob([new Uint8Array(message.file)], { type: "video/" + message.format });
+        (async () => {
+            const fileBlob = new Blob([new Uint8Array(message.file)], {
+                type: "video/" + message.format
+            });
 
-        if (fileBlob) {
-            sendResponse({ status: 'upload-iniciado' });
-            
-            // Realiza o upload para o Google Drive
-            await uploadToDrive(fileBlob, message.fileName);
-            
-        } else {
-            sendResponse({ status: 'erro', message: 'Arquivo não encontrado' });
-        }
+            if (fileBlob) {
+                await uploadToDrive(fileBlob, message.fileName);
+                sendResponse({ status: 'upload-iniciado' });
+            } else {
+                sendResponse({ status: 'erro', message: 'Arquivo não encontrado' });
+            }
+        })();
     }
 
     if (message.action === 'ready-to-receive') {
