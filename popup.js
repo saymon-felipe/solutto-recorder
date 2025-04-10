@@ -33,9 +33,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.local.set({
       tabId:  message.tabId
     }, () => {
-      chrome.tabs.create({ url: chrome.runtime.getURL("playback.html"), active: false }, (tab) => { 
+      chrome.tabs.create({ url: chrome.runtime.getURL("playback.html"), active: false, pinned: true, index: 0 }, (tab) => { 
         sendResponse({ message: "Processed: " + message.action, playbackTab: tab.id  });
       });      
+    });
+
+    return true;
+  }
+
+  if (message.action === "closeTabs") {
+    chrome.tabs.query({}, function(tabs) {
+      const tabsToClose = tabs.filter(tab => {
+        return tab.url.startsWith("chrome-extension://") && tab.url.endsWith("playback.html");
+      }).map(tab => tab.id);
+      if (tabsToClose.length > 0) {
+        chrome.tabs.remove(tabsToClose, () => {
+          sendResponse(`Processed: ` + message.action);
+        });
+      }
     });
 
     return true;

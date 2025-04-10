@@ -55,6 +55,10 @@ if (!window.contentScriptInjected) {
     injectStyles();
 }
 
+window.addEventListener("beforeunload", (event) => {
+    kill();
+});  
+
 /*************************************
  * Funções Relacionadas à Gravação
  *************************************/
@@ -565,6 +569,8 @@ function kill() {
             });
         }
 
+        closeTabs();
+
         // Oculta e remove os elementos necessários
         removeElements("#solutto-gravador-camera-preview");
         removeElements("#solutto-gravador-webcam-preview");
@@ -851,6 +857,10 @@ function closePlaybackTab() {
     if (recordType == "tab") {
         chrome.runtime.sendMessage({ action: "closePlaybackTab", playbackTab: playbackTab });
     }
+}
+
+function closeTabs() {
+    chrome.runtime.sendMessage({ action: "closeTabs" });
 }
 
 /**
