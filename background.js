@@ -84,17 +84,17 @@ chrome.action.onClicked.addListener(async function (tab) {
                     });
                 }
 
-                const existingIframe = document.querySelectorAll("#solutto-gravador-iframe");
+                const existingIframe = document.querySelectorAll("#solutto-recorder-iframe");
                 
                 let haveNew = existingIframe.length > 0;
 
                 // Se o iframe já existir, remove-o
                 if (haveNew) {
                     // Oculta e remove os elementos necessários
-                    removeElements("#solutto-gravador-iframe");
-                    removeElements("#solutto-gravador-camera-preview");
-                    removeElements("#solutto-gravador-webcam-preview");
-                    removeElements("#solutto-gravador-controls");
+                    removeElements("#solutto-recorder-iframe");
+                    removeElements("#solutto-recorder-camera-preview");
+                    removeElements("#solutto-recorder-webcam-preview");
+                    removeElements("#solutto-recorder-controls");
                     return;
                 }
 
@@ -109,7 +109,7 @@ chrome.action.onClicked.addListener(async function (tab) {
                 iframe.style.border = "none";
                 iframe.style.zIndex = "99999";
                 iframe.style.transition = "opacity 0.4s ease-in-out";
-                iframe.setAttribute("id", "solutto-gravador-iframe");
+                iframe.setAttribute("id", "solutto-recorder-iframe");
 
                 document.body.appendChild(iframe);
             },

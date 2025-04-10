@@ -152,7 +152,7 @@ function returnStoredOptions() {
 
   chrome.storage.local.get("optionsSelect", (data) => {
     if (data.optionsSelect) {
-      let button = document.querySelector(".solutto-gravador .source[source='" + data.optionsSelect + "']");
+      let button = document.querySelector(".solutto-recorder .source[source='" + data.optionsSelect + "']");
       addEventListenerSelectTab(button);
 
       if (data.optionsSelect == "webcam") {
@@ -203,7 +203,7 @@ function setDefaultCameraOptions(callback = null) {
  */
 function showDocument() {
   setTimeout(() => {
-    document.querySelector(".solutto-gravador").style.opacity = "1";
+    document.querySelector(".solutto-recorder").style.opacity = "1";
 
     setTimeout(() => {
       start();
@@ -215,12 +215,12 @@ function showDocument() {
  * Função para inciar o event listener de seleção das abas de source de gravação.
  */
 function addEventListenerSelectTab(button) {
-  document.querySelectorAll(".solutto-gravador .source").forEach(button2 => {
+  document.querySelectorAll(".solutto-recorder .source").forEach(button2 => {
     button2.classList.remove("selected");
   })
 
   button.classList.add("selected");
-  let selector = document.querySelector(".solutto-gravador .selector-tab");
+  let selector = document.querySelector(".solutto-recorder .selector-tab");
 
   let leftPosition = button.offsetLeft;
   let width = button.offsetWidth;
@@ -276,7 +276,7 @@ function start() {
   });
 
   // Atualiza a opção de configuração de vídeo no armazenamento local quando alterada
-  document.querySelectorAll(".solutto-gravador .source").forEach(button => {
+  document.querySelectorAll(".solutto-recorder .source").forEach(button => {
     button.addEventListener("click", () => {
       addEventListenerSelectTab(button);
 

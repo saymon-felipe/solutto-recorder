@@ -30,8 +30,8 @@ Siga os passos abaixo para instalar a extensão no seu navegador Chrome:
 ### 1️⃣ Clone o Repositório
 
 ```bash
-  git clone https://github.com/seu-usuario/solutto-gravador.git
-  cd solutto-gravador
+  git clone https://github.com/seu-usuario/solutto-recorder.git
+  cd solutto-recorder
 ```
 
 ### 2️⃣ Acesse a Página de Extensões do Chrome
@@ -42,7 +42,7 @@ Siga os passos abaixo para instalar a extensão no seu navegador Chrome:
 ### 3️⃣ Carregue a Extensão
 
 - Clique em **"Carregar sem compactação"**.
-- Selecione a pasta do projeto `solutto-gravador`.
+- Selecione a pasta do projeto `solutto-recorder`.
 
 ### 4️⃣ Configuração OAuth2
 
