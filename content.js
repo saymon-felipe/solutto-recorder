@@ -319,7 +319,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         window.isRequestingScreen = true;
-
         initRecording(message.timeout).then(() => {
             if (message.timeout > 0) {
                 recordTimeout = message.timeout;
@@ -394,8 +393,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             mandatory: {
                                 chromeMediaSource: "tab",
                                 chromeMediaSourceId: streamId,
-                                maxWidth: 99999999,
-                                maxHeight: 99999999,
+                                maxWidth: 999999999,
+                                maxHeight: 999999999,
                                 maxFrameRate: 30
                             }
                         }
@@ -457,14 +456,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
 
             async function mixAudioStreams(stream1, stream2) {
+                const stream1HasAudio = stream1.getAudioTracks().some(track => track.enabled);
+            
+                if (!stream1HasAudio) {
+                    return stream2;
+                }
+            
                 const context = new AudioContext();
                 const destination = context.createMediaStreamDestination();
-                
+            
                 [stream1, stream2].forEach((stream) => {
                     const source = context.createMediaStreamSource(stream);
                     source.connect(destination);
                 });
-                
+            
                 return destination.stream;
             }
 
@@ -503,6 +508,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
 
                 const streamCombinado = new MediaStream(trilhas);
+                
                 onAccessApproved(streamCombinado, timeout);
                 resolve();
             }).catch((error) => {
