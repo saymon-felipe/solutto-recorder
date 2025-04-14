@@ -927,6 +927,9 @@ function closeTabs() {
  * @param {number} timeout - Timeout em segundos antes de habilitar os controles.
  */
 function initRecordingInterface(timeout) {
+    document.getElementById("solutto-recorder-iframe").style.width = 0;
+    document.getElementById("solutto-recorder-iframe").style.height = 0;
+
     chrome.runtime.sendMessage({ action: "changeIcon", type: "recording" });
 
     // Esconde o iframe do gravador
