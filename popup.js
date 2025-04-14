@@ -127,26 +127,22 @@ function returnStoredOptions() {
   const timeoutCheckboxElement = document.getElementById("use-wait-seconds");
 
   chrome.storage.local.get("cameraSelect", (data) => {
-    if (data.cameraSelect) {
-      const optionExists = Array.from(cameraSelectElement.options).some(option => option.value === data.cameraSelect);
+    const optionExists = Array.from(cameraSelectElement.options).some(option => option.value === data.cameraSelect);
 
-      if (optionExists) {
-          cameraSelectElement.value = data.cameraSelect;
-      } else {
-        cameraSelectElement.value = "";
-      }
+    if (optionExists) {
+        cameraSelectElement.value = data.cameraSelect;
+    } else {
+      cameraSelectElement.value = "";
     }
   });
 
   chrome.storage.local.get("microphoneSelect", (data) => {
-    if (data.microphoneSelect) {
-      const optionExists = Array.from(microphoneSelectElement.options).some(option => option.value === data.microphoneSelect);
+    const optionExists = Array.from(microphoneSelectElement.options).some(option => option.value === data.microphoneSelect);
 
-      if (optionExists) {
-        microphoneSelectElement.value = data.microphoneSelect;
-      } else {
-        microphoneSelectElement.value = "";
-      }
+    if (optionExists) {
+      microphoneSelectElement.value = data.microphoneSelect;
+    } else {
+      microphoneSelectElement.value = "";
     }
   });
 
@@ -155,7 +151,7 @@ function returnStoredOptions() {
       let button = document.querySelector(".solutto-recorder .source[source='" + data.optionsSelect + "']");
       addEventListenerSelectTab(button);
 
-      if (data.optionsSelect == "webcam") {
+      if (data.optionsSelect === "webcam") {
         setDefaultCameraOptions();
       }
     }
@@ -183,18 +179,11 @@ function setDefaultCameraOptions(callback = null) {
   const firstValidOption = Array.from(cameraSelectElement.options).find(option => option.value.trim() !== "");
     
   if (!firstValidOption) {
-    if (confirm("Opção de gravação inválida. \n\n Nenhum dispositivo de vídeo encontrado.")) {
-      cameraSelectElement.value = "";
-      document.getElementById("video-config").value = "screen";
-    }
-  } else {
-    if (cameraSelectElement.value == "") {
-      cameraSelectElement.value = firstValidOption.value;
-    }
-    
-    if (callback) {
-      callback();
-    }
+    confirm("Opção de gravação inválida. \n\n Nenhum dispositivo de vídeo selecionado.");
+  }
+
+  if (callback) {
+    callback();
   }
 }
 
@@ -262,17 +251,15 @@ function start() {
   // Atualiza a seleção de câmera no armazenamento local quando alterada
   cameraSelectElement.addEventListener("change", (e) => {
     let value = e.target.value;
-    if (value.trim() !== "") {
-      chrome.storage.local.set({ cameraSelect: value });
-    }
+    
+    chrome.storage.local.set({ cameraSelect: value });
   });
 
   // Atualiza a seleção de microfone no armazenamento local quando alterada
   microphoneSelectElement.addEventListener("change", (e) => {
     let value = e.target.value;
-    if (value.trim() !== "") {
-      chrome.storage.local.set({ microphoneSelect: value });
-    }
+    
+    chrome.storage.local.set({ microphoneSelect: value });
   });
 
   // Atualiza a opção de configuração de vídeo no armazenamento local quando alterada
@@ -282,7 +269,7 @@ function start() {
 
       let value = button.getAttribute("source");
       if (value.trim() !== "") {
-        if (value == "webcam") {
+        if (value === "webcam") {
           setDefaultCameraOptions(() => { chrome.storage.local.set({ optionsSelect: value }) });
         } else {
           chrome.storage.local.set({ optionsSelect: value });

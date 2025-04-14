@@ -151,6 +151,7 @@ function initShadowEnvironment() {
             gap: 1rem;
             padding: 10px;
             color: #4D4D4D;
+            user-select: none;
         }
         #solutto-recorder-controls .elapsed-time .play {
             display: none;
@@ -186,7 +187,6 @@ function initShadowEnvironment() {
         }
 
         video, #recorder-timeout {
-            all: initial;
             font-family: sans-serif;
         }
     `;
@@ -350,7 +350,8 @@ function createTimeoutElement(timeoutSeconds) {
         background: "#00aab3",
         color: "white",
         transition: "opacity 0.4s ease-in-out",
-        opacity: "0"
+        opacity: "0",
+        userSelect: "none"
     });
 
     const timeoutSpan = document.createElement("span");
@@ -554,8 +555,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         navigator.mediaDevices.getDisplayMedia({
                             audio: true,
                             video: { 
-                                width: 999999999, 
-                                height: 999999999,
+                                maxWidth: screen.width,
+                                maxHeight: screen.height,
+                                maxFrameRate: 30,
                                 displaySurface: "monitor"
                             }
                         }).then((stream) => { 
@@ -1025,8 +1027,10 @@ function initRecordingInterface(timeout) {
  */
 function makeDraggable(element) {
     let offsetX, offsetY, isDragging = false;
-    element.style.position = "fixed"; // Necessário para movimentação
+    element.style.position = "fixed";
     element.style.cursor = "grab";
+
+    const root = element.getRootNode(); // ShadowRoot ou document
 
     element.addEventListener("mousedown", (event) => {
         isDragging = true;
@@ -1035,14 +1039,14 @@ function makeDraggable(element) {
         element.style.cursor = "grabbing";
     });
 
-    document.addEventListener("mousemove", (event) => {
+    root.addEventListener("mousemove", (event) => {
         if (isDragging) {
-            element.style.left = (event.clientX - offsetX) + "px";
-            element.style.top = (event.clientY - offsetY) + "px";
+            element.style.left = `${event.clientX - offsetX}px`;
+            element.style.top = `${event.clientY - offsetY}px`;
         }
     });
 
-    document.addEventListener("mouseup", () => {
+    root.addEventListener("mouseup", () => {
         isDragging = false;
         element.style.cursor = "grab";
     });
@@ -1056,29 +1060,27 @@ function makeDraggable(element) {
 function makeControlDraggable(element) {
     let offsetX, offsetY, isDragging = false;
     element.style.position = "fixed";
-    window.soluttoShadowRoot.getElementById("grab-control").style.cursor = "grab";
+    const grabControl = window.soluttoShadowRoot.getElementById("grab-control");
+    grabControl.style.cursor = "grab";
 
-    document.addEventListener("mousedown", (event) => {
-        const grabControl = event.target.closest("#grab-control");
-        if (grabControl) {
-            isDragging = true;
-            offsetX = event.clientX - element.getBoundingClientRect().left;
-            offsetY = event.clientY - element.getBoundingClientRect().top;
-            grabControl.style.cursor = "grabbing";
-        }
+    const root = grabControl.getRootNode();
+
+    grabControl.addEventListener("mousedown", (event) => {
+        isDragging = true;
+        offsetX = event.clientX - element.getBoundingClientRect().left;
+        offsetY = event.clientY - element.getBoundingClientRect().top;
+        grabControl.style.cursor = "grabbing";
     });
 
-    document.addEventListener("mousemove", (event) => {
+    root.addEventListener("mousemove", (event) => {
         if (isDragging) {
-            element.style.left = (event.clientX - offsetX) + "px";
-            element.style.top = (event.clientY - offsetY) + "px";
+            element.style.left = `${event.clientX - offsetX}px`;
+            element.style.top = `${event.clientY - offsetY}px`;
         }
     });
 
-    document.addEventListener("mouseup", () => {
+    root.addEventListener("mouseup", () => {
         isDragging = false;
-        if (window.soluttoShadowRoot.getElementById("grab-control")) {
-            window.soluttoShadowRoot.getElementById("grab-control").style.cursor = "grab";
-        }
+        grabControl.style.cursor = "grab";
     });
 }
