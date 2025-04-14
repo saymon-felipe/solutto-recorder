@@ -176,5 +176,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
     }
 
+    if (message.action === "changeIcon") {
+        if (message.type == "recording") {
+            chrome.action.setIcon({
+                path: {
+                    "16": "assets/icon-recording.png",
+                    "48": "assets/icon-recording.png",
+                    "128": "assets/icon-recording.png"
+                }
+            });
+        } else {
+            chrome.action.setIcon({
+                path: {
+                    "16": "assets/icon.png",
+                    "48": "assets/icon.png",
+                    "128": "assets/icon.png"
+                }
+            });
+        }
+    }
+
     return true;
 });

@@ -92,6 +92,8 @@ function onAccessApproved(stream, timeout) {
     recorder.onstop = () => {
         stream.getTracks().forEach(track => track.stop());
 
+        chrome.runtime.sendMessage({ action: "changeIcon", type: "default" });
+
         const localAudioClone = stream.clone();
         const localAudioElement = new Audio();
         localAudioElement.srcObject = localAudioClone;
@@ -864,13 +866,13 @@ function blobToBase64(blob) {
 async function openEditorTab(videoBlobUrl, recordTimeout) {    
     chrome.runtime.sendMessage({ action: "openEditor", videoUrl: videoBlobUrl, videoTimeout: recordTimeout });
 
-    closePlaybackTab();
+    if (recordType == "tab") {
+        closePlaybackTab();
+    }
 }
 
 function closePlaybackTab() {
-    if (recordType == "tab") {
-        chrome.runtime.sendMessage({ action: "closePlaybackTab", playbackTab: playbackTab });
-    }
+    chrome.runtime.sendMessage({ action: "closePlaybackTab", playbackTab: playbackTab });
 }
 
 function closeTabs() {
@@ -883,6 +885,8 @@ function closeTabs() {
  * @param {number} timeout - Timeout em segundos antes de habilitar os controles.
  */
 function initRecordingInterface(timeout) {
+    chrome.runtime.sendMessage({ action: "changeIcon", type: "recording" });
+
     // Esconde o iframe do gravador
     const existingIframe = document.querySelectorAll("#solutto-recorder-iframe");
     existingIframe.forEach((element) => {
