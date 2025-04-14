@@ -16,6 +16,8 @@ var localStream = null;
 var pendingAnswer = null;
 var recordType = null;
 
+var recordRequested = false;
+
 /*************************************
  * Injeção Única do Content Script
  *************************************/
@@ -56,7 +58,9 @@ if (!window.contentScriptInjected) {
 }
 
 window.addEventListener("beforeunload", (event) => {
-    kill();
+    if (recordRequested) {
+        kill();
+    }
 });  
 
 /*************************************
@@ -318,12 +322,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
         }
 
+        recordRequested = false;
+
         window.isRequestingScreen = true;
         initRecording(message.timeout).then(() => {
             if (message.timeout > 0) {
                 recordTimeout = message.timeout;
                 createTimeoutElement(message.timeout);
             }
+
+            recordRequested = true;
 
             initRecordingInterface(message.timeout);
 
