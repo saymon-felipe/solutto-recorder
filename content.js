@@ -94,11 +94,13 @@ function onAccessApproved(stream, timeout) {
 
         chrome.runtime.sendMessage({ action: "changeIcon", type: "default" });
 
-        const localAudioClone = stream.clone();
-        const localAudioElement = new Audio();
-        localAudioElement.srcObject = localAudioClone;
-        localAudioElement.volume = 1;
-        localAudioElement.play();
+        if (recordType == "tab") { // Se a ultima gravação for TAB, toca novamente o audio
+            const localAudioClone = stream.clone();
+            const localAudioElement = new Audio();
+            localAudioElement.srcObject = localAudioClone;
+            localAudioElement.volume = 1;
+            localAudioElement.play();
+        }
 
         window.isRequestingScreen = false;
         isRecording = false;
