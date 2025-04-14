@@ -53,8 +53,8 @@ if (!window.contentScriptInjected) {
     });
 
     // Injeta dependências visuais: FontAwesome e estilos customizados
+    initShadowEnvironment();
     injectFontAwesome();
-    injectStyles();
 }
 
 window.addEventListener("beforeunload", (event) => {
@@ -63,6 +63,135 @@ window.addEventListener("beforeunload", (event) => {
     }
 });  
 
+function injectFontAwesome() {
+    if (document.getElementById("font-awesome-injected")) return;
+    const link = document.createElement("link");
+    link.id = "font-awesome-injected";
+    link.rel = "stylesheet";
+    link.href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css";
+    link.integrity = "sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==";
+    link.crossOrigin = "anonymous";
+    link.referrerpolicy = "no-referrer";
+    document.head.prepend(link);
+}
+
+/*************************************
+ * Inicialização de Ambiente Shadow DOM
+ *************************************/
+function initShadowEnvironment() {
+    if (window.soluttoShadowRoot) return;
+
+    const host = document.createElement("div");
+    host.id = "solutto-recorder-host";
+    Object.assign(host.style, {
+        all: "initial",
+        zIndex: 9999999,
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "0",
+        height: "0"
+    });
+
+    document.body.appendChild(host);
+
+    const shadow = host.attachShadow({ mode: "open" });
+    window.soluttoShadowRoot = shadow;
+
+    const style = document.createElement("style");
+    style.textContent = `
+        @font-face {
+            font-family: 'Font Awesome 6 Free';
+            font-style: normal;
+            font-weight: 900;
+            font-display: block;
+            src: url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/webfonts/fa-solid-900.woff2') format('woff2');
+        }
+
+        .fa-solid {
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+        }
+
+        .fa-circle-check:before { content: "\\f058"; }
+        .fa-circle-pause:before { content: "\\f28b"; }
+        .fa-circle-play:before { content: "\\f144"; }
+        .fa-trash:before { content: "\\f1f8"; }
+        .fa-grip-vertical:before { content: "\\f58e"; }
+
+        #solutto-recorder-controls {
+            position: fixed;
+            bottom: 1rem;
+            left: 3rem;
+            background: #FAFAFA;
+            border-radius: 8px;
+            border: 1px solid #E6E6E6;
+            padding: 7px 20px;
+            z-index: 999999;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            height: 59px;
+            transition: opacity 0.4s ease-in-out;
+            opacity: 0;
+            font-family: "roboto", sans-serif;
+        }
+        #solutto-recorder-controls i {
+            font-size: 23px;
+            cursor: pointer;
+            font-family: "Font Awesome 6 Free" !important;
+            font-weight: 900;
+            font-style: normal !important;
+        }
+        #solutto-recorder-controls .elapsed-time {
+            border-radius: 8px;
+            background: #E6E6E6;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 10px;
+            color: #4D4D4D;
+        }
+        #solutto-recorder-controls .elapsed-time .play {
+            display: none;
+        }
+        #solutto-recorder-controls .actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        #solutto-recorder-controls .space {
+            height: 22px;
+            width: 2px;
+            background: #E6E6E6;
+        }
+        #solutto-recorder-controls #grab-control {
+            color: #999999;
+        }
+        #solutto-recorder-controls .solutto-rounded-btn {
+            background: none;
+            border: none;
+            display: grid;
+            margin: 0;
+        }
+        #solutto-recorder-controls .solutto-rounded-btn:disabled i {
+            color: #999999;
+            cursor: default;
+        }
+        #solutto-recorder-controls .submit {
+            color: #00AAB3;
+        }
+        #solutto-recorder-controls .delete {
+            color: #FF0000;
+        }
+
+        video, #recorder-timeout {
+            all: initial;
+            font-family: sans-serif;
+        }
+    `;
+    shadow.appendChild(style);
+}
 /*************************************
  * Funções Relacionadas à Gravação
  *************************************/
@@ -116,7 +245,7 @@ function onAccessApproved(stream, timeout) {
  * @param {MediaStream} stream - Stream de mídia para exibição.
  */
 function createVideoElement(stream) {
-    const existingControls = document.querySelectorAll("#solutto-recorder-camera-preview");
+    const existingControls = window.soluttoShadowRoot.querySelectorAll("#solutto-recorder-camera-preview");
     existingControls.forEach((element) => {
         element.remove();
     });
@@ -144,7 +273,7 @@ function createVideoElement(stream) {
         transition: "opacity 0.4s ease-in-out",
         opacity: "0"
     });
-    document.body.appendChild(previewVideo);
+    window.soluttoShadowRoot.appendChild(previewVideo);
     previewVideo.play();
 
     setTimeout(() => {
@@ -158,7 +287,7 @@ function createVideoElement(stream) {
  * @param {MediaStream} stream - Stream da webcam.
  */
 function createWebcamElement(stream) {
-    const existingControls = document.querySelectorAll("#solutto-recorder-webcam-preview");
+    const existingControls = window.soluttoShadowRoot.querySelectorAll("#solutto-recorder-webcam-preview");
     existingControls.forEach((element) => {
         element.remove();
     });
@@ -181,7 +310,7 @@ function createWebcamElement(stream) {
         transition: "opacity 0.4s ease-in-out",
         opacity: "0"
     });
-    document.body.appendChild(previewVideo);
+    window.soluttoShadowRoot.appendChild(previewVideo);
     previewVideo.play();
 
     makeDraggable(previewVideo);
@@ -230,7 +359,7 @@ function createTimeoutElement(timeoutSeconds) {
     timeoutSpan.textContent = "3";
     timeoutDiv.appendChild(timeoutSpan);
 
-    document.body.appendChild(timeoutDiv);
+    window.soluttoShadowRoot.appendChild(timeoutDiv);
 
     setTimeout(() => {
         timeoutDiv.style.opacity = "1";
@@ -507,10 +636,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
                     //Listener para o botão de parar compartilhamento
                     screenStream.getVideoTracks()[0].addEventListener("ended", () => {
-                        document.querySelector(".pause").click();
+                        window.soluttoShadowRoot.querySelector(".pause").click();
 
                         setTimeout(() => {
-                            document.getElementById("stop-recording").click();
+                            window.soluttoShadowRoot.getElementById("stop-recording").click();
                         }, 10)
                     });
                 }
@@ -572,7 +701,7 @@ function kill() {
 
         // Função auxiliar para ocultar e remover múltiplos elementos
         function removeElements(selector) {
-            const elements = document.querySelectorAll(selector);
+            const elements = window.soluttoShadowRoot.querySelectorAll(selector);
             elements.forEach((element) => {
                 element.style.opacity = "0";
                 promises.push(
@@ -604,7 +733,7 @@ function kill() {
 
         // Aguarda todas as promessas serem resolvidas antes de concluir
         Promise.all(promises).then(() => {
-            const existingIframe = document.querySelectorAll("#solutto-recorder-iframe");
+            const existingIframe = window.soluttoShadowRoot.querySelectorAll("#solutto-recorder-iframe");
             existingIframe.forEach((element) => {
                 element.remove();
             });
@@ -625,104 +754,13 @@ function kill() {
 }
 
 /*************************************
- * Funções de Injeção de Estilos e FontAwesome
- *************************************/
-/**
- * Injeta o FontAwesome na página para uso dos ícones.
- */
-function injectFontAwesome() {
-    if (document.getElementById("font-awesome-injected")) return;
-    const link = document.createElement("link");
-    link.id = "font-awesome-injected";
-    link.rel = "stylesheet";
-    link.href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css";
-    link.integrity = "sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==";
-    link.crossOrigin = "anonymous";
-    link.referrerpolicy = "no-referrer";
-    document.head.prepend(link);
-}
-
-/**
- * Injeta estilos customizados para os controles do gravador.
- */
-function injectStyles() {
-    const style = document.createElement("style");
-    style.textContent = `
-        #solutto-recorder-controls {
-            position: fixed;
-            bottom: 1rem;
-            left: 3rem;
-            background: #FAFAFA;
-            border-radius: 8px;
-            border: 1px solid #E6E6E6;
-            padding: 7px 20px;
-            z-index: 999999;
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            height: 59px;
-            transition: opacity 0.4s ease-in-out;
-            opacity: 0;
-        }
-        #solutto-recorder-controls i {
-            font-size: 23px;
-            cursor: pointer;
-            font-family: "Font Awesome 6 Free" !important; 
-            font-weight: 900; 
-            content: attr(data-icon);
-        }
-        #solutto-recorder-controls .elapsed-time {
-            border-radius: 8px;
-            background: #E6E6E6;
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            padding: 10px;
-            color: #4D4D4D;
-        }
-        #solutto-recorder-controls .elapsed-time .play {
-            display: none;
-        }
-        #solutto-recorder-controls .actions {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-        #solutto-recorder-controls .space {
-            height: 22px;
-            width: 2px;
-            background: #E6E6E6;
-        }
-        #solutto-recorder-controls #grab-control {
-            color: #999999;
-        }
-        #solutto-recorder-controls .solutto-rounded-btn {
-            background: none;
-            border: none;
-            display: grid;
-        }
-        #solutto-recorder-controls .solutto-rounded-btn:disabled i {
-            color: #999999;
-            cursor: default;
-        }
-        #solutto-recorder-controls .submit {
-            color: #00AAB3;
-        }
-        #solutto-recorder-controls .delete {
-            color: #FF0000;
-        }
-    `;
-    document.head.appendChild(style);
-}
-
-/*************************************
  * Criação dos Controles de Gravação
  *************************************/
 /**
  * Cria e insere na página os controles para manipulação da gravação.
  */
 function createRecorderControls() {
-    const existingControls = document.querySelectorAll("#solutto-recorder-controls");
+    const existingControls = window.soluttoShadowRoot.querySelectorAll("#solutto-recorder-controls");
     existingControls.forEach((element) => {
         element.remove();
     });
@@ -783,7 +821,7 @@ function createRecorderControls() {
     actionsDiv.appendChild(deleteButton);
 
     container.appendChild(actionsDiv);
-    document.body.appendChild(container);
+    window.soluttoShadowRoot.appendChild(container);
     container.style.opacity = "1";
 
     makeControlDraggable(container);
@@ -811,11 +849,11 @@ function formatTime(seconds) {
 function startTimer() {
     if (timerInterval) return;
     isPaused = false;
-    document.getElementById("elapsed-time").innerHTML = formatTime(elapsedSeconds);
+    window.soluttoShadowRoot.getElementById("elapsed-time").innerHTML = formatTime(elapsedSeconds);
     timerInterval = setInterval(() => {
-        if (document.getElementById("elapsed-time") && !isPaused) {
+        if (window.soluttoShadowRoot.getElementById("elapsed-time") && !isPaused) {
             elapsedSeconds++;
-            document.getElementById("elapsed-time").innerHTML = formatTime(elapsedSeconds);
+            window.soluttoShadowRoot.getElementById("elapsed-time").innerHTML = formatTime(elapsedSeconds);
         }
     }, 1000);
 }
@@ -844,7 +882,7 @@ function stopTimer() {
     timerInterval = null;
     elapsedSeconds = 0;
     isPaused = false;
-    document.getElementById("elapsed-time").innerHTML = "00:00:00";
+    window.soluttoShadowRoot.getElementById("elapsed-time").innerHTML = "00:00:00";
 }
 
 function blobToBase64(blob) {
@@ -890,26 +928,26 @@ function initRecordingInterface(timeout) {
     chrome.runtime.sendMessage({ action: "changeIcon", type: "recording" });
 
     // Esconde o iframe do gravador
-    const existingIframe = document.querySelectorAll("#solutto-recorder-iframe");
+    const existingIframe = window.soluttoShadowRoot.querySelectorAll("#solutto-recorder-iframe");
     existingIframe.forEach((element) => {
         element.style.display = "none";
     });
 
     setTimeout(() => {
-        document.querySelector(".play").setAttribute("disabled", true);
-        document.querySelector(".pause").removeAttribute("disabled");
-        document.querySelector(".submit").setAttribute("disabled", true);
-        document.querySelector(".delete").setAttribute("disabled", true);
+        window.soluttoShadowRoot.querySelector(".play").setAttribute("disabled", true);
+        window.soluttoShadowRoot.querySelector(".pause").removeAttribute("disabled");
+        window.soluttoShadowRoot.querySelector(".submit").setAttribute("disabled", true);
+        window.soluttoShadowRoot.querySelector(".delete").setAttribute("disabled", true);
 
         if (timeout == 0) {
             startTimer();
         }
     }, timeout * 1000);
 
-    const stopVideoButton = document.getElementById("stop-recording");
-    const deleteVideoButton = document.getElementById("delete-recording");
-    const pauseVideoButton = document.querySelector(".pause");
-    const resumeVideoButton = document.querySelector(".play");
+    const stopVideoButton = window.soluttoShadowRoot.getElementById("stop-recording");
+    const deleteVideoButton = window.soluttoShadowRoot.getElementById("delete-recording");
+    const pauseVideoButton = window.soluttoShadowRoot.querySelector(".pause");
+    const resumeVideoButton = window.soluttoShadowRoot.querySelector(".play");
 
     // Listener para encerrar a gravação
     stopVideoButton.addEventListener("click", () => {
@@ -928,10 +966,10 @@ function initRecordingInterface(timeout) {
             openEditorTab(videoBlobUrl, recordTimeout, blob);
 
             // Desabilita controles após finalizar
-            document.querySelector(".play").setAttribute("disabled", true);
-            document.querySelector(".pause").setAttribute("disabled", true);
-            document.querySelector(".submit").setAttribute("disabled", true);
-            document.querySelector(".delete").setAttribute("disabled", true);
+            window.soluttoShadowRoot.querySelector(".play").setAttribute("disabled", true);
+            window.soluttoShadowRoot.querySelector(".pause").setAttribute("disabled", true);
+            window.soluttoShadowRoot.querySelector(".submit").setAttribute("disabled", true);
+            window.soluttoShadowRoot.querySelector(".delete").setAttribute("disabled", true);
 
             stopTimer();
             kill();
@@ -952,12 +990,12 @@ function initRecordingInterface(timeout) {
             return console.log("Solutto Recorder: Não é possível pausar, pois a gravação não está ativa");
         }
         recorder.pause();
-        document.querySelector(".play").removeAttribute("disabled");
-        document.querySelector(".pause").setAttribute("disabled", true);
-        document.querySelector(".play").style.display = "grid";
-        document.querySelector(".pause").style.display = "none";
-        document.getElementById("stop-recording").removeAttribute("disabled");
-        document.querySelector(".delete").removeAttribute("disabled");
+        window.soluttoShadowRoot.querySelector(".play").removeAttribute("disabled");
+        window.soluttoShadowRoot.querySelector(".pause").setAttribute("disabled", true);
+        window.soluttoShadowRoot.querySelector(".play").style.display = "grid";
+        window.soluttoShadowRoot.querySelector(".pause").style.display = "none";
+        window.soluttoShadowRoot.getElementById("stop-recording").removeAttribute("disabled");
+        window.soluttoShadowRoot.querySelector(".delete").removeAttribute("disabled");
         pauseTimer();
     });
 
@@ -967,12 +1005,12 @@ function initRecordingInterface(timeout) {
             return console.log("Solutto Recorder: Não é possível retomar, pois a gravação não está pausada");
         }
         recorder.resume();
-        document.querySelector(".play").setAttribute("disabled", true);
-        document.querySelector(".pause").removeAttribute("disabled");
-        document.querySelector(".play").style.display = "none";
-        document.querySelector(".pause").style.display = "grid";
-        document.querySelector(".submit").setAttribute("disabled", true);
-        document.querySelector(".delete").setAttribute("disabled", true);
+        window.soluttoShadowRoot.querySelector(".play").setAttribute("disabled", true);
+        window.soluttoShadowRoot.querySelector(".pause").removeAttribute("disabled");
+        window.soluttoShadowRoot.querySelector(".play").style.display = "none";
+        window.soluttoShadowRoot.querySelector(".pause").style.display = "grid";
+        window.soluttoShadowRoot.querySelector(".submit").setAttribute("disabled", true);
+        window.soluttoShadowRoot.querySelector(".delete").setAttribute("disabled", true);
         resumeTimer();
     });
 }
@@ -1018,7 +1056,7 @@ function makeDraggable(element) {
 function makeControlDraggable(element) {
     let offsetX, offsetY, isDragging = false;
     element.style.position = "fixed";
-    document.getElementById("grab-control").style.cursor = "grab";
+    window.soluttoShadowRoot.getElementById("grab-control").style.cursor = "grab";
 
     document.addEventListener("mousedown", (event) => {
         const grabControl = event.target.closest("#grab-control");
@@ -1039,8 +1077,8 @@ function makeControlDraggable(element) {
 
     document.addEventListener("mouseup", () => {
         isDragging = false;
-        if (document.getElementById("grab-control")) {
-            document.getElementById("grab-control").style.cursor = "grab";
+        if (window.soluttoShadowRoot.getElementById("grab-control")) {
+            window.soluttoShadowRoot.getElementById("grab-control").style.cursor = "grab";
         }
     });
 }
