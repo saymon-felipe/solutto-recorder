@@ -180,20 +180,20 @@ function returnStoredOptions() {
 function setDefaultCameraOptions(callback = null) {
   const cameraSelectElement = document.getElementById("camera");
 
-  if (cameraSelectElement.value == "") {
-    const firstValidOption = Array.from(cameraSelectElement.options).find(option => option.value.trim() !== "");
+  const firstValidOption = Array.from(cameraSelectElement.options).find(option => option.value.trim() !== "");
     
-    if (!firstValidOption) {
-      if (confirm("Opção de gravação inválida. \n\n Nenhum dispositivo de vídeo encontrado.")) {
-        cameraSelectElement.value = "";
-        document.getElementById("video-config").value = "screen";
-      }
-    } else {
+  if (!firstValidOption) {
+    if (confirm("Opção de gravação inválida. \n\n Nenhum dispositivo de vídeo encontrado.")) {
+      cameraSelectElement.value = "";
+      document.getElementById("video-config").value = "screen";
+    }
+  } else {
+    if (cameraSelectElement.value == "") {
       cameraSelectElement.value = firstValidOption.value;
-
-      if (callback) {
-        callback();
-      }
+    }
+    
+    if (callback) {
+      callback();
     }
   }
 }
