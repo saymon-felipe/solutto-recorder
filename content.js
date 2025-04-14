@@ -405,8 +405,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             mandatory: {
                                 chromeMediaSource: "tab",
                                 chromeMediaSourceId: streamId,
-                                maxWidth: 999999999,
-                                maxHeight: 999999999,
+                                maxWidth: screen.width,
+                                maxHeight: screen.height,
                                 maxFrameRate: 30
                             }
                         }
