@@ -75,6 +75,8 @@ chrome.action.onClicked.addListener(async function (tab) {
                  * @param {string} selector - Seletor do elemento que será removido.
                  */
                 function removeElements(selector) {
+                    kill();
+
                     const elements = document.querySelectorAll(selector);
                     elements.forEach((element) => {
                         element.style.opacity = "0";

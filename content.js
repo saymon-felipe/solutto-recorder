@@ -725,6 +725,15 @@ function kill() {
         removeElements("#solutto-recorder-webcam-preview");
         removeElements("#solutto-recorder-controls");
 
+        const existingIframes = document.querySelectorAll("#solutto-recorder-iframe");
+        existingIframes.forEach((element) => {
+            element.style.opacity = 0;
+
+            setTimeout(() => {
+                element.remove();
+            }, 400)
+        });
+
         // Interrompe os streams existentes
         promises.push(stopExistingStreams());
 
@@ -733,13 +742,7 @@ function kill() {
             recorder = null;
         }
 
-        // Aguarda todas as promessas serem resolvidas antes de concluir
         Promise.all(promises).then(() => {
-            const existingIframe = window.soluttoShadowRoot.querySelectorAll("#solutto-recorder-iframe");
-            existingIframe.forEach((element) => {
-                element.remove();
-            });
-
             // Reseta variáveis globais e limpa intervalos
             recorder = null;
             isRecording = false;
@@ -824,7 +827,10 @@ function createRecorderControls() {
 
     container.appendChild(actionsDiv);
     window.soluttoShadowRoot.appendChild(container);
-    container.style.opacity = "1";
+    
+    setTimeout(() => {
+        container.style.opacity = "1";
+    }, 1)
 
     makeControlDraggable(container);
 }
