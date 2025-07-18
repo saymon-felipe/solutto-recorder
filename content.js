@@ -1075,6 +1075,8 @@ function makeControlDraggable(element) {
     const root = grabControl.getRootNode();
 
     grabControl.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        
         isDragging = true;
         offsetX = event.clientX - element.getBoundingClientRect().left;
         offsetY = event.clientY - element.getBoundingClientRect().top;
