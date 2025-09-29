@@ -84,9 +84,9 @@ video {
 }
 
 .editor {
-    max-width: 1200px;
     width: 95vw;
-    height: 100vh;
+    height: 100%;
+    min-height: 100dvh;
     background: #FAFAFA;
     margin: auto;
 }
@@ -123,10 +123,11 @@ video {
     justify-content: space-evenly;
 
     & video {
-        max-width: 500px;
+        max-width: 100%;
         width: 100%;
+        max-height: 300px;
         border-radius: 8px;
-        object-fit: cover;
+        object-fit: contain;
     }
 }
 

@@ -15,8 +15,8 @@
     background: #FAFAFA;
 }
 
-.editor .container {
-    max-width: 1200px;
+.editor .container, .editor {
+    max-width: 1320px;
 }
 
 .no-opacity {
