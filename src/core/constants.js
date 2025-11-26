@@ -60,12 +60,20 @@
             FINISH_VIDEO: "finish_video",
             GET_AUTH_TOKEN: "get_auth_token"
         },
+        STORAGE: {
+            CAMERA_ID: "cameraSelect",
+            MIC_ID: "microphoneSelect",
+            WAIT_SECONDS: "waitSeconds",
+            USE_WAIT_SECONDS: "timeoutCheckbox",
+            OPTIONS_SELECT: "optionsSelect",
+            VIDEO_ID: "videoId",
+            VIDEO_TIMEOUT: "videoTimeout"
+        },
         COMMANDS: {
             TOGGLE_PAUSE: "toggle-pause",
             STOP: "stop-recording",
             CANCEL: "cancel-recording"
         },
-
         SOURCE_TYPE: {
             TAB: "tab",
             SCREEN: "screen",
