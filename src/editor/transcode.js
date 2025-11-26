@@ -1,25 +1,18 @@
 /**
  * TranscodeService
- * Wrapper para a biblioteca FFmpeg.wasm.
  */
 export class TranscodeService {
     constructor() {
         this.ffmpeg = null;
         this.isLoaded = false;
         
-        // Caminhos para o Core (Worker e Wasm)
         this.coreUrl = chrome.runtime.getURL("/src/lib/ffmpeg/ffmpeg-core.js");
         this.wasmUrl = chrome.runtime.getURL("/src/lib/ffmpeg/ffmpeg-core.wasm");
         this.workerUrl = chrome.runtime.getURL("/src/lib/ffmpeg/ffmpeg-core.worker.js");
     }
 
-    /**
-     * Injeta scripts UMD na página dinamicamente.
-     * Necessário porque imports ES6 falham em alguns contextos de extensão.
-     */
     _loadScript(url) {
         return new Promise((resolve, reject) => {
-            // Verifica se já está carregado para evitar duplicidade
             if (url.includes("ffmpeg.js") && (window.FFmpeg || window.FFmpegWASM)) return resolve();
             if (url.includes("util.js") && window.FFmpegUtil) return resolve();
 
@@ -34,144 +27,128 @@ export class TranscodeService {
 
     async init() {
         if (this.isLoaded) return;
-
-        console.log("Transcoder: Inicializando bibliotecas...");
+        console.log("Transcoder: Init...");
 
         try {
-            // 1. Carrega os arquivos JS da biblioteca (UMD)
             await this._loadScript(chrome.runtime.getURL("src/lib/ffmpeg/umd/ffmpeg.js"));
             await this._loadScript(chrome.runtime.getURL("src/lib/ffmpeg/util.js"));
 
-            // 2. Localiza a Classe FFmpeg no escopo global
             const scope = window.FFmpegWASM || window.FFmpeg;
             if (!scope) throw new Error("Biblioteca FFmpeg não encontrada no window.");
 
-            let FFmpegConstructor;
+            let FFmpegConstructor = typeof scope === 'function' ? scope : scope.FFmpeg;
+            if (!FFmpegConstructor) throw new Error("Construtor FFmpeg não identificado.");
 
-            if (typeof scope === 'function') {
-                FFmpegConstructor = scope;
-            } else if (scope.FFmpeg) {
-                FFmpegConstructor = scope.FFmpeg;
-            } else {
-                throw new Error("Construtor FFmpeg não identificado.");
-            }
-
-            // 3. Instancia
             this.ffmpeg = new FFmpegConstructor();
-
             this.ffmpeg.on("log", ({ message }) => console.log("[FFmpeg Core]:", message));
 
-            // 4. Carrega o WebAssembly (Core)
             await this.ffmpeg.load({
-                coreURL: this.coreUrl,
-                wasmURL: this.wasmUrl,
-                workerURL: this.workerUrl
+                coreURL: this.coreUrl, wasmURL: this.wasmUrl, workerURL: this.workerUrl
             });
 
             this.isLoaded = true;
-            console.log("Transcoder: FFmpeg pronto!");
-
         } catch (error) {
-            console.error("Solutto Transcoder: Falha no init.", error);
+            console.error("Transcoder Init Error:", error);
             throw error;
         }
     }
 
-    /**
-     * Helper para acessar fetchFile globalmente com segurança.
-     */
     _getFetchFile() {
-        if (window.FFmpegUtil && window.FFmpegUtil.fetchFile) {
-            return window.FFmpegUtil.fetchFile;
-        }
-        throw new Error("FFmpegUtil.fetchFile não disponível. Verifique o carregamento de util.js");
+        if (window.FFmpegUtil && window.FFmpegUtil.fetchFile) return window.FFmpegUtil.fetchFile;
+        throw new Error("FFmpegUtil.fetchFile indisponível.");
     }
 
-    /**
-     * Junta múltiplos segmentos de vídeo (Blobs) em um único arquivo WebM limpo.
-     */
+    // --- Métodos ---
+
+    async imageToVideo(imageBlob, durationSeconds = 5) {
+        if (!this.isLoaded) await this.init();
+        const fetchFile = this._getFetchFile();
+        const inputName = "img_" + Date.now();
+        const outputName = inputName + ".webm";
+
+        try {
+            await this.ffmpeg.writeFile(inputName, await fetchFile(imageBlob));
+
+            await this.ffmpeg.exec([
+                "-loop", "1",
+                "-i", inputName,
+                "-c:v", "libvpx",
+                "-t", durationSeconds.toString(),
+                "-pix_fmt", "yuv420p",
+                "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+                outputName
+            ]);
+
+            const data = await this.ffmpeg.readFile(outputName);
+            await this.ffmpeg.deleteFile(inputName);
+            await this.ffmpeg.deleteFile(outputName);
+
+            return URL.createObjectURL(new Blob([data.buffer], { type: "video/webm" }));
+        } catch (e) {
+            console.error(e);
+            throw new Error("Falha imageToVideo: " + (e.message || "Erro desconhecido"));
+        }
+    }
+
     async mergeSegments(blobs, outputName) {
         if (!this.isLoaded) await this.init();
-
         const fetchFile = this._getFetchFile();
         const fileList = [];
         
-        console.log(`Transcoder: Unindo ${blobs.length} segmentos...`);
-
-        // 1. Escreve segmentos no FS virtual
-        for (let i = 0; i < blobs.length; i++) {
-            const name = `part${i}.webm`;
-            await this.ffmpeg.writeFile(name, await fetchFile(blobs[i]));
-            fileList.push(`file '${name}'`);
-        }
-
-        // 2. Cria lista para concat
-        await this.ffmpeg.writeFile('list.txt', fileList.join('\n'));
-
-        // 3. Executa concat (copy streams para velocidade máxima)
-        await this.ffmpeg.exec([
-            '-f', 'concat', 
-            '-safe', '0', 
-            '-i', 'list.txt', 
-            '-c', 'copy', 
-            outputName + '.webm'
-        ]);
-
-        // 4. Recupera resultado
-        const data = await this.ffmpeg.readFile(outputName + '.webm');
-        
-        // Limpeza
-        for (let i = 0; i < blobs.length; i++) await this.ffmpeg.deleteFile(`part${i}.webm`);
-        await this.ffmpeg.deleteFile('list.txt');
-        await this.ffmpeg.deleteFile(outputName + '.webm');
-
-        return URL.createObjectURL(new Blob([data.buffer], { type: 'video/webm' }));
-    }
-
-    /**
-     * Processa vídeo único (Corte/Conversão).
-     */
-    async processVideo(fileBlob, fileName, startTime, duration, format = 'webm') {
-        if (!this.isLoaded) await this.init();
-
-        const fetchFile = this._getFetchFile();
-        const inputName = `input_${fileName}`;
-        const outputName = `output_${fileName}.${format}`;
-
         try {
-            await this.ffmpeg.writeFile(inputName, await fetchFile(fileBlob));
-
-            let command = [];
-            command.push("-i", inputName);
-            command.push("-ss", startTime.toString());
-            command.push("-t", duration.toString());
-
-            if (format === 'gif') {
-                command.push("-vf", "fps=10,scale=720:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", "-f", "gif");
-            } else if (format === 'mp4') {
-                command.push("-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-movflags", "+faststart");
-            } else {
-                command.push("-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "8", "-c:a", "libvorbis");
+            for (let i = 0; i < blobs.length; i++) {
+                const name = `part${i}.webm`;
+                await this.ffmpeg.writeFile(name, await fetchFile(blobs[i]));
+                fileList.push(`file '${name}'`);
             }
 
-            command.push(outputName);
-            console.log("Transcoder Exec:", command.join(" "));
-            
-            await this.ffmpeg.exec(command);
+            await this.ffmpeg.writeFile('list.txt', fileList.join('\n'));
 
-            const data = await this.ffmpeg.readFile(outputName);
-            
-            let mimeType = format === 'mp4' ? "video/mp4" : (format === 'gif' ? "image/gif" : "video/webm");
-            return URL.createObjectURL(new Blob([data.buffer], { type: mimeType }));
+            await this.ffmpeg.exec([
+                '-f', 'concat', '-safe', '0', '-i', 'list.txt', 
+                '-c', 'copy', outputName + '.webm'
+            ]);
 
+            const data = await this.ffmpeg.readFile(outputName + '.webm');
+            
+            // Cleanup (opcional em produção para economizar RAM)
+            for (let i = 0; i < blobs.length; i++) await this.ffmpeg.deleteFile(`part${i}.webm`);
+            await this.ffmpeg.deleteFile('list.txt');
+            await this.ffmpeg.deleteFile(outputName + '.webm');
+
+            return URL.createObjectURL(new Blob([data.buffer], { type: 'video/webm' }));
+        } catch (e) {
+            throw new Error("Merge failed: " + (e.message || e));
+        }
+    }
+
+    async processVideo(inputBlob, outputName, start, duration, format) {
+        if (!this.isLoaded) await this.init();
+        const fetchFile = this._getFetchFile();
+        const inputName = 'input.webm';
+        const outName = `${outputName}.${format}`;
+        
+        try {
+            await this.ffmpeg.writeFile(inputName, await fetchFile(inputBlob));
+            const args = ['-i', inputName];
+            if (start > 0) args.push('-ss', start.toString());
+            if (duration > 0) args.push('-t', duration.toString());
+
+            if (format === 'mp4') args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac');
+            else if (format === 'gif') args.push('-vf', 'fps=10,scale=720:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse', '-c:v', 'gif');
+            else args.push('-c', 'copy');
+
+            args.push(outName);
+            await this.ffmpeg.exec(args);
+            const data = await this.ffmpeg.readFile(outName);
+            
+            await this.ffmpeg.deleteFile(inputName);
+            await this.ffmpeg.deleteFile(outName);
+
+            let mime = format === 'mp4' ? "video/mp4" : (format === 'gif' ? "image/gif" : "video/webm");
+            return URL.createObjectURL(new Blob([data.buffer], { type: mime }));
         } catch (error) {
-            console.error("Erro FFmpeg processVideo:", error);
-            throw error;
-        } finally {
-            try {
-                await this.ffmpeg.deleteFile(inputName);
-                await this.ffmpeg.deleteFile(outputName);
-            } catch (e) {}
+            throw new Error("ProcessVideo failed: " + (error.message || error));
         }
     }
 }

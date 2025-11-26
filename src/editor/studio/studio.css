@@ -1,0 +1,202 @@
+/* src/editor/studio/studio.css */
+#studio-app {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background-color: #1e1e1e; color: #e0e0e0;
+    font-family: 'Segoe UI', sans-serif;
+    z-index: 99999;
+    flex-direction: column;
+    user-select: none;
+    box-sizing: border-box;
+}
+
+#studio-app * { box-sizing: border-box; }
+
+/* Toolbar */
+#studio-app .studio-toolbar {
+    height: 45px; background: #2d2d2d; border-bottom: 1px solid #3e3e3e;
+    display: flex; align-items: center; padding: 0 15px; gap: 10px; flex-shrink: 0;
+}
+
+#studio-app .studio-btn {
+    background: #3a3a3a; border: 1px solid #555; color: #ddd;
+    padding: 5px 10px; border-radius: 3px; cursor: pointer;
+    font-size: 12px; display: flex; align-items: center; gap: 6px; height: 30px;
+}
+#studio-app .studio-btn:hover { background: #4a4a4a; border-color: #777; }
+#studio-app .studio-btn.primary { background: #0078d7; border: none; color: white; }
+#studio-app .studio-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Zoom */
+#studio-app .zoom-control {
+    display: flex; align-items: center; gap: 8px; margin-left: 15px;
+    font-size: 11px; color: #aaa;
+}
+#studio-app input[type=range] { cursor: pointer; }
+
+/* Workspace */
+#studio-app .studio-workspace {
+    flex: 1; display: flex; height: 50%; border-bottom: 2px solid #111; overflow: hidden;
+}
+
+/* Bin */
+#studio-app .studio-bin {
+    width: 280px; background: #252525; border-right: 1px solid #3e3e3e;
+    display: flex; flex-direction: column;
+}
+#studio-app .bin-header { padding: 8px 10px; background: #2d2d2d; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+#studio-app .bin-content { flex: 1; overflow-y: auto; padding: 5px; }
+#studio-app .bin-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px;
+    background: #333; margin-bottom: 2px; border-radius: 3px;
+    cursor: grab; font-size: 11px; border: 1px solid transparent;
+}
+#studio-app .bin-item:hover { background: #444; border-color: #555; }
+#studio-app .bin-item.processing { opacity: 0.6; pointer-events: none; }
+#studio-app .bin-item i { width: 15px; text-align: center; }
+
+/* Preview */
+#studio-app .preview-container {
+    flex: 1; background: #000; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; position: relative;
+}
+#studio-app .studio-preview {
+    flex: 1; width: 100%; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; background: #050505; position: relative;
+}
+#studio-app .studio-preview video { max-width: 100%; max-height: 100%; pointer-events: none; }
+
+#studio-audio-preview { display: none; }
+
+/* Controls Bar */
+#studio-app .preview-controls {
+    height: 35px; width: 100%; background: #222; border-top: 1px solid #333;
+    display: flex; align-items: center; justify-content: center; gap: 15px;
+}
+#studio-app .control-btn {
+    background: none; border: none; color: #ccc; cursor: pointer; font-size: 14px;
+    width: 25px; height: 25px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+}
+#studio-app .control-btn:hover { background: rgba(255,255,255,0.1); color: white; }
+#studio-app .time-display { font-family: monospace; font-size: 12px; color: #888; margin-left: 15px; }
+
+/* Timeline Structure */
+#studio-app .studio-timeline {
+    height: 45%; background: #1e1e1e; display: flex; flex-direction: column; overflow: hidden; position: relative;
+}
+
+#studio-app .timeline-scroll-area {
+    flex: 1; overflow: auto; position: relative; background: #1e1e1e; display: flex; flex-direction: column;
+}
+
+#studio-app .timeline-content-wrapper {
+    position: relative; min-width: 100%; height: 100%; display: flex; flex-direction: column;
+}
+
+/* Régua */
+#studio-app .timeline-ruler-container {
+    height: 24px; background: #252525; border-bottom: 1px solid #3e3e3e;
+    display: flex; position: sticky; top: 0; z-index: 50;
+}
+
+#studio-app .ruler-header-spacer {
+    width: 120px; background: #2a2a2a; border-right: 1px solid #3e3e3e;
+    flex-shrink: 0; position: sticky; left: 0; z-index: 51;
+}
+
+#studio-app .ruler-ticks {
+    flex: 1; position: relative; background: #252525; cursor: text; overflow: hidden;
+}
+
+#studio-app .tick {
+    position: absolute; bottom: 0; border-left: 1px solid #777;
+    font-size: 9px; color: #aaa; padding-left: 2px; pointer-events: none;
+}
+#studio-app .tick.major { height: 100%; border-left-color: #999; }
+#studio-app .tick.minor { height: 30%; border-left-color: #555; }
+
+/* Playhead */
+#studio-app .timeline-playhead-overlay {
+    position: absolute; top: 24px; bottom: 0; left: 0; width: 0;
+    pointer-events: none; z-index: 100;
+}
+#studio-app .playhead-line {
+    position: absolute; top: 0; bottom: 0; width: 1px; background: #ff5252;
+    pointer-events: none; height: 100vh;
+}
+#studio-app .playhead-knob {
+    position: absolute; top: -12px; width: 11px; height: 12px;
+    background: #ff5252; transform: translateX(-50%);
+    clip-path: polygon(0 0, 100% 0, 50% 100%); z-index: 101; pointer-events: auto; cursor: ew-resize;
+}
+
+/* Tracks */
+#studio-app .track { 
+    display: flex; height: 90px; border-bottom: 1px solid #333; background: #222; width: 100%; 
+}
+#studio-app .track-header {
+    width: 120px; background: #2a2a2a; border-right: 1px solid #3e3e3e;
+    padding: 10px; display: flex; flex-direction: column; justify-content: center;
+    position: sticky; left: 0; z-index: 20; box-shadow: 2px 0 5px rgba(0,0,0,0.2); flex-shrink: 0;
+}
+#studio-app .track-lane {
+    flex: 1; position: relative; height: 100%;
+    background: repeating-linear-gradient(90deg, #252525, #252525 99px, #303030 100px);
+}
+
+/* Clips */
+#studio-app .clip {
+    position: absolute; top: 10px; height: 70px;
+    background: #37474f; border: 1px solid #546e7a; border-radius: 4px;
+    cursor: grab; overflow: hidden; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: #fff; z-index: 10; box-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+}
+#studio-app .clip.selected { border: 2px solid #ffeb3b; z-index: 50; }
+#studio-app .clip.processing::after {
+    content: "PROCESSANDO..."; position: absolute; top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.7); color: #ccc; display: flex; align-items: center; justify-content: center;
+    font-size: 9px; letter-spacing: 1px;
+}
+
+/* Fader Handle (Vegas Style) */
+#studio-app .fader-handle {
+    position: absolute; top: 0; left: 0; width: 100%; height: 6px;
+    background: rgba(255,255,255,0.3); cursor: ns-resize;
+    z-index: 20; transition: background 0.2s;
+}
+#studio-app .fader-handle:hover { background: #fff; }
+#studio-app .fader-handle::before {
+    content: ""; position: absolute; top: 0; left: 0; width: 0%; height: 100%;
+    background: var(--primary-color); /* Indica nível */
+}
+
+/* Overlay de Opacidade (Escurece o clip) */
+#studio-app .clip-opacity-overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: #000; opacity: 0; pointer-events: none; z-index: 5;
+}
+
+#studio-app .resize-handle {
+    position: absolute; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 15;
+}
+#studio-app .resize-handle:hover { background: rgba(255,255,255,0.3); }
+#studio-app .resize-handle.right { right: 0; }
+
+#studio-app .loop-marker {
+    position: absolute; top: 0; bottom: 0; width: 1px;
+    border-left: 1px dashed rgba(255,255,255,0.4); pointer-events: none;
+}
+
+/* Status Bar */
+#studio-app .status-bar {
+    height: 24px; background: #0078d7; color: white; font-size: 11px;
+    display: flex; align-items: center; padding: 0 10px; gap: 10px;
+    overflow: hidden; transition: height 0.3s;
+}
+#studio-app .status-bar.hidden { height: 0; }
+#studio-app .status-spinner {
+    width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

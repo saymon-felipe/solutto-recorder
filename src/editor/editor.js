@@ -1,19 +1,24 @@
 import { DriveService } from '../services/DriveService.js';
 import { VideoStorage } from '../services/VideoStorage.js';
 import { TranscodeService } from './transcode.js';
+import { StudioManager } from './studio/studio.js';
 
 class EditorManager {
     constructor() {
-        this.videoBlob = null; 
+        this.videoBlob = null;
         this.videoUrl = null;
         this.fileName = "";
         this.duration = 0;
         this.isProcessing = false;
         this.currentExtension = "webm"; 
 
+        // Instancia Studio
+        this.studio = new StudioManager(this);
+
         this.driveService = new DriveService();
         this.transcoder = new TranscodeService();
 
+        // Mapeia UI
         this.ui = {
             video: document.getElementById("video-player"),
             rangeMin: document.getElementById("range-min"),
@@ -27,11 +32,15 @@ class EditorManager {
             btnDownloadGif: document.getElementById("btn-download-gif"),
             btnDrive: document.getElementById("btn-drive"),
             loader: document.getElementById("processing-overlay"),
-            loadingText: document.getElementById("loading-text")
+            loadingText: document.getElementById("loading-text"),
+            btnOpenStudio: document.getElementById("btn-open-studio")
         };
     }
 
     async init() {
+        // Inicia UI do Studio
+        this.studio.init();
+
         const data = await chrome.storage.local.get(["videoId"]);
         if (!data.videoId) return alert("Nenhum vídeo encontrado.");
 
@@ -42,30 +51,25 @@ class EditorManager {
             await this.transcoder.init();
             const storage = new VideoStorage();
             
-            // 1. Pega os segmentos SEPARADOS (Blob[])
+            // Lógica de Crash Recovery (Segmentos)
             const segments = await storage.getVideoSegments(data.videoId);
-            console.log(`Recuperado ${segments.length} segmentos de vídeo.`);
+            console.log(`Recuperado ${segments.length} segmentos.`);
 
-            // 2. Se houver mais de 1 segmento (houve Crash/F5), faz o merge
             if (segments.length > 1) {
-                this._setLoading(true, "Unindo partes da gravação...");
+                this._setLoading(true, "Unindo gravação...");
                 this.videoUrl = await this.transcoder.mergeSegments(segments, "merged_video");
-                
-                // Atualiza o blob principal com o resultado do merge
                 const resp = await fetch(this.videoUrl);
                 this.videoBlob = await resp.blob();
             } else {
-                // Vídeo normal, sem cortes
                 this.videoBlob = segments[0];
                 this.videoUrl = URL.createObjectURL(this.videoBlob);
             }
             
-            // 3. Carrega no player
             await this._loadVideo(this.videoUrl);
             this._setupListeners();
 
         } catch (error) {
-            console.error("Erro fatal init:", error);
+            console.error("Erro init:", error);
             alert("Erro: " + error.message);
         } finally {
             this._setLoading(false);
@@ -85,10 +89,7 @@ class EditorManager {
                 this._enableButtons();
                 resolve();
             };
-            this.ui.video.onerror = (e) => {
-                console.error("Erro Player:", this.ui.video.error);
-                resolve();
-            };
+            this.ui.video.onerror = (e) => { console.error("Erro Player:", this.ui.video.error); resolve(); };
         });
     }
 
@@ -97,23 +98,29 @@ class EditorManager {
             videoElement.currentTime = 1e101;
             videoElement.ontimeupdate = () => {
                 videoElement.ontimeupdate = null;
-                const d = videoElement.duration;
-                videoElement.currentTime = 0;
-                resolve(d);
+                resolve(videoElement.duration);
             };
         });
     }
 
     _setupListeners() {
-        this.ui.rangeMin.addEventListener("input", () => this._updateSlider("min"));
-        this.ui.rangeMax.addEventListener("input", () => this._updateSlider("max"));
-        this.ui.btnCut.addEventListener("click", () => this._handleCut());
-        this.ui.btnDownload.addEventListener("click", () => this._handleDownload("webm"));
-        this.ui.btnDownloadMp4.addEventListener("click", () => this._handleConvertAndDownloadMP4());
-        this.ui.btnDownloadGif.addEventListener("click", () => this._handleConvertAndDownloadGif());
-        this.ui.btnDrive.addEventListener("click", () => this._handleDriveUpload());
+        // Listeners seguros (verificam se o elemento existe)
+        if(this.ui.rangeMin) this.ui.rangeMin.addEventListener("input", () => this._updateSlider("min"));
+        if(this.ui.rangeMax) this.ui.rangeMax.addEventListener("input", () => this._updateSlider("max"));
+        
+        if(this.ui.btnCut) this.ui.btnCut.addEventListener("click", () => this._handleCut());
+        
+        // Botões de Download
+        if(this.ui.btnDownload) this.ui.btnDownload.addEventListener("click", () => this._handleDownload("webm"));
+        if(this.ui.btnDownloadMp4) this.ui.btnDownloadMp4.addEventListener("click", () => this._handleConvertAndDownloadMP4());
+        if(this.ui.btnDownloadGif) this.ui.btnDownloadGif.addEventListener("click", () => this._handleConvertAndDownloadGif());
+        
+        if(this.ui.btnDrive) this.ui.btnDrive.addEventListener("click", () => this._handleDriveUpload());
+        
+        // Botão Studio
+        if(this.ui.btnOpenStudio) this.ui.btnOpenStudio.addEventListener("click", () => this.studio.toggleMode());
     }
-
+    
     _resetSlider() {
         this.ui.rangeMin.value = 0;
         this.ui.rangeMax.value = 100;
@@ -204,6 +211,8 @@ class EditorManager {
         this.isProcessing = active;
         if (this.ui.loadingText) this.ui.loadingText.innerText = text || "Carregando...";
         if (this.ui.loader) this.ui.loader.style.display = active ? "flex" : "none";
+        
+        [this.ui.btnCut, this.ui.btnDownload, this.ui.btnDownloadMp4, this.ui.btnDownloadGif, this.ui.btnDrive].forEach(b => { if(b) b.disabled = active; });
     }
 
     _enableButtons() {

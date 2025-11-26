@@ -1,80 +1,70 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Solutto Recorder - Editor</title>
-  <link rel="shortcut icon" href="../../assets/icon.png" type="image/png">
-  <link rel="stylesheet" href="editor.css">
-  <link rel="stylesheet" href="../lib/fontawesome/css/all.min.css">
+    <meta charset="UTF-8">
+    <title>Solutto Editor</title>
+    
+    <link rel="stylesheet" href="./editor.css">
+    
+    <link rel="stylesheet" href="./studio/studio.css">
+    
+    <link rel="stylesheet" href="../lib/fontawesome/css/all.min.css">
 </head>
 <body>
-    <div class="editor-wrapper">
-        <div class="container">
-            <header class="header-container">
-                <div class="brand">
-                    <img src="../../assets/icon.png" alt="Solutto Icon">
-                    <h1>Solutto Recorder</h1>
-                </div>
-                <a href="https://solutto.com.br" target="_blank" class="website-link">solutto.com.br</a>
-            </header>
-            <main class="editor-workspace">
-                <div class="video-preview-area">
-                    <video id="video-player" controls playsinline></video>
-                </div>
-                <aside class="controls-sidebar">
-                    <div class="loading-overlay" id="processing-overlay">
-                        <div class="loader-content">
-                            <svg class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
-                            <p id="loading-text">Processando vídeo...</p>
-                        </div>
-                    </div>
-                    <div class="control-group">
-                        <h3>Cortar Vídeo</h3>
-                        <div class="time-inputs">
-                            <input type="text" id="start-time" value="00:00:00" readonly>
-                            <span class="separator">-</span>
-                            <input type="text" id="end-time" value="00:00:00" readonly>
-                        </div>
-                        <div class="range-slider-container">
-                            <div class="slider-track"></div>
-                            <div class="slider-fill" id="range-fill"></div>
-                            <input type="range" id="range-min" min="0" max="100" value="0">
-                            <input type="range" id="range-max" min="0" max="100" value="100">
-                        </div>
-                        <button class="btn-action secondary" id="btn-cut" disabled><i class="fa-solid fa-scissors"></i> Aplicar Corte</button>
-                    </div>
-                    <div class="divider"></div>
-                    <div class="control-group export-actions">
-                        <button class="btn-action primary" id="btn-download" disabled>
-                            <i class="fa-solid fa-download"></i>
-                            <span>Baixar (Original)</span>
-                        </button>
+    <div class="container">
+        <header>
+            <img src="../../assets/icone-solutto-recorder.png" alt="Logo" class="logo">
+            <h1>Editor de Vídeo</h1>
+            <button id="btn-open-studio" class="btn-secondary" style="margin-left: auto; border:1px solid #0078d7; color:#0078d7;">
+                <i class="fa-solid fa-layer-group"></i> Modo Estúdio PRO
+            </button>
+        </header>
 
-                        <button class="btn-action secondary" id="btn-download-mp4" disabled>
-                            <i class="fa-solid fa-file-video"></i>
-                            <span>Baixar em MP4</span>
-                        </button>
+        <div class="video-container">
+            <video id="video-player" controls></video>
+            <div id="processing-overlay">
+                <div class="spinner"></div>
+                <p id="loading-text">Processando...</p>
+            </div>
+        </div>
 
-                        <button class="btn-action secondary" id="btn-download-gif" disabled>
-                            <i class="fa-solid fa-image"></i>
-                            <span>Baixar como GIF</span>
-                        </button>
-                        
-                        <button class="btn-action google-drive" id="btn-drive" disabled>
-                            <i class="fa-brands fa-google-drive"></i>
-                            <span>Salvar no Drive</span>
-                        </button>
-                    </div>
-                </aside>
-            </main>
+        <div class="controls">
+            <div class="timeline-container">
+                <div class="range-slider-container">
+                    <div class="slider-track"></div>
+                    <div class="slider-fill" id="range-fill"></div>
+                    <input type="range" id="range-min" min="0" max="100" value="0">
+                    <input type="range" id="range-max" min="0" max="100" value="100">
+                </div>
+                <div class="time-inputs">
+                    <input type="text" id="start-time" value="00:00:00">
+                    <input type="text" id="end-time" value="00:00:00">
+                </div>
+            </div>
+
+            <div class="actions">
+                <button id="btn-cut" class="btn-primary" disabled>
+                    <i class="fa-solid fa-scissors"></i> Cortar
+                </button>
+                <button id="btn-download" class="btn-secondary" disabled>
+                    <i class="fa-solid fa-download"></i> Baixar original (Rápido)
+                </button>
+                <button id="btn-download-mp4" class="btn-secondary" disabled>
+                    <i class="fa-solid fa-file-video"></i> Baixar MP4 (Lento)
+                </button>
+                <button id="btn-download-gif" class="btn-secondary" disabled>
+                    <i class="fa-solid fa-image"></i> Baixar GIF
+                </button>
+                <button id="btn-drive" class="btn-google" disabled>
+                    <i class="fa-brands fa-google-drive"></i> Enviar Google Drive
+                </button>
+            </div>
         </div>
     </div>
 
     <script src="../lib/ffmpeg/umd/ffmpeg.js"></script>
     <script src="../lib/ffmpeg/util.js"></script>
-
-    <script src="transcode.js" type="module"></script>
-    <script src="editor.js" type="module"></script>
+    
+    <script type="module" src="./editor.js"></script>
 </body>
 </html>
