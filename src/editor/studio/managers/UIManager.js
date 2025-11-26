@@ -39,22 +39,67 @@ export class UIManager {
             </div>
 
             <div class="studio-timeline">
+                <div class="timeline-ruler-container" id="timeline-ruler-container">
+                    <div class="ruler-header-spacer"></div>
+                    <div class="ruler-ticks"></div>
+                </div>
+
+                <div class="timeline-playhead-overlay" id="timeline-playhead">
+                    <div class="playhead-knob"></div><div class="playhead-line"></div>
+                </div>
+                
                 <div class="timeline-scroll-area" id="studio-scroll-area">
                     <div class="timeline-content-wrapper" id="timeline-content-wrapper">
-                        <div class="timeline-ruler-container" id="timeline-ruler-container">
-                            <div class="ruler-header-spacer"></div>
-                            <div class="ruler-ticks"></div>
-                        </div>
-                        <div class="timeline-playhead-overlay" id="timeline-playhead">
-                            <div class="playhead-knob"></div><div class="playhead-line"></div>
-                        </div>
-                        <div class="timeline-tracks" id="studio-tracks"></div>
+                        
+                        <div id="studio-tracks"></div> 
+                        
                     </div>
                 </div>
             </div>
             
             <div class="status-bar hidden" id="studio-status-bar">
                 <div class="status-spinner"></div><span id="studio-status-text">Processando...</span>
+            </div>
+
+            <div id="render-modal" class="modal-overlay hidden">
+                <div class="modal-content">
+                    <h3>Opções de Renderização</h3>
+                    <div class="modal-body">
+                        
+                        <div class="input-group">
+                            <label for="render-resolution">Resolução:</label>
+                            <select id="render-resolution">
+                                <option value="low">480p</option>
+                                <option value="medium">720p (HD)</option>
+                                <option value="high">1080p (Full HD)</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="render-quality">Qualidade (Preset):</label>
+                            <select id="render-quality">
+                                <option value="ultrafast">Baixa (Mais Rápido)</option>
+                                <option value="medium" selected>Média (Equilíbrio)</option>
+                                <option value="veryslow">Alta (Melhor Qualidade)</option>
+                            </select>
+                        </div>
+
+                    </div>
+                    <div class="modal-actions">
+                        <button class="studio-btn" id="btn-render-cancel">Cancelar</button>
+                        <button class="studio-btn primary" id="btn-render-confirm">Confirmar e Renderizar</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="render-progress-bar" class="progress-overlay hidden">
+                <div class="progress-box">
+                    <h4>Renderizando...</h4>
+                    <div class="progress-container">
+                        <div class="progress-fill" style="width: 0%"></div>
+                    </div>
+                    <p id="progress-text">0% - Inicializando FFmpeg</p>
+                </div>
             </div>
 
             <input type="file" id="studio-upload" multiple style="display:none" accept="video/*,audio/*,image/*">

@@ -12,13 +12,11 @@ export class StudioManager {
         
         this.project = {
             tracks: [
-                { id: 1, type: 'video', name: 'V1 Principal', clips: [] },
-                { id: 2, type: 'video', name: 'V2 Overlay', clips: [] },
-                { id: 3, type: 'audio', name: 'A1 Áudio Orig.', clips: [] },
-                { id: 4, type: 'audio', name: 'A2 Música/FX', clips: [] }
+                { id: "track_v1", type: 'video', name: 'Video 1', clips: [] },
+                { id: "track_a1", type: 'audio', name: 'Audio 1', clips: [] }
             ],
             assets: [],
-            zoom: 20, 
+            zoom: 100, 
             duration: 300, 
             currentTime: 0
         };
@@ -106,7 +104,7 @@ export class StudioManager {
                 this.timelineManager.addClipToTrack(videoTrack.id, asset, startTime, groupId);
                 
                 const addedClip = videoTrack.clips[videoTrack.clips.length - 1];
-                if(addedClip) addedClip.muted = true; // <--- O PULO DO GATO
+                if(addedClip) addedClip.muted = true; 
             }
             
             // 2. Adiciona Áudio Separado
@@ -123,5 +121,42 @@ export class StudioManager {
              const videoTrack = this.project.tracks.find(t => t.type === 'video');
              if (videoTrack) this.timelineManager.addClipToTrack(videoTrack.id, asset, startTime, null);
         }
+    }
+
+    addTrack(type) {
+        const count = this.project.tracks.filter(t => t.type === type).length + 1;
+        const newTrack = {
+            id: `track_${type}_${Date.now()}`,
+            type: type,
+            name: `${type === 'video' ? 'Video' : 'Audio'} ${count}`,
+            clips: []
+        };
+        this.project.tracks.push(newTrack);
+        this.timelineManager.renderTracks();
+    }
+
+    reorderTracks(fromIndex, toIndex) {
+        const item = this.project.tracks.splice(fromIndex, 1)[0];
+        this.project.tracks.splice(toIndex, 0, item);
+        this.timelineManager.renderTracks();
+    }
+
+    // Valida e move o clip de track
+    moveClipToTrack(clip, targetTrackId) {
+        const currentTrack = this.project.tracks.find(t => t.clips.find(c => c.id === clip.id));
+        const targetTrack = this.project.tracks.find(t => t.id === targetTrackId);
+
+        if (!currentTrack || !targetTrack) return false;
+        
+        // --- VALIDAÇÃO DE TIPO (Video só em Video, Audio só em Audio) ---
+        if (currentTrack.type !== targetTrack.type) return false;
+        if (currentTrack.id === targetTrack.id) return false;
+
+        // Move os dados
+        currentTrack.clips = currentTrack.clips.filter(c => c.id !== clip.id);
+        
+        targetTrack.clips.push(clip);
+        
+        return true;
     }
 }

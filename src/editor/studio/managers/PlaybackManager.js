@@ -24,7 +24,6 @@ export class PlaybackManager {
         const knob = document.querySelector('.playhead-knob');
         const wrapper = document.getElementById('timeline-content-wrapper');
         
-        // Se o UIManager ainda não criou, tentamos depois (no init do studio)
         if(!knob) return;
 
         knob.onmousedown = (e) => {
@@ -32,7 +31,6 @@ export class PlaybackManager {
             const onMove = (ev) => {
                 const rect = wrapper.getBoundingClientRect();
                 const x = ev.clientX - rect.left; // Relativo ao wrapper
-                // Subtrai header para obter tempo
                 const trackX = x - getHeaderWidth();
                 
                 this.studio.project.currentTime = Math.max(0, trackX / this.studio.project.zoom);
@@ -98,11 +96,12 @@ export class PlaybackManager {
         const tracks = this.studio.project.tracks;
         
         let activeVideo = null;
-        // Overlay > Main
-        const track2 = tracks.find(t => t.id === 2);
-        const track1 = tracks.find(t => t.id === 1);
-        if (track2) activeVideo = track2.clips.find(c => time >= c.start && time < (c.start + c.duration));
-        if (!activeVideo && track1) activeVideo = track1.clips.find(c => time >= c.start && time < (c.start + c.duration));
+        // Lógica de procura do clipe de vídeo ativo (assumindo IDs 1 e 2)
+        const videoTracks = tracks.filter(t => t.type === 'video').sort((a, b) => b.id - a.id); // Prioriza IDs maiores (overlay)
+        for (const t of videoTracks) {
+            const clip = t.clips.find(c => time >= c.start && time < (c.start + c.duration));
+            if (clip) { activeVideo = clip; break; }
+        }
         
         this._syncPlayer(this.previewVideo, activeVideo, time);
 

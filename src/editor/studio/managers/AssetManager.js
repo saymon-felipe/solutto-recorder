@@ -32,8 +32,9 @@ export class AssetManager {
     }
 
     async _createAsset(file, name, mimeOverride) {
-        let type = 'unknown'; let blob = file; let duration = 0;
-        const mime = mimeOverride || (file.type ? file.type.split('/')[0] : 'video');
+        let type; let duration; 
+        const blob = new Blob([file], { type: file.type });
+        const mime = mimeOverride || file.type.split('/')[0];
 
         if (mime === 'image') {
             type = 'video'; name = "[IMG] " + name;
@@ -67,8 +68,8 @@ export class AssetManager {
             
             if(asset.status !== 'processing') {
                 item.ondragstart = (e) => { 
-                    this.studio.draggedAsset = asset; 
-                    e.dataTransfer.effectAllowed = "copy"; 
+                    this.studio.draggedAsset = asset;
+                    e.dataTransfer.setData('text/plain', asset.id);
                 };
             }
             list.appendChild(item);

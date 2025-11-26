@@ -1,133 +1,718 @@
 /* src/editor/studio/studio.css */
+
+/* =========================================
+   1. ESTRUTURA PRINCIPAL & RESET
+   ========================================= */
 #studio-app {
-    display: none;
-    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-    background-color: #1e1e1e; color: #e0e0e0;
-    font-family: 'Segoe UI', sans-serif; z-index: 99999;
-    flex-direction: column; user-select: none; box-sizing: border-box;
+    display: none; /* Ativado via JS (toggleMode) */
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    width: 100vw; 
+    height: 100vh;
+    background-color: #1e1e1e; 
+    color: #e0e0e0;
+    font-family: 'Segoe UI', sans-serif; 
+    z-index: 99999;
+    flex-direction: column; 
+    user-select: none; 
+    box-sizing: border-box;
 }
-#studio-app * { box-sizing: border-box; }
 
-/* Toolbar */
+#studio-app * { 
+    box-sizing: border-box; 
+}
+
+/* =========================================
+   2. TOOLBAR (TOPO)
+   ========================================= */
 #studio-app .studio-toolbar {
-    height: 45px; background: #2d2d2d; border-bottom: 1px solid #3e3e3e;
-    display: flex; align-items: center; padding: 0 15px; gap: 10px; flex-shrink: 0;
+    height: 45px; 
+    background: #2d2d2d; 
+    border-bottom: 1px solid #3e3e3e;
+    display: flex; 
+    align-items: center; 
+    padding: 0 15px; 
+    gap: 10px; 
+    flex-shrink: 0;
 }
+
 #studio-app .studio-btn {
-    background: #3a3a3a; border: 1px solid #555; color: #ddd;
-    padding: 5px 10px; border-radius: 3px; cursor: pointer;
-    font-size: 12px; display: flex; align-items: center; gap: 6px; height: 30px;
+    background: #3a3a3a; 
+    border: 1px solid #555; 
+    color: #ddd;
+    padding: 5px 10px; 
+    border-radius: 3px; 
+    cursor: pointer;
+    font-size: 12px; 
+    display: flex; 
+    align-items: center; 
+    gap: 6px; 
+    height: 30px;
 }
-#studio-app .studio-btn:hover { background: #4a4a4a; border-color: #777; }
-#studio-app .studio-btn.primary { background: #0078d7; border: none; color: white; }
-#studio-app .studio-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-#studio-app .zoom-control { display: flex; align-items: center; gap: 8px; margin-left: 15px; font-size: 11px; color: #aaa; }
-#studio-app input[type=range] { cursor: pointer; }
+#studio-app .studio-btn:hover { 
+    background: #4a4a4a; 
+    border-color: #777; 
+}
 
-/* Workspace */
-#studio-app .studio-workspace { flex: 1; display: flex; height: 50%; border-bottom: 2px solid #111; overflow: hidden; }
-#studio-app .studio-bin { width: 280px; background: #252525; border-right: 1px solid #3e3e3e; display: flex; flex-direction: column; }
-#studio-app .bin-header { padding: 8px 10px; background: #2d2d2d; font-size: 11px; font-weight: bold; text-transform: uppercase; }
-#studio-app .bin-content { flex: 1; overflow-y: auto; padding: 5px; }
+#studio-app .studio-btn.primary { 
+    background: #0078d7; 
+    border: none; 
+    color: white; 
+}
+
+#studio-app .studio-btn:disabled { 
+    opacity: 0.5; 
+    cursor: not-allowed; 
+}
+
+#studio-app .zoom-control { 
+    display: flex; 
+    align-items: center; 
+    gap: 8px; 
+    margin-left: 15px; 
+    font-size: 11px; 
+    color: #aaa; 
+}
+
+#studio-app input[type=range] { 
+    cursor: pointer; 
+}
+
+/* =========================================
+   3. WORKSPACE (BIN & PREVIEW)
+   ========================================= */
+#studio-app .studio-workspace { 
+    flex: 1; 
+    display: flex; 
+    height: 50%; 
+    border-bottom: 2px solid #111; 
+    overflow: hidden; 
+}
+
+/* --- Painel Lateral Esquerdo (Bin de Mídia) --- */
+#studio-app .studio-bin { 
+    width: 280px; 
+    background: #252525; 
+    border-right: 1px solid #3e3e3e; 
+    display: flex; 
+    flex-direction: column; 
+}
+
+#studio-app .bin-header { 
+    padding: 8px 10px; 
+    background: #2d2d2d; 
+    font-size: 11px; 
+    font-weight: bold; 
+    text-transform: uppercase; 
+}
+
+#studio-app .bin-content { 
+    flex: 1; 
+    overflow-y: auto; 
+    padding: 5px; 
+}
+
 #studio-app .bin-item {
-    display: flex; align-items: center; gap: 8px; padding: 6px;
-    background: #333; margin-bottom: 2px; border-radius: 3px;
-    cursor: grab; font-size: 11px; border: 1px solid transparent;
+    display: flex; 
+    align-items: center; 
+    gap: 8px; 
+    padding: 6px;
+    background: #333; 
+    margin-bottom: 2px; 
+    border-radius: 3px;
+    cursor: grab; 
+    font-size: 11px; 
+    border: 1px solid transparent;
 }
-#studio-app .bin-item:hover { background: #444; border-color: #555; }
-#studio-app .bin-item i { width: 15px; text-align: center; }
 
-/* Preview */
-#studio-app .preview-container { flex: 1; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
-#studio-app .studio-preview { flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #050505; position: relative; }
-#studio-app .studio-preview video { max-width: 100%; max-height: 100%; pointer-events: none; }
-#studio-audio-preview { display: none; }
+#studio-app .bin-item:hover { 
+    background: #444; 
+    border-color: #555; 
+}
+
+#studio-app .bin-item i { 
+    width: 15px; 
+    text-align: center; 
+}
+
+/* --- Área de Preview (Centro) --- */
+#studio-app .preview-container { 
+    flex: 1; 
+    background: #000; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    justify-content: center; 
+    position: relative; 
+}
+
+#studio-app .studio-preview { 
+    flex: 1; 
+    width: 100%; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    overflow: hidden; 
+    background: #050505; 
+    position: relative; 
+}
+
+#studio-app .studio-preview video { 
+    max-width: 100%; 
+    max-height: 100%; 
+    pointer-events: none; 
+}
+
+#studio-audio-preview { 
+    display: none; 
+}
 
 #studio-app .preview-controls {
-    height: 35px; width: 100%; background: #222; border-top: 1px solid #333;
-    display: flex; align-items: center; justify-content: center; gap: 15px;
+    height: 35px; 
+    width: 100%; 
+    background: #222; 
+    border-top: 1px solid #333;
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    gap: 15px;
 }
+
 #studio-app .control-btn {
-    background: none; border: none; color: #ccc; cursor: pointer; font-size: 14px;
-    width: 25px; height: 25px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: none; 
+    border: none; 
+    color: #ccc; 
+    cursor: pointer; 
+    font-size: 14px;
+    width: 25px; 
+    height: 25px; 
+    border-radius: 50%; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center;
 }
-#studio-app .control-btn:hover { background: rgba(255,255,255,0.1); color: white; }
-#studio-app .time-display { font-family: monospace; font-size: 12px; color: #888; margin-left: 15px; }
 
-/* Timeline */
-#studio-app .studio-timeline { height: 45%; background: #1e1e1e; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-#studio-app .timeline-scroll-area { flex: 1; overflow: auto; position: relative; background: #1e1e1e; display: flex; flex-direction: column; }
-#studio-app .timeline-content-wrapper { position: relative; min-width: 100%; height: 100%; display: flex; flex-direction: column; }
+#studio-app .control-btn:hover { 
+    background: rgba(255,255,255,0.1); 
+    color: white; 
+}
 
-#studio-app .timeline-ruler-container { min-height: 20px; background: #252525; border-bottom: 1px solid #3e3e3e; display: flex; position: sticky; top: 0; z-index: 50; }
-#studio-app .ruler-header-spacer { width: 120px; background: #2a2a2a; border-right: 1px solid #3e3e3e; flex-shrink: 0; position: sticky; left: 0; z-index: 51; }
-#studio-app .ruler-ticks { flex: 1; position: relative; background: #252525; cursor: text; overflow: hidden; }
-#studio-app .tick { position: absolute; bottom: 0; border-left: 1px solid #777; font-size: 9px; color: #aaa; padding-left: 2px; pointer-events: none; }
+#studio-app .time-display { 
+    font-family: monospace; 
+    font-size: 12px; 
+    color: #888; 
+    margin-left: 15px; 
+}
+
+/* =========================================
+   4. TIMELINE (GERAL & RÉGUA)
+   ========================================= */
+#studio-app .studio-timeline { 
+    height: 45%; 
+    background: #1e1e1e; 
+    display: flex; 
+    flex-direction: column; 
+    overflow: hidden; 
+    position: relative; 
+}
+
+#studio-app .timeline-scroll-area { 
+    flex: 1; 
+    overflow: auto; 
+    position: relative; 
+    background: #1e1e1e; 
+    display: flex; 
+    flex-direction: column; 
+}
+
+#studio-app .timeline-content-wrapper { 
+    position: relative; 
+    min-width: 100%; 
+    height: 100%; 
+    display: flex; 
+    flex-direction: column; 
+}
+
+/* Régua de Tempo */
+#studio-app .timeline-ruler-container { 
+    height: 24px; 
+    background: #252525; 
+    border-bottom: 1px solid #3e3e3e; 
+    display: flex; 
+    position: sticky; 
+    top: 0; 
+    z-index: 50; 
+}
+
+/* Espaçador do Cabeçalho (Canto Superior Esquerdo - Onde fica o botão Add) */
+#studio-app .ruler-header-spacer { 
+    width: 120px; 
+    background: #222; 
+    border-right: 1px solid #3e3e3e; 
+    flex-shrink: 0; 
+    position: sticky; 
+    left: 0; 
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+}
+
+#studio-app .ruler-ticks { 
+    flex: 1; 
+    position: relative; 
+    background: #252525; 
+    cursor: text; 
+    overflow: hidden; 
+}
+
+#studio-app .tick { 
+    position: absolute; 
+    bottom: 0; 
+    border-left: 1px solid #777; 
+    font-size: 9px; 
+    color: #aaa; 
+    padding-left: 2px; 
+    pointer-events: none; 
+}
+
 #studio-app .tick.major { height: 100%; border-left-color: #999; }
 #studio-app .tick.minor { height: 30%; border-left-color: #555; }
 
-/* Playhead */
-#studio-app .timeline-playhead-overlay { position: absolute; top: 24px; bottom: 0; left: 0; pointer-events: none; z-index: 100; }
-#studio-app .playhead-line { position: absolute; top: 0; bottom: 0; width: 1px; background: #ff5252; pointer-events: none; height: 100vh; }
-#studio-app .playhead-knob {
-    position: absolute; top: -12px; width: 11px; height: 12px;
-    background: #ff5252; transform: translateX(-50%);
-    clip-path: polygon(0 0, 100% 0, 50% 100%);
-    z-index: 101; pointer-events: auto; cursor: ew-resize;
+/* =========================================
+   5. BOTÃO "ADICIONAR TRACK" (DROPDOWN)
+   ========================================= */
+.track-add-dropdown-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-/* Tracks */
-#studio-app .track { display: flex; height: 90px; border-bottom: 1px solid #333; background: #222; width: 100%; }
+.btn-add-track-header {
+    background: #333;
+    border: 1px solid #444;
+    color: #ccc;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 10px;
+    padding: 4px 8px;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    transition: all 0.2s;
+}
+
+.btn-add-track-header:hover {
+    background: #444;
+    color: white;
+    border-color: #666;
+}
+
+/* Menu Dropdown */
+.dropdown-content-header {
+    display: none; /* Ativado via classe .show */
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background-color: #2d2d2d;
+    min-width: 130px;
+    box-shadow: 0px 4px 12px rgba(0,0,0,0.5);
+    z-index: 200;
+    border: 1px solid #444;
+    border-radius: 4px;
+    margin-top: 2px;
+}
+
+.dropdown-content-header.show {
+    display: block;
+}
+
+.dropdown-content-header a {
+    color: #ccc;
+    padding: 8px 10px;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    transition: background 0.1s;
+}
+
+.dropdown-content-header a:hover {
+    background-color: #0078d7;
+    color: white;
+}
+
+/* =========================================
+   6. TRACKS (TRILHAS)
+   ========================================= */
+#studio-tracks {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding-bottom: 50px; /* Espaço para scroll */
+}
+
+/* Container Individual da Track */
+#studio-app .track {
+    display: flex;
+    flex-direction: row;
+    height: 90px;       /* Altura fixa essencial */
+    min-height: 90px;
+    width: 100%;
+    border-bottom: 1px solid #333;
+    background: #222;
+    flex-shrink: 0;
+    position: relative;
+}
+
+/* Cabeçalho da Track (Esquerda) */
 #studio-app .track-header {
-    width: 120px; background: #2a2a2a; border-right: 1px solid #3e3e3e;
-    padding: 10px; display: flex; flex-direction: column; justify-content: center;
-    position: sticky; left: 0; z-index: 20; box-shadow: 2px 0 5px rgba(0,0,0,0.2); flex-shrink: 0;
+    width: 120px;       /* Largura igual ao HEADER_WIDTH */
+    min-width: 120px;
+    background: #2a2a2a;
+    border-right: 1px solid #3e3e3e;
+    display: flex;
+    align-items: center;
+    padding: 0 5px;
+    gap: 5px;
+    position: sticky; 
+    left: 0; 
+    z-index: 20;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+    cursor: grab;
+    user-select: none;
 }
-#studio-app .track-lane { flex: 1; position: relative; height: 100%; background: repeating-linear-gradient(90deg, #252525, #252525 99px, #303030 100px); }
 
-/* Clips */
+#studio-app .track-header:active { cursor: grabbing; }
+#studio-app .track-header.dragging { opacity: 0.5; background: #444; }
+
+.drag-handle { color: #666; cursor: grab; padding: 2px; }
+
+/* Input para Renomear */
+.track-name-input {
+    background: transparent; 
+    border: 1px solid transparent;
+    color: #ccc; 
+    font-size: 11px; 
+    width: 70px;
+    padding: 2px; 
+    border-radius: 3px;
+}
+.track-name-input:hover, .track-name-input:focus {
+    border-color: #555; 
+    background: #222; 
+    color: white;
+}
+
+.track-type-icon { font-size: 10px; color: #555; margin-left: auto; }
+
+/* Lane (Área de conteúdo da track) */
+#studio-app .track-lane {
+    flex: 1;
+    position: relative;
+    height: 100%;
+    background: repeating-linear-gradient(90deg, #252525, #252525 99px, #303030 100px);
+    overflow: hidden; 
+}
+
+/* =========================================
+   7. CLIPS & OBJETOS NA TIMELINE
+   ========================================= */
 #studio-app .clip {
-    position: absolute; top: 10px; height: 70px;
-    background: #37474f; border: 1px solid #546e7a; border-radius: 4px;
-    cursor: grab; overflow: hidden; display: flex; align-items: center; justify-content: center;
-    font-size: 10px; color: #fff; z-index: 10; box-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    position: absolute; 
+    top: 10px; 
+    height: 70px;
+    background: #37474f; 
+    border: 1px solid #546e7a; 
+    border-radius: 4px;
+    cursor: grab; 
+    overflow: hidden; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center;
+    font-size: 10px; 
+    color: #fff; 
+    z-index: 10;
+    box-shadow: 2px 2px 4px rgba(0,0,0,0.3);
 }
-#studio-app .clip.selected { border: 2px solid #ffeb3b; z-index: 50; }
 
-/* --- FADER STYLES (Sony Vegas Style) --- */
-/* Área sensível no topo para arrastar */
+#studio-app .clip.selected { 
+    border: 2px solid #ffeb3b; 
+    z-index: 50; 
+}
+
+/* --- Fader Handles (Estilo Sony Vegas) --- */
 #studio-app .fader-handle {
-    position: absolute; top: 0; left: 0; width: 100%; height: 10px;
-    cursor: ns-resize; z-index: 20; opacity: 0; transition: opacity 0.2s;
+    position: absolute; 
+    top: 0; 
+    left: 0; 
+    width: 100%;
+    height: 10px; /* Área de clique no topo */
+    cursor: ns-resize; 
+    z-index: 20; 
+    opacity: 0; 
+    transition: opacity 0.2s;
 }
-/* Exibe handle ao passar mouse no clip */
+
 #studio-app .clip:hover .fader-handle { opacity: 1; }
-/* Linha branca brilhante no topo do handle */
+
+/* Linha branca brilhante */
 #studio-app .fader-handle::before {
-    content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 2px;
-    background: rgba(255,255,255,0.8); box-shadow: 0 0 4px rgba(255,255,255,0.5);
+    content: ""; 
+    position: absolute; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 2px;
+    background: rgba(255,255,255,0.8); 
+    box-shadow: 0 0 4px rgba(255,255,255,0.5);
 }
 
-/* Linha que desce indicando o nível atual */
-#studio-app .fader-level-line {
-    position: absolute; left: 0; width: 100%; height: 1px;
-    background: white; opacity: 0.8; pointer-events: none; z-index: 15;
+/* Linha de nível */
+#studio-app .fader-line {
+    position: absolute; 
+    left: 0; 
+    width: 100%; 
+    height: 1px;
+    background: white; 
+    opacity: 0.8; 
+    pointer-events: none; 
+    z-index: 15;
 }
 
-/* Overlay preto que escurece o clip */
+/* Overlay de Opacidade */
 #studio-app .clip-opacity-overlay {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: #000; opacity: 0; pointer-events: none; z-index: 5;
+    position: absolute; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 100%;
+    background: #000; 
+    opacity: 0; 
+    pointer-events: none; 
+    z-index: 5;
 }
 
-#studio-app .resize-handle { position: absolute; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 15; }
-#studio-app .resize-handle:hover { background: rgba(255,255,255,0.3); }
-#studio-app .resize-handle.right { right: 0; }
-#studio-app .loop-marker { position: absolute; top: 0; bottom: 0; width: 1px; border-left: 1px dashed rgba(255,255,255,0.4); pointer-events: none; }
+/* --- Outros Controles de Clip --- */
+#studio-app .resize-handle { 
+    position: absolute; 
+    top: 0; 
+    bottom: 0; 
+    width: 8px; 
+    cursor: col-resize; 
+    z-index: 15; 
+}
 
-/* Status Bar */
-#studio-app .status-bar { height: 24px; background: #0078d7; color: white; font-size: 11px; display: flex; align-items: center; padding: 0 10px; gap: 10px; overflow: hidden; transition: height 0.3s; }
-#studio-app .status-bar.hidden { height: 0; }
-#studio-app .status-spinner { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
+#studio-app .resize-handle:hover { 
+    background: rgba(255,255,255,0.3); 
+}
+
+#studio-app .resize-handle.right { right: 0; }
+
+#studio-app .loop-marker { 
+    position: absolute; 
+    top: 0; 
+    bottom: 0; 
+    width: 1px; 
+    border-left: 1px dashed rgba(255,255,255,0.4); 
+    pointer-events: none; 
+}
+
+/* =========================================
+   8. PLAYHEAD (AGULHA)
+   ========================================= */
+#studio-app .timeline-playhead-overlay { 
+    position: absolute; 
+    top: 24px; 
+    bottom: 0; 
+    left: 0; 
+    pointer-events: none; 
+    z-index: 100; 
+}
+
+#studio-app .playhead-line { 
+    position: absolute; 
+    top: 0; 
+    bottom: 0; 
+    width: 1px; 
+    background: #ff5252; 
+    pointer-events: none; 
+    height: 100vh; 
+}
+
+#studio-app .playhead-knob {
+    position: absolute; 
+    top: -12px; 
+    width: 11px; 
+    height: 12px;
+    background: #ff5252; 
+    transform: translateX(-50%);
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+    z-index: 101; 
+    pointer-events: auto; 
+    cursor: ew-resize;
+}
+
+/* =========================================
+   9. STATUS BAR
+   ========================================= */
+#studio-app .status-bar {
+    height: 24px; 
+    background: #0078d7; 
+    color: white; 
+    font-size: 11px;
+    display: flex; 
+    align-items: center; 
+    padding: 0 10px; 
+    gap: 10px;
+    overflow: hidden; 
+    transition: height 0.3s;
+}
+
+#studio-app .status-bar.hidden { 
+    height: 0; 
+}
+
+#studio-app .status-spinner {
+    width: 12px; 
+    height: 12px; 
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white; 
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin { 
+    to { transform: rotate(360deg); } 
+}
+
+/* =========================================
+   10. MODAL DE RENDERIZAÇÃO & PROGRESSO
+   ========================================= */
+
+/* --- Modal Overlay (Fundo) --- */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7); /* Fundo escuro semi-transparente */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000; /* Deve estar acima de tudo */
+}
+
+/* Container do Conteúdo do Modal */
+.modal-content {
+    background: #2d2d2d;
+    color: #e0e0e0;
+    padding: 25px;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+    width: 100%;
+    max-width: 400px;
+}
+
+.modal-content h3 {
+    margin-top: 0;
+    border-bottom: 1px solid #3e3e3e;
+    padding-bottom: 10px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.modal-body {
+    padding: 15px 0;
+}
+
+.input-group {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    font-size: 13px;
+}
+
+.input-group label {
+    font-weight: 600;
+}
+
+.modal-content select {
+    background: #3a3a3a;
+    color: #ddd;
+    border: 1px solid #555;
+    padding: 6px 10px;
+    border-radius: 4px;
+    width: 200px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #3e3e3e;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* --- Barra de Progresso (Overlay) --- */
+.progress-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9); 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000; /* Acima do Modal */
+    backdrop-filter: blur(2px);
+}
+
+.progress-box {
+    background: #252525;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.7);
+    width: 100%;
+    max-width: 450px;
+    text-align: center;
+}
+
+.progress-container {
+    height: 15px;
+    background: #3e3e3e;
+    border-radius: 8px;
+    margin: 15px 0;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #0078d7; /* Cor primária de progresso */
+    transition: width 0.3s ease;
+    border-radius: 8px;
+}
+
+#progress-text {
+    font-size: 12px;
+    color: #aaa;
+    margin-top: 5px;
+}
