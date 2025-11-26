@@ -21,8 +21,6 @@ export class PlaybackManager {
 
     // Agulha: Drag
     _bindPlayheadEvents() {
-        // Espera DOM estar pronto ou usa delegate. 
-        // Como o knob é criado pelo UIManager, podemos pegar aqui
         const knob = document.querySelector('.playhead-knob');
         const wrapper = document.getElementById('timeline-content-wrapper');
         
@@ -133,8 +131,15 @@ export class PlaybackManager {
                 player.load();
             }
 
-            if (player.tagName === 'VIDEO') player.style.opacity = clip.level;
-            if (player.tagName === 'AUDIO') player.volume = clip.level;
+            if (player.tagName === 'VIDEO') {
+                player.style.opacity = clip.level;
+                
+                player.muted = clip.muted === true; 
+                
+            }
+            if (player.tagName === 'AUDIO') {
+                player.volume = clip.level;
+            }
 
             let localTime = (globalTime - clip.start) + clip.offset;
             if (localTime > asset.baseDuration) localTime = localTime % asset.baseDuration;

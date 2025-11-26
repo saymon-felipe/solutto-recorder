@@ -89,4 +89,39 @@ export class StudioManager {
                 this.uiManager.updateStatusBar(this.tasks);
             });
     }
+
+    /**
+     * Adiciona um asset à timeline de forma inteligente.
+     * Se for vídeo com áudio, separa em duas tracks e vincula.
+     */
+    addAssetToTimeline(asset, startTime = 0) {
+        const groupId = "group_" + Date.now();
+        
+        if (asset.type === 'video') {
+            const videoTrack = this.project.tracks.find(t => t.type === 'video');
+            const audioTrack = this.project.tracks.find(t => t.type === 'audio');
+            
+            // 1. Adiciona Vídeo (MUDO, pois o áudio irá para baixo)
+            if (videoTrack) {                
+                this.timelineManager.addClipToTrack(videoTrack.id, asset, startTime, groupId);
+                
+                const addedClip = videoTrack.clips[videoTrack.clips.length - 1];
+                if(addedClip) addedClip.muted = true; // <--- O PULO DO GATO
+            }
+            
+            // 2. Adiciona Áudio Separado
+            if (audioTrack) {
+                this.timelineManager.addClipToTrack(audioTrack.id, asset, startTime, groupId);
+            }
+        } 
+        else if (asset.type === 'audio') {
+             const audioTrack = this.project.tracks.find(t => t.type === 'audio');
+             if (audioTrack) this.timelineManager.addClipToTrack(audioTrack.id, asset, startTime, null);
+        }
+        else {
+             // Imagens
+             const videoTrack = this.project.tracks.find(t => t.type === 'video');
+             if (videoTrack) this.timelineManager.addClipToTrack(videoTrack.id, asset, startTime, null);
+        }
+    }
 }

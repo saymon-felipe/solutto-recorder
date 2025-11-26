@@ -66,7 +66,6 @@ export class UIManager {
     _bindEvents() {
         document.getElementById("btn-studio-add").onclick = () => document.getElementById("studio-upload").click();
         
-        // CORRIGIDO: Apenas o ID correto
         document.getElementById("btn-studio-close").onclick = () => this.studio.toggleMode();
         
         document.getElementById("studio-upload").onchange = async (e) => { 
