@@ -109,6 +109,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
 });
 
+chrome.commands.onCommand.addListener(async (command) => {
+    try {
+        // Pega a aba ativa na janela atual
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        
+        if (tabs && tabs.length > 0) {
+            // Envia o comando para o Content Script processar
+            chrome.tabs.sendMessage(tabs[0].id, { 
+                action: "keyboard_command", 
+                command: command 
+            }).catch(() => {
+                // Ignora erro se a aba não tiver o content script (ex: nova guia vazia)
+            });
+        }
+    } catch (error) {
+        console.error("Erro ao processar atalho:", error);
+    }
+});
+
 /**
  * Controlador Principal (Router).
  * Decide qual ação tomar com base no `msg.action`.

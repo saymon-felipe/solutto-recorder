@@ -33,6 +33,7 @@ class EditorManager {
             btnCut: document.getElementById("btn-cut"),
             btnDownload: document.getElementById("btn-download"),
             btnDownloadMp4: document.getElementById("btn-download-mp4"),
+            btnDownloadGif: document.getElementById("btn-download-gif"),
             btnDrive: document.getElementById("btn-drive"),
             
             loader: document.getElementById("processing-overlay"),
@@ -137,6 +138,7 @@ class EditorManager {
         this.ui.btnCut.addEventListener("click", () => this._handleCut());
         this.ui.btnDownload.addEventListener("click", () => this._handleDownload(this.currentExtension));
         this.ui.btnDownloadMp4.addEventListener("click", () => this._handleConvertAndDownloadMP4());
+        this.ui.btnDownloadGif.addEventListener("click", () => this._handleConvertAndDownloadGif());
         this.ui.btnDrive.addEventListener("click", () => this._handleDriveUpload());
     }
 
@@ -243,6 +245,33 @@ class EditorManager {
     }
 
     /**
+     * Converte o vídeo atual para GIF e baixa.
+     */
+    async _handleConvertAndDownloadGif() {
+        if (this.isProcessing || !this.videoBlob) return;
+        
+        this._setLoading(true, "Gerando GIF (isso pode levar alguns segundos)...");
+
+        try {
+            const gifUrl = await this.transcoder.processVideo(
+                this.videoBlob,
+                this.fileName,
+                0, 
+                this.duration, 
+                "gif"
+            );
+
+            this._triggerDownload(gifUrl, "gif");
+
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao criar GIF: " + error.message);
+        } finally {
+            this._setLoading(false);
+        }
+    }
+
+    /**
      * Converte o vídeo atual para MP4 e baixa imediatamente.
      * Não altera o vídeo do player (o player continua mostrando o WebM).
      */
@@ -344,12 +373,14 @@ class EditorManager {
         this.ui.btnCut.disabled = active;
         this.ui.btnDownload.disabled = active;
         this.ui.btnDownloadMp4.disabled = active;
+        this.ui.btnDownloadGif.disabled = active;
     }
 
     _enableButtons() {
         this.ui.btnCut.disabled = false;
         this.ui.btnDownload.disabled = false;
         this.ui.btnDownloadMp4.disabled = false;
+        this.ui.btnDownloadGif.disabled = false;
         this.ui.btnDrive.disabled = false;
     }
 

@@ -66,38 +66,36 @@ export class TranscodeService {
         const outputName = `output_${fileName}.${format}`;
 
         try {
-            // 1. Escreve o arquivo Blob na memória virtual do FFmpeg (FS)
             await this.ffmpeg.writeFile(inputName, await fetchFile(fileBlob));
 
-            // 2. Monta o array de argumentos para o comando FFmpeg
             let command = [];
 
-            // Input (-i)
+            // Input e Corte
             command.push("-i", inputName);
-
-            // Start Time (-ss)
-            // Posicionado DEPOIS do input para forçar "Output Seeking".
-            // Isso decodifica o vídeo desde o início até o ponto de corte, garantindo precisão frame a frame.
-            // (Input seeking seria mais rápido, mas impreciso em WebM).
             command.push("-ss", startTime.toString());
-
-            // Duração (-t)
             command.push("-t", duration.toString());
 
-            // Configurações de Codec baseadas no formato
-            if (format === 'mp4') {
-                // MP4: H.264 (vídeo) + AAC (áudio)
-                // Preset ultrafast para velocidade máxima
-                // Movflags faststart para permitir reprodução enquanto baixa (boa prática web)
+            // --- LÓGICA ESPECÍFICA PARA CADA FORMATO ---
+            if (format === 'gif') {
+                // Comando Complexo para GIF de Alta Qualidade
+                // 1. fps=10: Reduz frames para não ficar pesado
+                // 2. scale=720:-1: Redimensiona largura para 720px (altura automática)
+                // 3. split...paletteuse: Gera uma paleta de cores otimizada para evitar granulado
+                command.push(
+                    "-vf", "fps=10,scale=720:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+                    "-f", "gif"
+                );
+            } 
+            else if (format === 'mp4') {
                 command.push(
                     "-c:v", "libx264", 
                     "-preset", "ultrafast", 
                     "-c:a", "aac",
                     "-movflags", "+faststart"
                 );
-            } else {
-                // WebM: VP8 (vídeo) + Vorbis (áudio)
-                // Deadline realtime e cpu-used 8 para máxima velocidade de encode em WASM
+            } 
+            else {
+                // WebM (Padrão)
                 command.push(
                     "-c:v", "libvpx", 
                     "-deadline", "realtime", 
@@ -106,19 +104,19 @@ export class TranscodeService {
                 );
             }
 
-            // Arquivo de Saída
             command.push(outputName);
 
-            console.log("Executando FFmpeg (Preciso):", command.join(" "));
+            console.log("Executando FFmpeg:", command.join(" "));
             
-            // 3. Executa o comando
             await this.ffmpeg.exec(command);
 
-            // 4. Lê o arquivo gerado da memória virtual
             const data = await this.ffmpeg.readFile(outputName);
             
-            // 5. Cria um novo Blob e retorna a URL
-            const mimeType = format === 'mp4' ? "video/mp4" : "video/webm";
+            // Define o MIME type correto
+            let mimeType = "video/webm";
+            if (format === 'mp4') mimeType = "video/mp4";
+            if (format === 'gif') mimeType = "image/gif";
+
             const resultBlob = new Blob([data.buffer], { type: mimeType });
             
             return URL.createObjectURL(resultBlob);
@@ -127,8 +125,6 @@ export class TranscodeService {
             console.error("Erro FFmpeg:", error);
             throw error;
         } finally {
-            // 6. Limpeza (Garbage Collection Virtual)
-            // Remove arquivos da memória do FFmpeg para liberar RAM do navegador
             try {
                 await this.ffmpeg.deleteFile(inputName);
                 await this.ffmpeg.deleteFile(outputName);

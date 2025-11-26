@@ -230,7 +230,7 @@ input[type="checkbox"]:checked::after {
 }
 
 #timer-select {
-    width: 120px;
+    width: 183px;
 }
 
 /* =========================================
@@ -265,4 +265,84 @@ input[type="checkbox"]:checked::after {
     cursor: not-allowed; 
     background: #999;
     box-shadow: none;
+}
+
+/* =========================================
+   SEÇÃO DE ATALHOS (ACCORDION)
+   ========================================= */
+.shortcuts-wrapper {
+    margin-top: 1rem;
+    border-top: 1px solid #f0f0f0;
+    padding-top: 0.5rem;
+}
+
+/* Botão de Expandir */
+.shortcuts-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    color: #888;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px;
+    transition: color 0.2s;
+    user-select: none;
+}
+
+.shortcuts-toggle:hover {
+    color: #00aab3;
+}
+
+.shortcuts-toggle i {
+    transition: transform 0.3s ease;
+    font-size: 10px;
+}
+
+/* Classe para girar a setinha quando aberto */
+.shortcuts-toggle.active i {
+    transform: rotate(180deg);
+}
+
+/* Conteúdo (Oculto por padrão) */
+.shortcuts-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-in-out, opacity 0.3s ease;
+    opacity: 0;
+}
+
+/* Estado Aberto */
+.shortcuts-content.open {
+    max-height: 150px; /* Altura suficiente para caber o conteúdo */
+    opacity: 1;
+    margin-top: 10px;
+}
+
+/* Linhas dos atalhos */
+.shortcut-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: #666;
+    padding: 0 5px;
+}
+
+/* Estilo de Tecla (KBD) */
+kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 10px;
+    font-weight: bold;
+    line-height: 1;
+    color: #555;
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.1);
+    white-space: nowrap;
 }

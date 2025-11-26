@@ -29,6 +29,8 @@ const ui = {
     timerSelect: document.getElementById('timer-select'),
     useTimerCheckbox: document.getElementById('use-timer'),
     startBtn: document.getElementById('start-btn'),
+    shortcutsToggle: document.getElementById('shortcuts-toggle'),
+    shortcutsContent: document.getElementById('shortcuts-content'),
     closeBtn: document.getElementById('close-btn')
 };
 
@@ -198,6 +200,11 @@ function setupListeners() {
     // Botões de ação
     ui.startBtn.addEventListener('click', handleStart);
     ui.closeBtn.addEventListener('click', closePopup);
+
+    ui.shortcutsToggle.addEventListener('click', () => {
+        ui.shortcutsContent.classList.toggle('open');
+        ui.shortcutsToggle.classList.toggle('active');
+    });
 }
 
 function populateSelect(select, devices, defaultLabel) {
