@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solutto Recorder</title>
+  
+  <link rel="stylesheet" href="style.css">
+  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+</head>
+<body>
+
+    <div class="solutto-recorder-popup">
+      
+      <div class="container">
+        
+        <i class="fa-solid fa-xmark close-popup" id="close-btn" title="Fechar janela"></i>
+
+        <div class="header">
+          <img src="../../assets/icon.png" alt="Solutto Icon">
+          <h1 class="fontsize-2xl">Solutto Recorder</h1>
+        </div>
+
+        <div class="configurations">
+          
+          <div class="form-group">
+            <div class="select-source-container">
+              <div class="source-slider" id="source-slider"></div>
+              
+              <div class="source-option selected" data-source="tab">
+                <i class="fa-solid fa-table-columns"></i>
+                <span>Aba</span>
+              </div>
+              <div class="source-option" data-source="screen">
+                <i class="fa-solid fa-display"></i>
+                <span>Tela</span>
+              </div>              
+              <div class="source-option" data-source="webcam">
+                <i class="fa-solid fa-camera"></i>  
+                <span>Câmera</span>
+              </div>              
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="fontsize-md">Configurações de gravação</label>
+            
+            <span class="fontsize-sm">Câmera</span>
+            <select id="camera-select">
+              <option value="">Carregando dispositivos...</option>
+            </select>
+            
+            <span class="fontsize-sm">Microfone</span>
+            <select id="mic-select">
+              <option value="">Carregando dispositivos...</option>
+            </select>
+          </div>
+
+          <div class="form-group radio-group">
+            <input type="checkbox" id="use-timer" checked>
+            <select id="timer-select">
+              <option value="3">3 segundos</option>
+              <option value="5">5 segundos</option>
+              <option value="10">10 segundos</option>
+            </select>
+            <span class="fontsize-sm" style="margin-top: 0; font-size: 13px;">de contagem regressiva</span>
+          </div>
+
+        </div>
+
+        <div class="footer">
+          <button class="btn" id="start-btn">
+            <i class="fa-solid fa-circle-dot"></i>
+            Iniciar gravação
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+  <script src="popup.js" type="module"></script>
+
+</body>
+</html>
