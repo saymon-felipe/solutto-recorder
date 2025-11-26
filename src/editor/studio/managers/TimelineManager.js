@@ -385,11 +385,19 @@ export class TimelineManager {
         el.onmousedown = (e) => {
             e.stopPropagation();
             
+            const rect = el.getBoundingClientRect();
+            const x = e.clientX - rect.left + (clip.start * this.studio.project.zoom); 
+            
+            this._seekToPixel(x);
+
             this._handleSelection(e, clip, trackId, el);
             
             const action = e.target.dataset.action;
             if (action === 'resize') {
                 this._startResize(e, clip, el, asset.baseDuration);
+
+                const endTime = clip.start + clip.duration;
+                this._seekToTime(endTime);
             } else if (action === 'fader') {
                 this._startFader(e, clip, el);
             } else {
@@ -397,6 +405,20 @@ export class TimelineManager {
             }
         };
         return el;
+    }
+
+    _seekToTime(time) {
+        this.studio.project.currentTime = time;
+        this.studio.playbackManager.updatePlayhead();
+        this.studio.playbackManager.syncPreview();
+        this.lastSeekTime = time; 
+        this.playedSinceLastSeek = false; // Resetar para o play/pause inteligente
+    }
+
+    _seekToPixel(x) {
+        const trackX = x; 
+        const time = Math.max(0, trackX / this.studio.project.zoom);
+        this._seekToTime(time);
     }
 
     _startFader(e, clip, el) {

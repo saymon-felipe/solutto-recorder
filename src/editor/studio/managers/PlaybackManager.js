@@ -11,7 +11,7 @@ export class PlaybackManager {
     init() {
         this.previewVideo = document.getElementById('studio-preview-video');
         this.previewAudio = document.getElementById('studio-audio-preview');
-        
+
         // Agulha (Drag do Knob)
         this._bindPlayheadEvents();
 
@@ -23,8 +23,8 @@ export class PlaybackManager {
     _bindPlayheadEvents() {
         const knob = document.querySelector('.playhead-knob');
         const wrapper = document.getElementById('timeline-content-wrapper');
-        
-        if(!knob) return;
+
+        if (!knob || !wrapper) return;
 
         knob.onmousedown = (e) => {
             e.stopPropagation();
@@ -32,7 +32,7 @@ export class PlaybackManager {
                 const rect = wrapper.getBoundingClientRect();
                 const x = ev.clientX - rect.left; // Relativo ao wrapper
                 const trackX = x - getHeaderWidth();
-                
+
                 this.studio.project.currentTime = Math.max(0, trackX / this.studio.project.zoom);
                 this.updatePlayhead();
                 this.syncPreview();
@@ -49,6 +49,7 @@ export class PlaybackManager {
     togglePlayback() { this.isPlaying ? this.pause() : this.play(); }
 
     play() {
+        this._savePlaybackState();
         this.isPlaying = true;
         document.getElementById('btn-play-pause').innerHTML = '<i class="fa-solid fa-pause"></i>';
         let lastTime = performance.now();
@@ -66,8 +67,15 @@ export class PlaybackManager {
     pause() {
         this.isPlaying = false;
         document.getElementById('btn-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
-        if(this.previewVideo) this.previewVideo.pause();
-        if(this.previewAudio) this.previewAudio.pause();
+        if (this.previewVideo) this.previewVideo.pause();
+        if (this.previewAudio) this.previewAudio.pause();
+
+        if (this.playedSinceLastSeek) {
+            this.studio.project.currentTime = this.lastPlayStartTime;
+            this.playedSinceLastSeek = false;
+            this.updatePlayhead();
+            this.syncPreview();
+        }
     }
 
     stop() {
@@ -81,8 +89,8 @@ export class PlaybackManager {
         // Posição absoluta = Header + (Tempo * Zoom)
         const x = getHeaderWidth() + (this.studio.project.currentTime * this.studio.project.zoom);
         const el = document.getElementById('timeline-playhead');
-        if(el) el.style.left = x + "px";
-        
+        if (el) el.style.left = x + "px";
+
         if (this.isPlaying) {
             const area = document.getElementById('studio-scroll-area');
             if (x - area.scrollLeft > area.clientWidth * 0.9) {
@@ -94,7 +102,7 @@ export class PlaybackManager {
     syncPreview() {
         const time = this.studio.project.currentTime;
         const tracks = this.studio.project.tracks;
-        
+
         let activeVideo = null;
         // Lógica de procura do clipe de vídeo ativo (assumindo IDs 1 e 2)
         const videoTracks = tracks.filter(t => t.type === 'video').sort((a, b) => b.id - a.id); // Prioriza IDs maiores (overlay)
@@ -102,7 +110,7 @@ export class PlaybackManager {
             const clip = t.clips.find(c => time >= c.start && time < (c.start + c.duration));
             if (clip) { activeVideo = clip; break; }
         }
-        
+
         this._syncPlayer(this.previewVideo, activeVideo, time);
 
         let activeAudio = null;
@@ -114,7 +122,7 @@ export class PlaybackManager {
         this._syncPlayer(this.previewAudio, activeAudio, time);
 
         const display = document.getElementById('studio-time-display');
-        if(display) display.innerText = fmtTime(time);
+        if (display) display.innerText = fmtTime(time);
     }
 
     _syncPlayer(player, clip, globalTime) {
@@ -132,9 +140,9 @@ export class PlaybackManager {
 
             if (player.tagName === 'VIDEO') {
                 player.style.opacity = clip.level;
-                
-                player.muted = clip.muted === true; 
-                
+
+                player.muted = clip.muted === true;
+
             }
             if (player.tagName === 'AUDIO') {
                 player.volume = clip.level;
@@ -144,11 +152,16 @@ export class PlaybackManager {
             if (localTime > asset.baseDuration) localTime = localTime % asset.baseDuration;
 
             if (Math.abs(player.currentTime - localTime) > 0.3 || player.ended) player.currentTime = localTime;
-            
-            if (this.isPlaying && player.paused) { const p = player.play(); if(p) p.catch(()=>{}); }
+
+            if (this.isPlaying && player.paused) { const p = player.play(); if (p) p.catch(() => { }); }
             else if (!this.isPlaying && !player.paused) player.pause();
         } else {
             player.style.display = 'none'; player.pause(); player.dataset.currentClipId = "";
         }
+    }
+
+    _savePlaybackState() {
+        this.lastPlayStartTime = this.studio.project.currentTime;
+        this.playedSinceLastSeek = true;
     }
 }
