@@ -6,7 +6,78 @@ export class UIManager {
     buildUI() {
         const div = document.createElement("div");
         div.id = "studio-app";
-        div.innerHTML = `
+
+        const styles = `
+            <style>
+                .vegas-modal {
+                    background-color: #2d2d30;
+                    color: #e0e0e0;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    border: 1px solid #3e3e42;
+                    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+                    width: 500px;
+                    max-width: 95%;
+                    border-radius: 4px;
+                }
+                .vegas-header {
+                    background-color: #3e3e42;
+                    padding: 8px 15px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    border-bottom: 1px solid #1e1e1e;
+                    display: flex; justify-content: space-between; align-items: center;
+                }
+                .vegas-body { padding: 20px; }
+                .vegas-stats-grid {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 15px;
+                    margin-bottom: 15px;
+                    background: #1e1e1e;
+                    padding: 10px;
+                    border: 1px solid #3f3f46;
+                }
+                .vegas-stat-item { display: flex; flex-direction: column; font-size: 11px; color: #aaa; }
+                .vegas-stat-value { font-size: 14px; color: #fff; font-family: 'Consolas', 'Monaco', monospace; margin-top: 2px; }
+                
+                .vegas-progress-track {
+                    height: 18px;
+                    background-color: #1e1e1e;
+                    border: 1px solid #3f3f46;
+                    position: relative;
+                    margin-bottom: 8px;
+                }
+                .vegas-progress-fill {
+                    height: 100%;
+                    background: linear-gradient(to bottom, #00b7eb, #007acc); /* Azul Profissional */
+                    width: 0%;
+                    transition: width 0.2s;
+                }
+                .vegas-log-box {
+                    font-family: 'Consolas', monospace;
+                    font-size: 10px;
+                    color: #888;
+                    margin-top: 5px;
+                    height: 16px;
+                    overflow: hidden;
+                    white-space: nowrap;
+                    text-overflow: ellipsis;
+                }
+                .vegas-btn-abort {
+                    width: 100%;
+                    background: #3e3e42;
+                    border: 1px solid #555;
+                    color: #e0e0e0;
+                    padding: 6px;
+                    font-size: 12px;
+                    cursor: pointer;
+                    margin-top: 15px;
+                }
+                .vegas-btn-abort:hover { background: #c42b1c; border-color: #c42b1c; color: white; }
+            </style>
+        `;
+        
+        div.innerHTML = styles + `
             <div class="studio-toolbar">
                 <div style="font-weight:bold;">Solutto Studio</div>
                 
@@ -105,13 +176,43 @@ export class UIManager {
                 </div>
             </div>
 
-            <div id="render-progress-bar" class="progress-overlay hidden">
-                <div class="progress-box">
-                    <h4>Renderizando...</h4>
-                    <div class="progress-container">
-                        <div class="progress-fill" style="width: 0%"></div>
+            <div id="render-progress-overlay" class="modal-overlay hidden" style="z-index: 2000;">
+                <div class="vegas-modal">
+                    <div class="vegas-header">
+                        <span>Renderizando...</span>
+                        <span id="render-percentage-text">0%</span>
                     </div>
-                    <p id="progress-text">0%</p>
+                    <div class="vegas-body">
+                        
+                        <div class="vegas-stats-grid">
+                            <div class="vegas-stat-item">
+                                <span>Tempo Decorrido</span>
+                                <span class="vegas-stat-value" id="render-timer-elapsed">00:00:00</span>
+                            </div>
+                            <div class="vegas-stat-item">
+                                <span>Tempo Restante (Est.)</span>
+                                <span class="vegas-stat-value" id="render-timer-left">Calculando...</span>
+                            </div>
+                            <div class="vegas-stat-item">
+                                <span>Velocidade Render</span>
+                                <span class="vegas-stat-value" id="render-speed-text">--</span>
+                            </div>
+                            <div class="vegas-stat-item">
+                                <span>Status</span>
+                                <span class="vegas-stat-value" style="font-size:12px; color:#00b7eb;">Processando</span>
+                            </div>
+                        </div>
+
+                        <div class="vegas-progress-track">
+                            <div class="vegas-progress-fill" style="width: 0%"></div>
+                        </div>
+                        
+                        <div class="vegas-log-box" id="render-log-text">Inicializando motor de renderização...</div>
+
+                        <button id="btn-render-abort" class="vegas-btn-abort">
+                            Cancelar
+                        </button>
+                    </div>
                 </div>
             </div>
         `;

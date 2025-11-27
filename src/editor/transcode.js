@@ -110,107 +110,113 @@ export class TranscodeService {
     }
 
     /**
-     * Realiza o processamento do vídeo (corte, conversão, padronização de codec).
+     * Força o encerramento do Worker FFmpeg
      */
-    async processVideo(fileBlob, fileName, startTime, duration, format = "webm", options = {}) {
+    async cancelJob() {
+        if (this.ffmpeg) {
+            try {
+                await this.ffmpeg.terminate();
+                console.log("[Transcoder] Worker encerrado.");
+            } catch (e) {
+                console.error("Erro ao encerrar worker:", e);
+            } finally {
+                this.ffmpeg = null;
+                this.isLoaded = false;
+            }
+        }
+    }
+
+    /**
+     * Processa vídeo aplicando corte e efeitos opcionais.
+     * @param {Blob} fileBlob - Arquivo original
+     * @param {string} fileName - Nome identificador
+     * @param {number} startTime - Início do corte
+     * @param {number} duration - Duração
+     * @param {string} format - 'webm', 'mp4', 'gif'
+     * @param {object} options - Opções extras como { opacity: 0.5 }
+     */
+    async processVideo(fileBlob, fileName, startTime, duration, format = 'webm', options = {}) {
         if (!this.isLoaded) await this.init();
 
-        const fetchFile = this._getFetchFile();
-
-        // Tenta inferir extensão, senão usa .webm como fallback no input
-        const inputExt = (fileBlob.type && fileBlob.type.split("/")[1]) || "webm";
-        const safeName = fileName || `file_${Date.now()}`;
-        const inputName = `input_${safeName}.${inputExt}`;
-        const outputName = `output_${safeName}.${format}`;
+        const { fetchFile } = window.FFmpegUtil;
+        const inputName = `input_${fileName}`;
+        const outputName = `output_${fileName}.${format}`;
 
         try {
             await this.ffmpeg.writeFile(inputName, await fetchFile(fileBlob));
 
             let command = [];
-            let vf = []; // Filtros de Vídeo
 
-            // Input, Corte e Duração
             command.push("-i", inputName);
             command.push("-ss", startTime.toString());
             command.push("-t", duration.toString());
 
-            // Verifica se pode usar stream copy (sem filtros, sem conversão)
-            const canUseCopy = !options.opacity &&
-                vf.length === 0 &&
-                format === inputExt &&
-                !options.forceReencode;
+            let videoFilters = [];
 
-            if (canUseCopy) {
-                // STREAM COPY - Sem recodificação (muito mais rápido e sem perda)
-                command.push("-c", "copy");
-                console.log("[FFmpeg] Usando STREAM COPY (sem recodificação)");
-            } else {
-                // Filtro de Opacidade (Fader)
-                if (options.opacity && options.opacity < 1) {
-                    vf.push(`format=yuv444p,geq='max(128,min(255,128+(A-${options.opacity})*255))':128:128`);
+            if (options.opacity !== undefined && options.opacity < 1 && format !== 'gif') {
+                console.log(`[Transcoder] Aplicando opacidade otimizada: ${options.opacity}`);
+                
+                // 1. Promove para formato com Alpha (yuva420p)
+                videoFilters.push("format=yuva420p"); 
+                
+                // 2. Define o valor do canal Alpha (A) usando LUT.
+                const alphaVal = Math.floor(options.opacity * 255);
+                videoFilters.push(`lutyuv=a=${alphaVal}`);
+            }
+
+            if (format === 'gif') {
+                command.push(
+                    "-vf", "fps=10,scale=720:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+                    "-f", "gif"
+                );
+            } 
+            else if (format === 'mp4') {
+                if (videoFilters.length > 0) command.push("-vf", videoFilters.join(","));
+                command.push(
+                    "-c:v", "libx264", 
+                    "-preset", "ultrafast", 
+                    "-c:a", "aac",
+                    "-movflags", "+faststart"
+                );
+            } 
+            else {
+                // WebM
+                if (videoFilters.length > 0) command.push("-vf", videoFilters.join(","));
+
+                command.push(
+                    "-c:v", "libvpx", 
+                    "-deadline", "realtime", // Garante velocidade máxima
+                    "-cpu-used", "8",        // Usa todos os threads/recursos disponíveis
+                    "-c:a", "libvorbis"
+                );
+                
+                if (options.opacity < 1) {
+                    command.push("-auto-alt-ref", "0");
                 }
-
-                // --- CÓDECS DE SAÍDA ---
-                if (format === "gif") {
-                    command.push(
-                        "-vf",
-                        "fps=10,scale=720:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
-                        "-f",
-                        "gif"
-                    );
-                } else if (format === "mp4") {
-                    command.push(
-                        "-c:v", "libx264",
-                        "-preset", options.quality || "medium",
-                        "-crf", options.crf || "23",
-                        "-c:a", "aac",
-                        "-movflags", "+faststart"
-                    );
-                } else {
-                    // WebM (Padrão para Studio e Padronização de Codec)
-                    command.push(
-                        "-c:v", "libvpx",
-                        "-deadline", "realtime",
-                        "-cpu-used", "8",
-                        "-crf", options.crf || "23",
-                        "-c:a", "libvorbis"
-                    );
-                    if (options.quality) command.push("-preset", options.quality);
-                }
-
-                // Adiciona filtros de vídeo se existirem
-                if (vf.length > 0) command.push("-vf", vf.join(","));
             }
 
             command.push(outputName);
-
-            console.log("[FFmpeg EXEC]:", command.join(" "));
-
+            console.log("Executando FFmpeg:", command.join(" "));
+            
             await this.ffmpeg.exec(command);
 
-            const data = await this.ffmpeg.readFile(outputName);
-
-            let mimeType =
-                format === "mp4"
-                    ? "video/mp4"
-                    : format === "gif"
-                        ? "image/gif"
-                        : "video/webm";
-
-            const resultBlob = new Blob([data.buffer], { type: mimeType });
-
-            return URL.createObjectURL(resultBlob);
+            try {
+                const data = await this.ffmpeg.readFile(outputName);
+                let mimeType = format === 'mp4' ? "video/mp4" : (format === 'gif' ? "image/gif" : "video/webm");
+                const resultBlob = new Blob([data.buffer], { type: mimeType });
+                return URL.createObjectURL(resultBlob);
+            } catch (readError) {
+                throw new Error("Falha ao ler arquivo de saída do FFmpeg.");
+            }
 
         } catch (error) {
-            console.error("Erro FFmpeg durante processVideo:", error);
+            console.error("Erro FFmpeg:", error);
             throw error;
         } finally {
             try {
                 await this.ffmpeg.deleteFile(inputName);
-            } catch (e) { }
-            try {
                 await this.ffmpeg.deleteFile(outputName);
-            } catch (e) { }
+            } catch (e) {}
         }
     }
 
