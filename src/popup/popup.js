@@ -205,6 +205,10 @@ function setupListeners() {
         ui.shortcutsContent.classList.toggle('open');
         ui.shortcutsToggle.classList.toggle('active');
     });
+
+    document.getElementById('btn-open-studio').addEventListener('click', () => {
+        chrome.tabs.create({ url: chrome.runtime.getURL('src/editor/editor.html?mode=studio') });
+    });
 }
 
 function populateSelect(select, devices, defaultLabel) {

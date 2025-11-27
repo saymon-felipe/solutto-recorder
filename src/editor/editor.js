@@ -41,6 +41,14 @@ class EditorManager {
         // Inicia UI do Studio
         this.studio.init();
 
+        const params = new URLSearchParams(window.location.search);
+        const mode = params.get('mode');
+
+        if (mode === 'studio') {
+            this.studio.toggleMode();
+            return;
+        }
+
         const data = await chrome.storage.local.get(["videoId"]);
         if (!data.videoId) return alert("Nenhum vídeo encontrado.");
 

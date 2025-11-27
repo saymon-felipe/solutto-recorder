@@ -346,3 +346,34 @@ kbd {
     box-shadow: 0 1px 0 rgba(0,0,0,0.1);
     white-space: nowrap;
 }
+
+.actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    padding: 15px 0; /* Adiciona padding para separar dos atalhos/footer */
+}
+
+/* Estilo Base para botões secundários */
+.secondary-btn {
+    /* Define o fundo transparente com contorno da cor primária */
+    background: transparent;
+    border: 1px solid var(--primary-color);
+    color: var(--primary-color);
+    
+    /* Garante que o padding seja aplicado corretamente no HTML */
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.secondary-btn:hover:not(:disabled) {
+    /* Efeito sutil de hover */
+    background: rgba(0, 170, 179, 0.1); /* Usando a cor primária com transparência */
+    color: var(--primary-hover);
+}
+
+.secondary-btn:active:not(:disabled) {
+    background: rgba(0, 170, 179, 0.2);
+}

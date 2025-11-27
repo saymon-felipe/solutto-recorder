@@ -4,6 +4,7 @@ import { TimelineManager } from './managers/TimelineManager.js';
 import { PlaybackManager } from './managers/PlaybackManager.js';
 import { RenderManager } from './managers/RenderManager.js';
 import { updateHeaderWidth } from './utils.js';
+import { ProjectStorage } from '../../services/ProjectStorage.js';
 
 export class StudioManager {
     constructor(editorManager) {
@@ -11,6 +12,8 @@ export class StudioManager {
         this.isActive = false;
         
         this.project = {
+            id: null,
+            name: "Novo Projeto",
             tracks: [
                 { id: "track_v1", type: 'video', name: 'Video 1', clips: [] },
                 { id: "track_a1", type: 'audio', name: 'Audio 1', clips: [] }
@@ -24,51 +27,73 @@ export class StudioManager {
         this.tasks = [];
         this.draggedAsset = null;
 
-        // Inicializa Managers
         this.uiManager = new UIManager(this);
         this.assetManager = new AssetManager(this);
         this.timelineManager = new TimelineManager(this);
         this.playbackManager = new PlaybackManager(this);
         this.renderManager = new RenderManager(this);
+        
+        this.projectStorage = new ProjectStorage(); 
     }
 
     init() {
-        this.uiManager.buildUI();
-        this.playbackManager.init();
-        this.timelineManager.init();
-        this.renderManager.init();
+        this.projectStorage.init().catch(console.error);
 
-        // Mede a largura real do cabeçalho da track para alinhar a agulha
+        // 1. Constroi a UI
+        this.uiManager.buildUI();
+        
+        // 2. Renderiza Tracks (necessário para inicializar o PlaybackManager corretamente depois)
+        this.timelineManager.renderRuler();
+        this.timelineManager.renderTracks();
+
+        // 3. Inicializa Listeners
+        this.timelineManager.init();
+        this.playbackManager.init();
+        this.renderManager.init();
+        
+        this.uiManager.updateRecentProjectsList();
+
         setTimeout(() => {
             const h = document.querySelector('.track-header');
             if(h) updateHeaderWidth(h.getBoundingClientRect().width);
-        }, 500);
+        }, 100);
+
+        // CORREÇÃO: Carregamento robusto da gravação
+        if (this.editor.videoBlob) {
+            console.log("Importando gravação original...");
+            this.assetManager.importAsset(this.editor.videoBlob, "Gravação Original");
+            
+            // Aguarda o processamento terminar
+            const checkInterval = setInterval(() => {
+                const asset = this.project.assets[0];
+                if (asset && asset.status === 'ready') {
+                    clearInterval(checkInterval);
+                    console.log("Gravação pronta, adicionando à timeline...");
+                    this.addAssetToTimeline(asset, 0); // Usa o método inteligente
+                }
+            }, 500);
+        }
     }
 
     toggleMode() {
+        let app = document.getElementById("studio-app");
         this.isActive = !this.isActive;
-        const el = document.getElementById("studio-app");
-        el.style.display = this.isActive ? "flex" : "none";
         
         if (this.isActive) {
-            // Auto-importação
-            if (this.project.assets.length === 0 && this.editor.videoBlob) {
-                this.assetManager.importAsset(this.editor.videoBlob, "Gravação Original").then(() => {
-                    // Adiciona à timeline após processar
-                    // O assetManager cuida de adicionar na lista, aqui pegamos e botamos na track
-                    setTimeout(() => {
-                        const asset = this.project.assets[0];
-                        if(asset && asset.status === 'ready') {
-                            this.timelineManager.addClipToTrack(1, asset, 0);
-                            this.timelineManager.addClipToTrack(3, asset, 0);
-                        }
-                    }, 200);
-                });
+            if (!app) {
+                this.init(); // Inicializa na primeira vez
+                app = document.getElementById("studio-app");
             }
-            this.uiManager.updateStatusBar(this.tasks);
-            this.timelineManager.renderRuler();
-            this.timelineManager.renderTracks();
+            
+            if (app) app.style.display = "flex";
+            
+            // Reforça o layout ao abrir
+            if(this.timelineManager) {
+                this.timelineManager.renderRuler();
+                this.timelineManager.renderTracks();
+            }
         } else {
+            if (app) app.style.display = "none";
             this.playbackManager.pause();
         }
     }
@@ -88,10 +113,95 @@ export class StudioManager {
             });
     }
 
-    /**
-     * Adiciona um asset à timeline de forma inteligente.
-     * Se for vídeo com áudio, separa em duas tracks e vincula.
-     */
+    // --- PERSISTÊNCIA ---
+    async saveCurrentProject() {
+        if (this.tasks.length > 0) return alert("Aguarde o processamento de assets antes de salvar.");
+
+        const defaultName = this.project.name !== "Novo Projeto" ? this.project.name : `Projeto ${new Date().toLocaleString()}`;
+        const name = prompt("Nome do Projeto:", defaultName);
+        if (!name) return;
+
+        this.project.name = name;
+        if (!this.project.id) this.project.id = Date.now();
+        this.project.lastSaved = Date.now();
+
+        const assetsToSave = this.project.assets.map(a => ({
+            id: a.id,
+            name: a.name,
+            type: a.type,
+            baseDuration: a.baseDuration,
+            status: 'ready',
+            blob: a.blob
+        }));
+
+        const projectData = {
+            id: this.project.id,
+            name: this.project.name,
+            lastSaved: this.project.lastSaved,
+            tracks: this.project.tracks,
+            assets: assetsToSave,
+            zoom: this.project.zoom,
+            duration: this.project.duration
+        };
+
+        try {
+            await this.projectStorage.saveProject(projectData);
+            alert("Projeto salvo com sucesso!");
+            this.uiManager.updateRecentProjectsList();
+        } catch (e) {
+            console.error(e);
+            alert("Erro ao salvar projeto: " + e.message);
+        }
+    }
+
+    async loadProject(projectId) {
+        if (this.project.assets.length > 0 && !confirm("Carregar projeto? As alterações não salvas atuais serão perdidas.")) return;
+
+        try {
+            const data = await this.projectStorage.getProject(projectId);
+            if (!data) throw new Error("Projeto não encontrado.");
+
+            const restoredAssets = data.assets.map(a => ({
+                ...a,
+                url: URL.createObjectURL(a.blob),
+                status: 'ready'
+            }));
+
+            this.project = {
+                id: data.id,
+                name: data.name,
+                tracks: data.tracks,
+                assets: restoredAssets,
+                zoom: data.zoom || 100,
+                duration: data.duration || 300,
+                currentTime: 0
+            };
+
+            this.assetManager.renderBin();
+            this.timelineManager.renderRuler();
+            this.timelineManager.renderTracks();
+            this.playbackManager.updatePlayhead();
+            this.playbackManager.syncPreview();
+            
+            const slider = document.getElementById('studio-zoom-slider');
+            if(slider) slider.value = this.project.zoom;
+
+        } catch (e) {
+            console.error(e);
+            alert("Erro ao carregar: " + e.message);
+        }
+    }
+    
+    async deleteSavedProject(id) {
+        if(!confirm("Excluir este projeto permanentemente?")) return;
+        try {
+            await this.projectStorage.deleteProject(id);
+            this.uiManager.updateRecentProjectsList();
+        } catch(e) {
+            alert("Erro ao excluir: " + e.message);
+        }
+    }
+
     addAssetToTimeline(asset, startTime = 0) {
         const groupId = "group_" + Date.now();
         
@@ -99,25 +209,20 @@ export class StudioManager {
             const videoTrack = this.project.tracks.find(t => t.type === 'video');
             const audioTrack = this.project.tracks.find(t => t.type === 'audio');
             
-            // 1. Adiciona Vídeo (MUDO, pois o áudio irá para baixo)
-            if (videoTrack) {                
+            if (videoTrack) {
                 this.timelineManager.addClipToTrack(videoTrack.id, asset, startTime, groupId);
-                
                 const addedClip = videoTrack.clips[videoTrack.clips.length - 1];
-                if(addedClip) addedClip.muted = true; 
+                if(addedClip) addedClip.muted = true;
             }
-            
-            // 2. Adiciona Áudio Separado
             if (audioTrack) {
                 this.timelineManager.addClipToTrack(audioTrack.id, asset, startTime, groupId);
             }
         } 
         else if (asset.type === 'audio') {
-             const audioTrack = this.project.tracks.find(t => t.type === 'audio');
-             if (audioTrack) this.timelineManager.addClipToTrack(audioTrack.id, asset, startTime, null);
+            const audioTrack = this.project.tracks.find(t => t.type === 'audio');
+            if (audioTrack) this.timelineManager.addClipToTrack(audioTrack.id, asset, startTime, null);
         }
         else {
-             // Imagens
              const videoTrack = this.project.tracks.find(t => t.type === 'video');
              if (videoTrack) this.timelineManager.addClipToTrack(videoTrack.id, asset, startTime, null);
         }
@@ -141,22 +246,16 @@ export class StudioManager {
         this.timelineManager.renderTracks();
     }
 
-    // Valida e move o clip de track
     moveClipToTrack(clip, targetTrackId) {
         const currentTrack = this.project.tracks.find(t => t.clips.find(c => c.id === clip.id));
         const targetTrack = this.project.tracks.find(t => t.id === targetTrackId);
 
         if (!currentTrack || !targetTrack) return false;
-        
-        // --- VALIDAÇÃO DE TIPO (Video só em Video, Audio só em Audio) ---
         if (currentTrack.type !== targetTrack.type) return false;
         if (currentTrack.id === targetTrack.id) return false;
 
-        // Move os dados
         currentTrack.clips = currentTrack.clips.filter(c => c.id !== clip.id);
-        
         targetTrack.clips.push(clip);
-        
         return true;
     }
 }

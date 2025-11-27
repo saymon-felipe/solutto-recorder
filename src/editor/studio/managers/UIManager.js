@@ -9,22 +9,36 @@ export class UIManager {
         div.innerHTML = `
             <div class="studio-toolbar">
                 <div style="font-weight:bold;">Solutto Studio</div>
+                
+                <button class="studio-btn" id="btn-studio-save" title="Salvar Projeto">
+                    <i class="fa-solid fa-floppy-disk"></i> Salvar
+                </button>
+
                 <div class="zoom-control">
                     <i class="fa-solid fa-minus"></i>
-                    <input type="range" id="studio-zoom-slider" min="5" max="600" value="20">
+                    <input type="range" id="studio-zoom-slider" min="5" max="600" value="100">
                     <i class="fa-solid fa-plus"></i>
                 </div>
                 <div style="flex:1"></div>
-                <button class="studio-btn" id="btn-studio-add"><i class="fa-solid fa-plus"></i> Add</button>
+                <button class="studio-btn" id="btn-studio-add"><i class="fa-solid fa-plus"></i> Adicionar Mídia</button>
                 <button class="studio-btn primary" id="btn-studio-render"><i class="fa-solid fa-file-export"></i> Renderizar</button>
                 <button class="studio-btn" id="btn-studio-close"><i class="fa-solid fa-times"></i></button>
             </div>
             
             <div class="studio-workspace">
                 <div class="studio-bin">
-                    <div class="bin-header">Mídia</div>
+                    <div class="bin-tabs">
+                        <button class="bin-tab active" data-target="bin-media">Mídia</button>
+                        <button class="bin-tab" data-target="bin-projects">Projetos</button>
+                    </div>
+                    
                     <div class="bin-content" id="studio-bin-list"></div>
+                    
+                    <div class="bin-content hidden" id="studio-projects-list">
+                        <div style="padding:10px; color:#888; font-size:11px; text-align:center">Nenhum projeto recente</div>
+                    </div>
                 </div>
+                
                 <div class="preview-container">
                     <div class="studio-preview">
                         <video id="studio-preview-video"></video>
@@ -43,29 +57,30 @@ export class UIManager {
                     <div class="ruler-header-spacer"></div>
                     <div class="ruler-ticks"></div>
                 </div>
-
-                <div class="timeline-playhead-overlay" id="timeline-playhead">
-                    <div class="playhead-knob"></div><div class="playhead-line"></div>
-                </div>
                 
                 <div class="timeline-scroll-area" id="studio-scroll-area">
                     <div class="timeline-content-wrapper" id="timeline-content-wrapper">
-                        
-                        <div id="studio-tracks"></div> 
-                        
+                        <div class="timeline-playhead-overlay" id="timeline-playhead-overlay">
+                            <div class="playhead-line"></div>
+                            <div class="playhead-knob"></div>
+                        </div>
+
+                        <div id="studio-tracks"></div>
                     </div>
                 </div>
             </div>
             
-            <div class="status-bar hidden" id="studio-status-bar">
-                <div class="status-spinner"></div><span id="studio-status-text">Processando...</span>
+            <input type="file" id="studio-upload" multiple style="display:none" accept="video/*,audio/*,image/*">
+            
+            <div id="studio-status-bar" class="status-bar hidden">
+                <div class="status-spinner"></div>
+                <span id="studio-status-text">Processando...</span>
             </div>
 
             <div id="render-modal" class="modal-overlay hidden">
                 <div class="modal-content">
                     <h3>Opções de Renderização</h3>
                     <div class="modal-body">
-                        
                         <div class="input-group">
                             <label for="render-resolution">Resolução:</label>
                             <select id="render-resolution">
@@ -74,7 +89,6 @@ export class UIManager {
                                 <option value="high">1080p (Full HD)</option>
                             </select>
                         </div>
-
                         <div class="input-group">
                             <label for="render-quality">Qualidade (Preset):</label>
                             <select id="render-quality">
@@ -83,11 +97,10 @@ export class UIManager {
                                 <option value="veryslow">Alta (Melhor Qualidade)</option>
                             </select>
                         </div>
-
                     </div>
                     <div class="modal-actions">
                         <button class="studio-btn" id="btn-render-cancel">Cancelar</button>
-                        <button class="studio-btn primary" id="btn-render-confirm">Confirmar e Renderizar</button>
+                        <button class="studio-btn primary" id="btn-render-confirm">Renderizar</button>
                     </div>
                 </div>
             </div>
@@ -98,43 +111,125 @@ export class UIManager {
                     <div class="progress-container">
                         <div class="progress-fill" style="width: 0%"></div>
                     </div>
-                    <p id="progress-text">0% - Inicializando FFmpeg</p>
+                    <p id="progress-text">0%</p>
                 </div>
             </div>
-
-            <input type="file" id="studio-upload" multiple style="display:none" accept="video/*,audio/*,image/*">
         `;
         document.body.appendChild(div);
         this._bindEvents();
+        this._bindTabEvents();
     }
 
     _bindEvents() {
-        document.getElementById("btn-studio-add").onclick = () => document.getElementById("studio-upload").click();
-        
-        document.getElementById("btn-studio-close").onclick = () => this.studio.toggleMode();
-        
-        document.getElementById("studio-upload").onchange = async (e) => { 
-            for(const f of e.target.files) await this.studio.assetManager.importAsset(f, f.name); 
+        const fileInput = document.getElementById("studio-upload");
+
+        // Formatos que o FFmpeg WASM suporta de forma estável
+        const ALLOWED_EXTENSIONS = [
+            'mp4', 'webm', 'mov', 'mkv', 'ogg', 'avi', // Vídeo
+            'mp3', 'wav', 'ogg', 'aac', 'm4a', // Áudio
+            'png', 'jpg', 'jpeg', 'gif' // Imagem
+        ];
+
+        document.getElementById("btn-studio-add").onclick = () => fileInput.click();
+
+        document.getElementById("studio-upload").onchange = async (e) => {
+            const files = Array.from(e.target.files);
+            const validFiles = [];
+
+            for (const file of files) {
+                const parts = file.name.split('.');
+                const ext = parts.length > 1 ? parts.pop().toLowerCase() : '';
+
+                if (ALLOWED_EXTENSIONS.includes(ext)) {
+                    validFiles.push(file);
+                } else {
+                    alert(`O formato de arquivo *.${ext} não é suportado pelo Studio. Formatos aceitos incluem: ${ALLOWED_EXTENSIONS.slice(0, 8).join(', ')}...`);
+                }
+            }
+
+            for (const f of validFiles) {
+                await this.studio.assetManager.importAsset(f, f.name);
+            }
+            // Limpa o input para permitir o upload do mesmo arquivo novamente
+            e.target.value = '';
         };
 
+        document.getElementById("btn-studio-close").onclick = () => this.studio.toggleMode();
         document.getElementById('studio-zoom-slider').oninput = (e) => {
             this.studio.timelineManager.setZoom(parseInt(e.target.value));
         };
+        document.getElementById("btn-studio-save").onclick = () => this.studio.saveCurrentProject();
+    }
+
+    _bindTabEvents() {
+        const tabs = document.querySelectorAll('.bin-tab');
+        tabs.forEach(tab => {
+            tab.onclick = () => {
+                document.querySelectorAll('.bin-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.bin-content').forEach(c => c.classList.add('hidden'));
+
+                tab.classList.add('active');
+                const targetId = tab.dataset.target;
+
+                const targetContent = document.getElementById(targetId === 'bin-media' ? 'studio-bin-list' : 'studio-projects-list');
+                if (targetContent) targetContent.classList.remove('hidden');
+            };
+        });
     }
 
     updateStatusBar(tasks) {
         const bar = document.getElementById('studio-status-bar');
         const text = document.getElementById('studio-status-text');
         const btn = document.getElementById('btn-studio-render');
-        
+
         if (tasks.length > 0) {
             bar.classList.remove('hidden');
             const current = tasks[tasks.length - 1];
             text.innerText = `${current.label} (${tasks.length}...)`;
-            if(btn) btn.disabled = true;
+            if (btn) btn.disabled = true;
         } else {
             bar.classList.add('hidden');
-            if(btn) btn.disabled = false;
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async updateRecentProjectsList() {
+        const container = document.getElementById('studio-projects-list');
+        if (!container) return;
+
+        try {
+            const projects = await this.studio.projectStorage.getAllProjects();
+
+            if (projects.length === 0) {
+                container.innerHTML = `<div style="padding:10px; color:#888; font-size:11px; text-align:center">Nenhum projeto salvo.</div>`;
+                return;
+            }
+
+            projects.sort((a, b) => b.lastSaved - a.lastSaved);
+            container.innerHTML = "";
+
+            projects.forEach(p => {
+                const item = document.createElement('div');
+                item.className = "project-item";
+                item.innerHTML = `
+                    <div class="project-info">
+                        <div class="project-name">${p.name}</div>
+                        <div class="project-date">${new Date(p.lastSaved).toLocaleString()}</div>
+                    </div>
+                    <div class="project-actions">
+                        <button class="btn-load" title="Carregar"><i class="fa-solid fa-folder-open"></i></button>
+                        <button class="btn-delete" title="Excluir"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                `;
+
+                item.querySelector('.btn-load').onclick = () => this.studio.loadProject(p.id);
+                item.querySelector('.btn-delete').onclick = () => this.studio.deleteSavedProject(p.id);
+
+                container.appendChild(item);
+            });
+
+        } catch (e) {
+            console.error("Erro ao listar projetos:", e);
         }
     }
 }

@@ -532,7 +532,7 @@
    ========================================= */
 #studio-app .timeline-playhead-overlay { 
     position: absolute; 
-    top: 24px; 
+    top: 12px; 
     bottom: 0; 
     left: 0; 
     pointer-events: none; 
@@ -716,3 +716,60 @@
     color: #aaa;
     margin-top: 5px;
 }
+
+/* --- ABAS DO BIN --- */
+.bin-tabs {
+    display: flex;
+    border-bottom: 1px solid #3e3e3e;
+    background: #2a2a2a;
+}
+
+.bin-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #aaa;
+    padding: 8px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    border-bottom: 2px solid transparent;
+}
+
+.bin-tab:hover { color: #ddd; }
+.bin-tab.active {
+    color: white;
+    border-bottom-color: #0078d7;
+    background: #333;
+}
+
+.bin-content.hidden { display: none; }
+
+/* --- LISTA DE PROJETOS --- */
+.project-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #333;
+    padding: 8px;
+    margin-bottom: 2px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+}
+.project-item:hover { border-color: #555; background: #3a3a3a; }
+
+.project-info { flex: 1; overflow: hidden; }
+.project-name { font-size: 12px; color: #eee; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-date { font-size: 10px; color: #888; margin-top: 2px; }
+
+.project-actions { display: flex; gap: 5px; }
+.project-actions button {
+    background: transparent;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 3px;
+}
+.project-actions button:hover { color: white; background: #555; }
+.project-actions .btn-delete:hover { color: #ff5252; }
