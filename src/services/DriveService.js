@@ -23,26 +23,30 @@ export class DriveService {
         try {
             console.log("DriveService (Editor): Iniciando upload direto...");
 
-            // 1. Verificar se a pasta do app já existe
             let folderId = await this._findFolder(token);
             
-            // Se não existir, cria
             if (!folderId) {
                 folderId = await this._createFolder(token);
             }
 
-            // Gera um nome único para evitar conflitos de sobrescrita
             const finalFileName = this._generateUniqueName(fileName);
 
-            // 2. Faz o Upload Multipart (Metadados + Binário)
             const fileId = await this._performMultipartUpload(token, folderId, fileBlob, finalFileName);
 
-            // 3. Torna o arquivo público (Link compartilhável)
             await this._makeFilePublic(token, fileId);
+
+            const publicLink = `https://drive.google.com/file/d/${fileId}/view`;
+
+            try {
+                await navigator.clipboard.writeText(publicLink);
+                console.log("[DriveService] Link copiado para a área de transferência.");
+            } catch (clipboardErr) {
+                console.warn("[DriveService] Falha ao copiar link (possível timeout de interação):", clipboardErr);
+            }
 
             return {
                 fileId: fileId,
-                fileViewLink: `https://drive.google.com/file/d/${fileId}/view`
+                fileViewLink: publicLink
             };
 
         } catch (error) {

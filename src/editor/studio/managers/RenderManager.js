@@ -122,7 +122,16 @@ export class RenderManager {
                 await this.studio.editor.transcoder.init();
             }
 
-            // 1. Coleta e mapeamento de clips
+            // 0. Configurações de Resolução Alvo (para recriar imagens)
+            const resolutionPresets = {
+                high: { w: 1920, h: 1080 },
+                medium: { w: 1280, h: 720 },
+                low: { w: 640, h: 480 },
+                proxy: { w: 640, h: 360 }
+            };
+            const targetRes = resolutionPresets[options.quality] || resolutionPresets.medium;
+
+            // 1. Coleta e ordenação de clips
             let allClips = [];
             let totalDuration = 0;
             const uniqueAssetIds = new Set();
@@ -136,13 +145,11 @@ export class RenderManager {
                 });
             });
 
-            // CORREÇÃO CRÍTICA: Ordena os clipes cronologicamente pela timeline.
-            // Sem isso, o filtro concat une os vídeos na ordem errada (ex: por ordem de track).
             allClips.sort((a, b) => a.start - b.start);
 
             if (allClips.length === 0) throw new Error("Timeline vazia.");
 
-            // 2. Processamento Paralelo de Assets (WebM Interno)
+            // 2. Processamento Inteligente (Imagens HD + Fader)
             let assetsMap = {}; 
             const assetsToProcess = [];
             const assetsReady = [];
@@ -151,44 +158,72 @@ export class RenderManager {
                 const asset = this.studio.project.assets.find(a => a.id === assetId);
                 if (!asset || asset.status !== 'ready') continue;
 
-                // Verifica necessidade de fader (processamento)
                 const needsFader = allClips.some(c => c.assetId === assetId && c.trackType === 'video' && c.level < 1);
-                
-                if (needsFader) assetsToProcess.push(asset);
-                else assetsReady.push(asset);
+                // Verifica se é imagem E se temos o sourceBlob para recriar em HD
+                const needsHighResRebuild = (asset.originalType === 'image' && asset.sourceBlob);
+
+                if (needsFader || needsHighResRebuild) {
+                    assetsToProcess.push(asset);
+                } else {
+                    assetsReady.push(asset);
+                }
             }
 
             assetsReady.forEach(asset => { assetsMap[asset.id] = asset.blob; });
 
             if (assetsToProcess.length > 0) {
-                document.getElementById('render-log-text').innerText = `Otimizando ${assetsToProcess.length} clips...`;
+                document.getElementById('render-log-text').innerText = `Otimizando ${assetsToProcess.length} assets (HD/Fader)...`;
                 
                 await Promise.all(assetsToProcess.map(asset => {
-                    return this.studio.addTask(`Otimizando: ${asset.name}`, async () => {
+                    return this.studio.addTask(`Renderizando Asset: ${asset.name}`, async () => {
                         if (!this.isRendering) return;
                         
-                        // Busca o primeiro clipe que usa esse asset para pegar o nível de opacidade
+                        let currentBlob = asset.blob;
+
+                        if (asset.originalType === 'image' && asset.sourceBlob) {
+                            try {
+                                const hdUrl = await this.studio.editor.transcoder.imageToVideo(
+                                    asset.sourceBlob, 
+                                    asset.baseDuration, 
+                                    { w: targetRes.w, h: targetRes.h } // Passa resolução alvo
+                                );
+                                const res = await fetch(hdUrl);
+                                currentBlob = await res.blob();
+                            } catch (err) {
+                                console.error(`Erro ao recriar imagem HD ${asset.name}`, err);
+                                // Mantém o blob original (proxy) se falhar
+                            }
+                        }
+
+                        // Usa o currentBlob que pode ser o recém criado HD ou o original
                         const clipRef = allClips.find(c => c.assetId === asset.id);
                         const opacityLevel = clipRef ? clipRef.level : 1;
 
-                        try {
-                            // Mantém WebM internamente (format: 'webm')
-                            const url = await this.studio.editor.transcoder.processVideo(
-                                asset.blob, "fader_" + asset.id, 0, asset.baseDuration, "webm", { opacity: opacityLevel }
-                            );
-                            const res = await fetch(url);
-                            assetsMap[asset.id] = await res.blob();
-                        } catch (err) {
-                            console.error(`Erro asset ${asset.name}`, err);
-                            assetsMap[asset.id] = asset.blob; // Fallback
+                        if (opacityLevel < 1) {
+                            try {
+                                const url = await this.studio.editor.transcoder.processVideo(
+                                    currentBlob, 
+                                    "fader_" + asset.id, 
+                                    0, 
+                                    asset.baseDuration, 
+                                    "webm", 
+                                    { opacity: opacityLevel }
+                                );
+                                const res = await fetch(url);
+                                currentBlob = await res.blob();
+                            } catch (err) {
+                                console.error(`Erro fader asset ${asset.name}`, err);
+                            }
                         }
+
+                        assetsMap[asset.id] = currentBlob;
                     });
                 }));
             }
 
             if (!this.isRendering) throw new Error("Cancelado.");
 
-            // 3. Mixagem Final (Respeitando o formato escolhido)
+            // 3. Mixagem Final
             document.getElementById('render-log-text').innerText = `Mixando em ${options.format.toUpperCase()}...`;
             
             const progressCallback = (ratio, speed) => {
@@ -203,10 +238,9 @@ export class RenderManager {
                 options
             );
             
-            // Carrega o vídeo final no Editor
             const res = await fetch(url);
             this.studio.editor.videoBlob = await res.blob();
-            this.studio.editor.currentExtension = options.format === 'mp4' ? 'mp4' : 'webm'; // Atualiza extensão
+            this.studio.editor.currentExtension = options.format === 'mp4' ? 'mp4' : 'webm';
             await this.studio.editor._loadVideo(url);
             
             this.studio.toggleMode(); 

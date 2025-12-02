@@ -163,7 +163,7 @@ export class UIManager {
                         <div class="input-group">
                             <label for="render-quality">Qualidade (Preset):</label>
                             <select id="render-quality">
-                                <option value="ultrafast">Baixa (Mais Rápido)</option>
+                                <option value="veryfast">Baixa (Mais Rápido)</option>
                                 <option value="medium" selected>Média (Equilíbrio)</option>
                                 <option value="veryslow">Alta (Melhor Qualidade)</option>
                             </select>

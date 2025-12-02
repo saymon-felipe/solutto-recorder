@@ -247,7 +247,6 @@ export class TranscodeService {
 
         const inputName = `input_img_${Date.now()}.${fileExtension}`;
         const outputName = `output_img_${Date.now()}.webm`;
-
         const isGif = mimeType === "image/gif";
 
         try {
@@ -264,26 +263,38 @@ export class TranscodeService {
                 command.push("-t", durationSeconds.toString());
             }
 
-            const isProxy = options.isProxy || false;
+            // Detecta se é renderização final (tem largura/altura definidas) ou proxy
+            const isRenderMode = (options.w && options.h);
+
+            // Filtro de escala
+            let scaleFilter = "scale=1280:720";
+            if (isRenderMode) {
+                scaleFilter = `scale=${options.w}:${options.h}`;
+            } else if (options.isProxy) {
+                scaleFilter = "scale=640:360";
+            }
+            
+            const deadline = isRenderMode ? "good" : "realtime";
+            const cpuUsed = isRenderMode ? "2" : "8";
+            const crf = isRenderMode ? "10" : "30"; 
 
             command.push(
-                "-r", "25",
-                "-g", "1",
-                "-deadline", "realtime",
-                "-cpu-used", "8",
-                "-crf", isProxy ? "30" : "10",
-                "-b:v", isProxy ? "500k" : "0",
-                "-an", // Sem stream de áudio
+                "-r", "30", // Força 30fps para consistência
+                "-g", "30", // GOP size
+                "-deadline", deadline,
+                "-cpu-used", cpuUsed,
+                "-crf", crf,
+                "-b:v", "0", // Bitrate variável baseado no CRF
+                "-an",
                 "-c:v", "libvpx",
                 "-pix_fmt", "yuv420p",
                 "-vf",
-                isProxy
-                    ? "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2"
-                    : "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+                `${scaleFilter}:force_original_aspect_ratio=decrease,pad=${options.w||1280}:${options.h||720}:(ow-iw)/2:(oh-ih)/2`,
                 outputName
             );
 
-            console.log("[FFmpeg IMAGE2VIDEO]:", command.join(" "));
+            console.log(`[FFmpeg IMG->VID] Mode: ${isRenderMode ? 'HIGH QUALITY' : 'PROXY'} | Command:`, command.join(" "));
+            
             await this.ffmpeg.exec(command);
 
             const data = await this.ffmpeg.readFile(outputName);
@@ -379,14 +390,13 @@ export class TranscodeService {
         // Presets de Qualidade
         const qualityPresets = {
             veryslow: { preset: "veryslow", crf: 15, bitrate: null, audioBitrate: "320k" },
-            high:     { preset: "slow",     crf: 18, bitrate: null, audioBitrate: "320k" },
-            medium:   { preset: "medium",   crf: 23, bitrate: null, audioBitrate: "192k" },
+            high:     { preset: "slow",     crf: 17, bitrate: null, audioBitrate: "256k" },
+            medium:   { preset: "medium",   crf: 18, bitrate: null, audioBitrate: "192k" }, // CRF 18 é excelente
             low:      { preset: "veryfast", crf: 28, bitrate: "2000k", audioBitrate: "128k" },
             proxy:    { preset: "ultrafast",crf: 35, bitrate: "500k", audioBitrate: "64k" }
         };
 
         const qualityKey = options.quality || 'medium';
-        // CORREÇÃO: let para permitir fallback
         let quality = qualityPresets[qualityKey];
 
         if (!quality) {
@@ -438,7 +448,6 @@ export class TranscodeService {
                 const assetBlob = assetsMap[assetId];
                 if (!assetBlob) continue;
 
-                // Importante: Detectar se é mp4 ou webm na entrada para a extensão correta
                 const inExt = assetBlob.type.includes('mp4') ? 'mp4' : 'webm';
                 const inputVFSName = `input_${assetId}.${inExt}`;
                 
@@ -454,6 +463,7 @@ export class TranscodeService {
 
             if (inputIndex === 0) throw new Error("Nenhum asset válido foi carregado");
 
+            // 3. Sondagem de Áudio
             const inputsWithAudio = new Set();
             console.log("[FFmpeg] Sondando streams de áudio...");
             
@@ -462,22 +472,19 @@ export class TranscodeService {
                 const msg = log.message || log;
                 if (typeof msg !== 'string') return;
                 
-                // Detecta Input #N
                 const inputMatch = msg.match(/Input #(\d+),/);
                 if (inputMatch) currentProbeIndex = parseInt(inputMatch[1]);
                 
-                // Detecta Stream Audio no Input atual
                 if (currentProbeIndex >= 0 && msg.match(/Stream #\d+:\d+.*Audio:/)) {
                     inputsWithAudio.add(currentProbeIndex);
                 }
             };
 
             this.ffmpeg.on("log", probeLogHandler);
-            try { await this.ffmpeg.exec(probeList); } catch (e) { /* Ignora erro de output missing */ }
+            try { await this.ffmpeg.exec(probeList); } catch (e) { }
             this.ffmpeg.off("log", probeLogHandler);
             
             console.log("[FFmpeg] Inputs com áudio:", Array.from(inputsWithAudio));
-            // -----------------------------------------------------
 
             // 4. Montar Filter Complex
             let filterComplex = "";
@@ -486,13 +493,12 @@ export class TranscodeService {
             let audioStreamsToMix = [];
             let videoStreamsToMerge = [];
 
-            // A. Streams de Áudio (Com verificação de existência)
+            // A. Streams de Áudio
             audioClips.forEach((clip) => {
                 if (!clip || !clip.assetId) return;
                 const map = assetFileMap[clip.assetId];
                 if (!map) return;
 
-                // SÓ PROCESSA SE TIVER ÁUDIO
                 if (!inputsWithAudio.has(map.index)) {
                     if (clip.trackType === 'audio') console.warn(`Asset ${clip.assetId} não tem áudio.`);
                     return; 
@@ -536,7 +542,6 @@ export class TranscodeService {
             if (audioStreamsToMix.length > 0) {
                 filterComplex += `${audioStreamsToMix.map(l => `[${l}]`).join("")}amix=inputs=${audioStreamsToMix.length}:duration=longest[mixed_audio];`;
             } else {
-                // Silêncio
                 filterComplex += `anullsrc=channel_layout=stereo:sample_rate=44100[mixed_audio];`;
             }
 
@@ -544,14 +549,14 @@ export class TranscodeService {
 
             filterComplex += `${videoStreamsToMerge.map(l => `[${l}]`).join("")}concat=n=${videoStreamsToMerge.length}:v=1:a=0[mixed_video]`;
 
-            // 5. Execução de Codificação (WebM vs MP4)
+            // 5. Execução de Codificação
             let encodeCommand = [...inputCommands];
             encodeCommand.push("-filter_complex", filterComplex);
             encodeCommand.push("-map", "[mixed_video]");
             encodeCommand.push("-map", "[mixed_audio]");
 
             if (isMp4) {
-                // Configuração H.264 (MP4)
+                // MP4: Usa Preset do x264
                 encodeCommand.push(
                     "-c:v", "libx264",
                     "-c:a", "aac",
@@ -563,16 +568,22 @@ export class TranscodeService {
                 if(quality.bitrate) encodeCommand.push("-b:v", quality.bitrate);
                 else encodeCommand.push("-crf", String(quality.crf));
             } else {
-                // Configuração VP8 (WebM)
+                // WebM: Configuração Dinâmica baseada na Qualidade escolhida
+                // Mapeia qualidade para deadline (good = melhor qualidade / realtime = velocidade)
+                const isHighQuality = ['medium', 'high', 'veryslow'].includes(qualityKey);
+                const deadline = isHighQuality ? "good" : "realtime";
+                const cpuUsed = isHighQuality ? "4" : "8"; 
+
                 encodeCommand.push(
                     "-c:v", "libvpx",
-                    "-deadline", "realtime",
-                    "-cpu-used", "8",
+                    "-deadline", deadline,
+                    "-cpu-used", cpuUsed,
                     "-c:a", "libvorbis",
                     "-b:a", quality.audioBitrate || "128k"
                 );
+                
                 if(quality.bitrate) encodeCommand.push("-b:v", quality.bitrate);
-                else encodeCommand.push("-crf", "30", "-b:v", "1M"); 
+                else encodeCommand.push("-crf", String(quality.crf), "-b:v", "0"); 
             }
 
             encodeCommand.push("-t", totalDuration.toString());
@@ -583,9 +594,7 @@ export class TranscodeService {
 
             await this.ffmpeg.exec(encodeCommand);
 
-            // 6. REMUX (Se necessário, ou apenas leitura final)
-            // Para simplificar e evitar erros de cópia em wasm, lemos diretamente se possível, 
-            // mas o remux garante metadados limpos.
+            // 6. REMUX
             this.ffmpeg.off("log", progressHandler);
             safeProgress(1.0, 'Finalizando...');
 
@@ -598,7 +607,6 @@ export class TranscodeService {
 
             await this.ffmpeg.exec(remuxCommand);
 
-            // 7. Retorno
             const data = await this.ffmpeg.readFile(finalOutputName);
             const mimeType = `video/${outputFormat}`;
             const resultBlob = new Blob([data.buffer], { type: mimeType });

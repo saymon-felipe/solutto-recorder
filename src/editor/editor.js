@@ -211,9 +211,18 @@ class EditorManager {
     }
 
     _triggerDownload(url, ext) {
+        if (!this.fileName || this.fileName.trim() === "") {
+            console.warn("Nome do arquivo vazio, gerando novo nome...");
+            this.fileName = this._generateFileName();
+        }
+
         const a = document.createElement("a");
-        a.href = url; a.download = `${this.fileName}.${ext}`;
-        document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 100);
+        a.href = url; 
+        a.download = `${this.fileName}.${ext}`;
+        
+        document.body.appendChild(a); 
+        a.click(); 
+        setTimeout(() => a.remove(), 100);
     }
 
     _setLoading(active, text) {

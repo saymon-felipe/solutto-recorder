@@ -13,7 +13,12 @@ export class AssetManager {
             id: assetId,
             name: (mime === 'image' ? "[IMG] " : "") + name,
             type: mime === 'image' ? 'video' : mime,
-            blob: null, url: "", baseDuration: 5, status: 'processing'
+            originalType: mime,
+            blob: null, 
+            sourceBlob: null,
+            url: "", 
+            baseDuration: 5, 
+            status: 'processing'
         };
 
         this.studio.project.assets.push(placeholder);
@@ -23,7 +28,7 @@ export class AssetManager {
             const result = await this._createAsset(file, name, mime);
             const idx = this.studio.project.assets.findIndex(a => a.id === assetId);
             if (idx !== -1) {
-                this.studio.project.assets[idx] = { ...result, id: assetId, status: 'ready' };
+                this.studio.project.assets[idx] = { ...result, id: assetId, status: 'ready', sourceBlob: file, originalType: mime };
                 this.renderBin();
                 this.studio.timelineManager.renderTracks();
             }

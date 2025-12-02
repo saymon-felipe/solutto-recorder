@@ -214,7 +214,10 @@ export class StudioManager {
                 const addedClip = videoTrack.clips[videoTrack.clips.length - 1];
                 if(addedClip) addedClip.muted = true;
             }
-            if (audioTrack) {
+
+            const isImage = (asset.originalType && asset.originalType.startsWith('image')) || asset.name.startsWith("[IMG]");
+            
+            if (audioTrack && !isImage) {
                 this.timelineManager.addClipToTrack(audioTrack.id, asset, startTime, groupId);
             }
         } 
