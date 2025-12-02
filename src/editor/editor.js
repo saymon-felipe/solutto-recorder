@@ -45,6 +45,7 @@ class EditorManager {
         const mode = params.get('mode');
 
         if (mode === 'studio') {
+            this._setupListeners();
             this.studio.toggleMode();
             return;
         }

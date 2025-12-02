@@ -168,6 +168,13 @@ export class UIManager {
                                 <option value="veryslow">Alta (Melhor Qualidade)</option>
                             </select>
                         </div>
+                        <div class="input-group">
+                            <label for="render-format">Formato de Saída:</label>
+                            <select id="render-format">
+                                <option value="webm" selected>WebM (Rápido)</option>
+                                <option value="mp4">MP4 (Lento)</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="modal-actions">
                         <button class="studio-btn" id="btn-render-cancel">Cancelar</button>

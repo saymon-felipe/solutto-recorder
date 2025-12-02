@@ -6,7 +6,6 @@ export class AssetManager {
     }
 
     async importAsset(file, name = "Sem Nome") {
-        // Fallback se type estiver vazio
         const mime = file.type ? file.type.split('/')[0] : 'video';
         const assetId = "asset_" + Date.now();
         
@@ -26,21 +25,21 @@ export class AssetManager {
             if (idx !== -1) {
                 this.studio.project.assets[idx] = { ...result, id: assetId, status: 'ready' };
                 this.renderBin();
-                this.studio.timelineManager.renderTracks(); // Atualiza se já estiver na timeline
+                this.studio.timelineManager.renderTracks();
             }
         });
     }
 
     async _createAsset(file, name, mimeOverride) {
         let type; let duration; 
-        const blob = new Blob([file], { type: file.type });
+        let blob = new Blob([file], { type: file.type });
         const mime = mimeOverride || file.type.split('/')[0];
 
         if (mime === 'image') {
             type = 'video'; name = "[IMG] " + name;
             const url = await this.studio.editor.transcoder.imageToVideo(file, 5);
             const res = await fetch(url);
-            blob = await res.blob();
+            blob = await res.blob(); 
             duration = 5;
         } else if (mime === 'video' || mime === 'application') {
             type = 'video'; duration = await getMediaDuration(blob);

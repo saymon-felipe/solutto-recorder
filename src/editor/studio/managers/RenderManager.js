@@ -4,7 +4,6 @@ export class RenderManager {
         this.isRendering = false;
         this.renderStartTime = 0;
         this.timerInterval = null; 
-        this.estimatedTotalTime = 0;
     }
 
     init() {
@@ -23,16 +22,17 @@ export class RenderManager {
         document.getElementById("btn-render-confirm").onclick = () => {
             modal.classList.add('hidden');
             
+            // Captura as opções, incluindo o novo Formato
             const options = {
                 resolution: document.getElementById("render-resolution").value,
-                quality: document.getElementById("render-quality").value
+                quality: document.getElementById("render-quality").value,
+                format: document.getElementById("render-format") ? document.getElementById("render-format").value : 'webm'
             };
             this.renderProject(options);
         };
 
-        document.getElementById("btn-render-abort").addEventListener('click', (e) => {
-            this.cancelRendering();
-        });
+        const btnAbort = document.getElementById("btn-render-abort");
+        if(btnAbort) btnAbort.onclick = () => this.cancelRendering();
     }
 
     async cancelRendering() {
@@ -50,15 +50,12 @@ export class RenderManager {
         const elElapsed = document.getElementById('render-timer-elapsed');
         const elLog = document.getElementById('render-log-text');
         
-        if(elLog) elLog.innerText = "Preparando arquivos e filtros...";
+        if(elLog) elLog.innerText = "Preparando assets...";
 
         this.timerInterval = setInterval(() => {
             const now = Date.now();
             const elapsedSec = (now - this.renderStartTime) / 1000;
-            
-            // Atualiza o tempo decorrido a cada segundo
             if(elElapsed) elElapsed.innerText = this._fmt(elapsedSec);
-            
         }, 1000);
     }
 
@@ -84,9 +81,8 @@ export class RenderManager {
             if(fill) fill.style.width = `${percentage}%`;
             if(textPerc) textPerc.innerText = `${percentage}%`;
             if(textSpeed) textSpeed.innerText = `${speed}x`;
-            if(textLog) textLog.innerText = `Codificando frames... (${percentage}%)`;
+            if(textLog) textLog.innerText = `Renderizando... (${percentage}%)`;
 
-            // Cálculo do Tempo Restante
             const elapsed = (Date.now() - this.renderStartTime) / 1000;
             if (ratio > 0.01) {
                 const totalEstimated = elapsed / ratio;
@@ -106,9 +102,6 @@ export class RenderManager {
         return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     }
 
-    /**
-     * Inicia o processo de mixagem e renderização do projeto.
-     */
     async renderProject(options = {}) {
         if (this.studio.tasks.length > 0) return alert("Aguarde tarefas pendentes...");
         
@@ -119,18 +112,17 @@ export class RenderManager {
         if(btn) { btn.innerHTML = "Renderizando..."; btn.disabled = true; }
 
         document.getElementById('render-timer-elapsed').innerText = "00:00:00";
-        document.getElementById('render-timer-left').innerText = "--:--:--";
         document.querySelector('.vegas-progress-fill').style.width = "0%";
         
         this._startTimerLoop();
 
         try {
             if (!this.studio.editor.transcoder.isLoaded) {
-                document.getElementById('render-log-text').innerText = "Carregando núcleo do FFmpeg...";
+                document.getElementById('render-log-text').innerText = "Carregando FFmpeg...";
                 await this.studio.editor.transcoder.init();
             }
 
-            // 1. Coleta TODOS os clipes (áudio e vídeo) e calcula a duração total
+            // 1. Coleta e mapeamento de clips
             let allClips = [];
             let totalDuration = 0;
             const uniqueAssetIds = new Set();
@@ -144,58 +136,63 @@ export class RenderManager {
                 });
             });
 
-            if (allClips.length === 0 || totalDuration === 0) throw new Error("Timeline vazia ou duração zero.");
+            // CORREÇÃO CRÍTICA: Ordena os clipes cronologicamente pela timeline.
+            // Sem isso, o filtro concat une os vídeos na ordem errada (ex: por ordem de track).
+            allClips.sort((a, b) => a.start - b.start);
 
-            // 2. Pré-processamento e Mapeamento de Assets (Blob final)
-            const assetsMap = {}; 
+            if (allClips.length === 0) throw new Error("Timeline vazia.");
+
+            // 2. Processamento Paralelo de Assets (WebM Interno)
+            let assetsMap = {}; 
+            const assetsToProcess = [];
+            const assetsReady = [];
+
             for (const assetId of uniqueAssetIds) {
                 const asset = this.studio.project.assets.find(a => a.id === assetId);
-                if (!this.isRendering) throw new Error("Cancelado.");
+                if (!asset || asset.status !== 'ready') continue;
 
-                if (!asset || asset.status !== 'ready') {
-                    console.warn(`[Render] Asset ignorado (não encontrado ou não pronto): ${assetId}`);
-                    continue;
-                }
+                // Verifica necessidade de fader (processamento)
+                const needsFader = allClips.some(c => c.assetId === assetId && c.trackType === 'video' && c.level < 1);
+                
+                if (needsFader) assetsToProcess.push(asset);
+                else assetsReady.push(asset);
+            }
 
-                document.getElementById('render-log-text').innerText = `Processando asset: ${asset.name}...`;
+            assetsReady.forEach(asset => { assetsMap[asset.id] = asset.blob; });
+
+            if (assetsToProcess.length > 0) {
+                document.getElementById('render-log-text').innerText = `Otimizando ${assetsToProcess.length} clips...`;
                 
-                let finalBlob = asset.blob;
-                
-                // Aplica Fader (apenas se houver clipe de vídeo com level < 1)
-                const videoClipNeedsFader = allClips.some(c => c.assetId === assetId && c.trackType === 'video' && c.level < 1);
-                
-                if (videoClipNeedsFader) {
-                    try {
-                        const faderBlob = await this.studio.addTask("Aplicando Fader...", async () => { 
+                await Promise.all(assetsToProcess.map(asset => {
+                    return this.studio.addTask(`Otimizando: ${asset.name}`, async () => {
+                        if (!this.isRendering) return;
+                        
+                        // Busca o primeiro clipe que usa esse asset para pegar o nível de opacidade
+                        const clipRef = allClips.find(c => c.assetId === asset.id);
+                        const opacityLevel = clipRef ? clipRef.level : 1;
+
+                        try {
+                            // Mantém WebM internamente (format: 'webm')
                             const url = await this.studio.editor.transcoder.processVideo(
-                                asset.blob, "fader_" + asset.id, 0, asset.baseDuration, "webm", { opacity: allClips.find(c => c.assetId === asset.id).level }
+                                asset.blob, "fader_" + asset.id, 0, asset.baseDuration, "webm", { opacity: opacityLevel }
                             );
                             const res = await fetch(url);
-                            return await res.blob();
-                        });
-                        
-                        if (faderBlob) finalBlob = faderBlob;
-                    } catch (err) {
-                        console.error(`[Render] Erro ao aplicar fader no asset ${assetId}. Usando original.`, err);
-                    }
-                }
-
-                if (!finalBlob || finalBlob.size === 0) {
-                    console.error(`[Render] Blob inválido para asset: ${assetId}`);
-                    continue;
-                }
-
-                assetsMap[assetId] = finalBlob;
+                            assetsMap[asset.id] = await res.blob();
+                        } catch (err) {
+                            console.error(`Erro asset ${asset.name}`, err);
+                            assetsMap[asset.id] = asset.blob; // Fallback
+                        }
+                    });
+                }));
             }
 
-            if (Object.keys(assetsMap).length === 0) {
-                throw new Error("Não foi possível preparar os arquivos de mídia. Verifique se os assets estão carregados corretamente.");
-            }
+            if (!this.isRendering) throw new Error("Cancelado.");
+
+            // 3. Mixagem Final (Respeitando o formato escolhido)
+            document.getElementById('render-log-text').innerText = `Mixando em ${options.format.toUpperCase()}...`;
             
-            // 3. Chamar mixProject: Lógica complexa de FFmpeg para combinar áudio e vídeo
             const progressCallback = (ratio, speed) => {
-                if(!this.isRendering) return;
-                this.updateProgress(ratio, speed);
+                if(this.isRendering) this.updateProgress(ratio, speed);
             };
 
             const url = await this.studio.editor.transcoder.mixProject(
@@ -206,28 +203,23 @@ export class RenderManager {
                 options
             );
             
+            // Carrega o vídeo final no Editor
             const res = await fetch(url);
             this.studio.editor.videoBlob = await res.blob();
+            this.studio.editor.currentExtension = options.format === 'mp4' ? 'mp4' : 'webm'; // Atualiza extensão
             await this.studio.editor._loadVideo(url);
             
             this.studio.toggleMode(); 
 
         } catch(e) { 
-            if (!this.isRendering) {
-                console.warn("Renderização cancelada pelo usuário.");
-            } else {
-                alert("Erro: " + e.message);
-            }
+            if (!this.isRendering) console.warn("Cancelado.");
+            else alert("Erro na renderização: " + e.message);
         } finally {
             this.isRendering = false;
             this._stopTimerLoop(); 
             document.getElementById('render-progress-overlay').classList.add('hidden');
             this.studio.editor._setLoading(false);
-
-            if(btn) {
-                btn.innerHTML = `<i class="fa-solid fa-file-export"></i> Renderizar`; 
-                btn.disabled = false;
-            }
+            if(btn) { btn.innerHTML = `<i class="fa-solid fa-file-export"></i> Renderizar`; btn.disabled = false; }
         }
     }
 }
