@@ -165,10 +165,6 @@
     pointer-events: none; 
 }
 
-#studio-audio-preview { 
-    display: none; 
-}
-
 #studio-app .preview-controls {
     height: 35px; 
     width: 100%; 

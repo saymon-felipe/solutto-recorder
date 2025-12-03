@@ -112,8 +112,7 @@ export class UIManager {
                 
                 <div class="preview-container">
                     <div class="studio-preview">
-                        <video id="studio-preview-video" style="position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;"></video>
-                        <audio id="studio-audio-preview"></audio>
+                        <div id="studio-preview-container"></div>
                     </div>
                     <div class="preview-controls">
                         <button class="control-btn" id="btn-stop"><i class="fa-solid fa-stop"></i></button>
