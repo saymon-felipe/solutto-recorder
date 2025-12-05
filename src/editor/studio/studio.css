@@ -155,7 +155,7 @@
     align-items: center; 
     justify-content: center; 
     overflow: hidden; 
-    background: #050505; 
+    background: #1e1e1e !important; 
     position: relative; 
 }
 
@@ -783,3 +783,54 @@
 }
 .project-actions button:hover { color: white; background: #555; }
 .project-actions .btn-delete:hover { color: #ff5252; }
+
+.project-settings-modal {
+    width: 450px;
+    display: flex;
+    flex-direction: column;
+}
+
+.ps-grid {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    gap: 15px;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.ps-grid label {
+    text-align: right;
+    color: #aaa;
+    font-size: 12px;
+}
+
+.ps-grid input, .ps-grid select {
+    background: #1e1e1e;
+    border: 1px solid #444;
+    color: white;
+    padding: 6px;
+    font-size: 13px;
+    width: 100%;
+}
+
+.ps-grid input:focus, .ps-grid select:focus {
+    border-color: #0078d7;
+    outline: none;
+}
+
+.studio-preview {
+    background: #050505; 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+#preview-viewport-wrapper {
+    position: relative;
+    background: #000;
+    box-shadow: 0 0 30px rgba(0,0,0,0.5);
+    transition: width 0.3s, height 0.3s, aspect-ratio 0.3s;
+    max-width: 95%;
+    max-height: 95%;
+}

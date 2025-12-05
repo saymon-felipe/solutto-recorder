@@ -5,6 +5,7 @@ import { PlaybackManager } from './managers/PlaybackManager.js';
 import { RenderManager } from './managers/RenderManager.js';
 import { updateHeaderWidth } from './utils.js';
 import { ProjectStorage } from '../../services/ProjectStorage.js';
+import { VideoStorage } from '../../services/VideoStorage.js';
 
 export class StudioManager {
     constructor(editorManager) {
@@ -14,6 +15,7 @@ export class StudioManager {
         this.project = {
             id: null,
             name: "Novo Projeto",
+            settings: { width: 1280, height: 720 },
             tracks: [
                 { id: "track_v1", type: 'video', name: 'Video 1', clips: [] },
                 { id: "track_a1", type: 'audio', name: 'Audio 1', clips: [] }
@@ -27,6 +29,8 @@ export class StudioManager {
         this.tasks = [];
         this.draggedAsset = null;
 
+        this.isFreshInit = true;
+
         this.uiManager = new UIManager(this);
         this.assetManager = new AssetManager(this);
         this.timelineManager = new TimelineManager(this);
@@ -36,43 +40,88 @@ export class StudioManager {
         this.projectStorage = new ProjectStorage(); 
     }
 
-    init() {
-        this.projectStorage.init().catch(console.error);
-
-        // 1. Constroi a UI
+    async init() {
+        // Inicializa a UI básica
         this.uiManager.buildUI();
         
-        // 2. Renderiza Tracks (necessário para inicializar o PlaybackManager corretamente depois)
-        this.timelineManager.renderRuler();
-        this.timelineManager.renderTracks();
-
-        // 3. Inicializa Listeners
+        // Inicializa subsistemas
+        this.assetManager.init();
         this.timelineManager.init();
         this.playbackManager.init();
         this.renderManager.init();
+
+        // Verifica se há um ID de projeto na URL (para carregamento direto)
+        const projectIdFromUrl = new URLSearchParams(window.location.search).get('projectId');
         
-        this.uiManager.updateRecentProjectsList();
-
-        setTimeout(() => {
-            const h = document.querySelector('.track-header');
-            if(h) updateHeaderWidth(h.getBoundingClientRect().width);
-        }, 100);
-
-        // CORREÇÃO: Carregamento robusto da gravação
-        if (this.editor.videoBlob) {
-            console.log("Importando gravação original...");
-            this.assetManager.importAsset(this.editor.videoBlob, "Gravação Original");
-            
-            // Aguarda o processamento terminar
-            const checkInterval = setInterval(() => {
-                const asset = this.project.assets[0];
-                if (asset && asset.status === 'ready') {
-                    clearInterval(checkInterval);
-                    console.log("Gravação pronta, adicionando à timeline...");
-                    this.addAssetToTimeline(asset, 0); // Usa o método inteligente
-                }
-            }, 500);
+        if (projectIdFromUrl) {
+            // Se veio um ID, carrega o projeto salvo e ignora a modal de novo projeto
+            await this.loadProject(projectIdFromUrl); // Assumindo que este método já existe ou será criado
+            this.isFreshInit = false;
         }
+
+        // Aplica o aspecto visual inicial ao player
+        this.uiManager.updatePreviewViewport();
+
+        // Lógica da Modal de Novo Projeto
+        if (this.isFreshInit) {
+            // Abre a modal. O botão "OK" dessa modal chamará 'checkForPendingRecording'
+            this.uiManager.promptProjectSettings();
+        } else {
+            // Se já carregamos um projeto existente, limpamos qualquer gravação pendente para não confundir
+            await this.clearPendingRecordingId();
+        }
+    }
+
+    /**
+     * Verifica se existe uma gravação recente no storage e a importa para o projeto.
+     * Chamado pelo UIManager após definir as configurações do projeto.
+     */
+    async checkForPendingRecording() {
+        try {
+            // 1. Verifica se há ID de vídeo gravado
+            const data = await chrome.storage.local.get(["videoId"]);
+            if (!data.videoId) return;
+
+            this.uiManager.updateStatusBar([{ label: "Importando gravação..." }]);
+
+            // 2. Recupera o Blob do IndexedDB
+            const storage = new VideoStorage();
+            const videoBlob = await storage.getVideo(data.videoId);
+            
+            if (!videoBlob) {
+                console.warn("Vídeo não encontrado no storage.");
+                return;
+            }
+
+            // 3. Converte para File para o AssetManager
+            const ext = videoBlob.type.includes("mp4") ? "mp4" : "webm";
+            const fileName = `gravacao_${new Date().getTime()}.${ext}`;
+            const videoFile = new File([videoBlob], fileName, { type: videoBlob.type });
+
+            // 4. Importa para o Bin de Mídia
+            const asset = await this.assetManager.importAsset(videoFile, fileName);
+            
+            // 5. Opcional: Adicionar automaticamente à timeline se desejar
+            if (asset) {
+                // Adiciona na track de vídeo 1 no tempo 0
+                this.timelineManager.addClipToTrack("track_v1", asset, 0);
+            }
+
+            console.log("Gravação importada com sucesso.");
+
+            // 6. Limpa o registro para não importar novamente no futuro
+            await this.clearPendingRecordingId();
+
+        } catch (e) {
+            console.error("Erro ao importar gravação pendente:", e);
+            alert("Falha ao carregar a gravação: " + e.message);
+        } finally {
+            this.uiManager.updateStatusBar([]); // Limpa status
+        }
+    }
+
+    async clearPendingRecordingId() {
+        await chrome.storage.local.remove(["videoId"]);
     }
 
     toggleMode() {

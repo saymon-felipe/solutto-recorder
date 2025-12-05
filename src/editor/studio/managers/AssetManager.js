@@ -5,6 +5,10 @@ export class AssetManager {
         this.studio = studio;
     }
 
+    init() {
+        this.renderBin();
+    }
+
     async importAsset(file, name = "Sem Nome") {
         const mime = file.type ? file.type.split('/')[0] : 'video';
         const type = mime === 'image' ? 'image' : mime; 
@@ -14,7 +18,7 @@ export class AssetManager {
         const placeholder = {
             id: assetId,
             name: (type === 'image' ? "[IMG] " : "") + name,
-            type: type === 'image' ? 'image' : (mime === 'image' ? 'video' : mime), // Correção para manter type='image'
+            type: type === 'image' ? 'image' : (mime === 'image' ? 'video' : mime), 
             originalType: mime,
             blob: null, 
             sourceBlob: null,

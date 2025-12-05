@@ -74,6 +74,75 @@ export class UIManager {
                     margin-top: 15px;
                 }
                 .vegas-btn-abort:hover { background: #c42b1c; border-color: #c42b1c; color: white; }
+
+                .ps-orientation-selector {
+                    display: flex;
+                    gap: 15px;
+                    margin-bottom: 20px;
+                }
+                .ps-orientation-btn {
+                    flex: 1;
+                    background: #333;
+                    border: 2px solid transparent;
+                    padding: 20px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 10px;
+                    color: #aaa;
+                    transition: all 0.2s;
+                    text-align: center;
+                }
+                .ps-orientation-btn:hover { background: #3e3e3e; }
+                .ps-orientation-btn.selected {
+                    border-color: #0078d7; /* Azul Sony Vegas */
+                    background: #252526;
+                    color: white;
+                    box-shadow: 0 0 10px rgba(0, 120, 215, 0.2);
+                }
+                .ps-orientation-btn i { font-size: 28px; margin-bottom: 5px; }
+                .ps-orientation-btn span { font-size: 13px; font-weight: 600; }
+                .ps-orientation-btn small { font-size: 10px; color: #777; font-weight: normal; }
+
+                /* Toggle Avançado */
+                .ps-advanced-toggle {
+                    color: #00b7eb;
+                    cursor: pointer;
+                    font-size: 12px;
+                    margin-bottom: 10px;
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                    user-select: none;
+                }
+                .ps-advanced-toggle:hover { text-decoration: underline; }
+                .ps-advanced-toggle i { transition: transform 0.2s; }
+                .ps-advanced-toggle.open i { transform: rotate(90deg); }
+
+                /* Container Avançado (Inputs) */
+                .ps-advanced-options {
+                    display: none;
+                    background: #1e1e1e;
+                    padding: 15px;
+                    border: 1px solid #3e3e3e;
+                    border-radius: 4px;
+                    margin-bottom: 5px;
+                }
+                .ps-advanced-options.show { display: block; animation: fadeIn 0.3s; }
+
+                /* Correção do Rodapé (Botão grudado) */
+                .ps-footer {
+                    padding: 15px 20px;
+                    background: #252526;
+                    border-top: 1px solid #3e3e3e;
+                    display: flex;
+                    justify-content: flex-end; /* Alinha à direita */
+                    gap: 10px;
+                }
+
+                @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
             </style>
         `;
         
@@ -223,10 +292,64 @@ export class UIManager {
                     </div>
                 </div>
             </div>
+
+            <div id="project-settings-modal" class="modal-overlay hidden">
+                <div class="vegas-modal project-settings-modal">
+                    <div class="vegas-header">
+                        <span><i class="fa-solid fa-clapperboard"></i> &nbsp; Novo Projeto</span>
+                    </div>
+                    
+                    <div class="vegas-body">
+                        <div style="margin-bottom:15px; font-size:13px; color:#ddd">Selecione o formato do vídeo:</div>
+                        
+                        <div class="ps-orientation-selector">
+                            <div class="ps-orientation-btn selected" data-mode="landscape">
+                                <i class="fa-solid fa-tv"></i>
+                                <span>Paisagem</span>
+                                <small>16:9 (Youtube, Monitor)</small>
+                            </div>
+                            <div class="ps-orientation-btn" data-mode="portrait">
+                                <i class="fa-solid fa-mobile-screen"></i>
+                                <span>Retrato</span>
+                                <small>9:16 (Shorts, TikTok)</small>
+                            </div>
+                        </div>
+
+                        <div class="ps-advanced-toggle" id="btn-toggle-advanced">
+                            <i class="fa-solid fa-chevron-right" id="icon-advanced-toggle"></i> 
+                            Personalizar Resolução (Avançado)
+                        </div>
+
+                        <div class="ps-advanced-options" id="ps-advanced-container">
+                            <div class="vegas-stats-grid" style="margin-bottom:0; grid-template-columns: 1fr 1fr;">
+                                <div class="input-group" style="margin-bottom:0; display:block;">
+                                    <label style="display:block; margin-bottom:5px; color:#aaa;">Largura (px)</label>
+                                    <input type="number" id="ps-width" value="1920" max="2560" style="width:100%; background:#252525; color:white; border:1px solid #444; padding:5px;">
+                                </div>
+                                <div class="input-group" style="margin-bottom:0; display:block;">
+                                    <label style="display:block; margin-bottom:5px; color:#aaa;">Altura (px)</label>
+                                    <input type="number" id="ps-height" value="1080" max="2560" style="width:100%; background:#252525; color:white; border:1px solid #444; padding:5px;">
+                                </div>
+                            </div>
+                            <div style="font-size: 10px; color: #666; margin-top: 8px; text-align: right;">
+                                Máximo suportado: 2560px (2K)
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ps-footer">
+                        <button class="studio-btn primary" id="btn-ps-confirm" style="padding: 6px 20px; height: 32px;">
+                            Criar Projeto <i class="fa-solid fa-arrow-right" style="margin-left:5px"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
         `;
         document.body.appendChild(div);
         this._bindEvents();
         this._bindTabEvents();
+
+        this._bindProjectSettingsEvents();
     }
 
     _bindEvents() {
@@ -340,5 +463,99 @@ export class UIManager {
         } catch (e) {
             console.error("Erro ao listar projetos:", e);
         }
+    }
+
+    _bindProjectSettingsEvents() {
+        const modal = document.getElementById('project-settings-modal');
+        const btnConfirm = document.getElementById('btn-ps-confirm');
+        const inpW = document.getElementById('ps-width');
+        const inpH = document.getElementById('ps-height');
+        
+        // 1. Lógica dos Botões Seletores (Cards)
+        const buttons = document.querySelectorAll('.ps-orientation-btn');
+        buttons.forEach(btn => {
+            btn.onclick = () => {
+                // Remove seleção anterior
+                buttons.forEach(b => b.classList.remove('selected'));
+                // Adiciona na atual
+                btn.classList.add('selected');
+
+                // Define valores baseados no modo
+                const mode = btn.dataset.mode;
+                if (mode === 'landscape') {
+                    inpW.value = 1920;
+                    inpH.value = 1080;
+                } else if (mode === 'portrait') {
+                    inpW.value = 1080;
+                    inpH.value = 1920;
+                }
+            };
+        });
+
+        // 2. Lógica do Toggle Avançado
+        const toggleBtn = document.getElementById('btn-toggle-advanced');
+        const advContainer = document.getElementById('ps-advanced-container');
+        
+        toggleBtn.onclick = () => {
+            const isHidden = !advContainer.classList.contains('show');
+            if (isHidden) {
+                advContainer.classList.add('show');
+                toggleBtn.classList.add('open');
+            } else {
+                advContainer.classList.remove('show');
+                toggleBtn.classList.remove('open');
+            }
+        };
+
+        // 3. Botão Confirmar
+        btnConfirm.onclick = async () => {
+            const w = parseInt(inpW.value);
+            const h = parseInt(inpH.value);
+
+            if (w > 2560 || h > 2560) return alert("A resolução máxima é 2K (2560px) para garantir performance.");
+
+            // Salva no Projeto
+            this.studio.project.settings = { width: w, height: h };
+            
+            // Atualiza o Preview e Fecha
+            this.updatePreviewViewport();
+            modal.classList.add('hidden');
+
+            // Carrega gravação pendente se for inicialização
+            if (this.studio.isFreshInit) {
+                this.studio.isFreshInit = false;
+                await this.studio.checkForPendingRecording();
+            }
+        };
+    }
+
+    promptProjectSettings() {
+        const modal = document.getElementById('project-settings-modal');
+        
+        // Recupera valores atuais do projeto se existirem
+        if (this.studio.project.settings) {
+            document.getElementById('ps-width').value = this.studio.project.settings.width;
+            document.getElementById('ps-height').value = this.studio.project.settings.height;
+        }
+        
+        modal.classList.remove('hidden');
+    }
+
+    // Atualiza o CSS do preview para refletir a proporção (Letterboxing)
+    updatePreviewViewport() {
+        const vid = document.getElementById('studio-preview-video');
+        const settings = this.studio.project.settings || { width: 1920, height: 1080 };
+        
+        // Aplica aspect-ratio via CSS
+        vid.style.aspectRatio = `${settings.width} / ${settings.height}`;
+        
+        // Garante que o vídeo se comporte como "contain" dentro dessa caixa
+        vid.style.width = 'auto';
+        vid.style.height = 'auto';
+        vid.style.maxWidth = '100%';
+        vid.style.maxHeight = '100%';
+        
+        // Fundo preto para letterboxing (já está no CSS, mas reforçando)
+        vid.parentElement.style.background = '#000';
     }
 }

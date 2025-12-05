@@ -35,6 +35,14 @@ export class RenderManager {
 
         const btnAbort = document.getElementById("btn-render-abort");
         if(btnAbort) btnAbort.onclick = () => this.cancelRendering();
+
+        const resSelect = document.getElementById("render-resolution");
+        if(resSelect) {
+            const { width, height } = this.studio.project.settings;
+            // Cria uma opção única com a resolução do projeto
+            resSelect.innerHTML = `<option value="project" selected>Projeto (${width}x${height})</option>`;
+            resSelect.disabled = true;
+        }
     }
 
     async cancelRendering() {
@@ -142,13 +150,10 @@ export class RenderManager {
                 await this.studio.editor.transcoder.init();
             }
 
-            const resPresets = {
-                high: { w: 1920, h: 1080 },
-                medium: { w: 1280, h: 720 },
-                low: { w: 640, h: 480 },
-                proxy: { w: 640, h: 360 }
-            };
-            const targetRes = resPresets[options.quality] || resPresets.medium;
+            const projectW = this.studio.project.settings.width;
+            const projectH = this.studio.project.settings.height;
+
+            const targetRes = { w: projectW, h: projectH };
 
             // 1. Coleta de Assets e Análise de Complexidade
             let allClips = [];
@@ -213,7 +218,7 @@ export class RenderManager {
                 assetsMap,
                 totalDuration,
                 progressCallback,
-                options
+                { ...options, width: projectW, height: projectH }
             );
             
             const res = await fetch(url);

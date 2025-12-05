@@ -105,6 +105,38 @@ export class VideoStorage {
         return result; // [BlobPart1, BlobPart2, ...]
     }
 
+    /**
+     * Recupera o vídeo completo como um único Blob.
+     * Junta todos os chunks de todos os segmentos em ordem correta.
+     */
+    async getVideo(videoId) {
+        if (!this.db) await this.init();
+        
+        // 1. Pega todos os pedaços do banco de dados
+        const chunks = await this._getAllChunks(videoId);
+        
+        if (!chunks || chunks.length === 0) {
+            console.warn(`VideoStorage: Nenhum chunk encontrado para o ID ${videoId}`);
+            return null;
+        }
+
+        // 2. Ordena os pedaços para garantir a sequência do vídeo
+        // Primeiro pelo número do segmento, depois pelo índice dentro do segmento
+        chunks.sort((a, b) => {
+            const segA = a.segment || 0;
+            const segB = b.segment || 0;
+            if (segA !== segB) return segA - segB;
+            return a.index - b.index;
+        });
+
+        // 3. Extrai apenas os dados brutos (Blobs)
+        const blobParts = chunks.map(c => c.blob);
+        
+        // 4. Cria um novo Blob único com o tipo do primeiro pedaço (ex: video/webm)
+        const mimeType = chunks[0].blob.type;
+        return new Blob(blobParts, { type: mimeType });
+    }
+
     _getAllChunks(videoId) {
         return new Promise((resolve, reject) => {
             const t = this.db.transaction([this.chunkStore], "readonly");

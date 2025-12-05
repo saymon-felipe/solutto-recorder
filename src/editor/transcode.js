@@ -273,9 +273,20 @@ export class TranscodeService {
             low: { w: '640', h: '480' },
             proxy: { w: '640', h: '360' }
         };
-        const res = resolutionPresets[options.quality] || resolutionPresets.medium;
-        const targetW = res.w;
-        const targetH = res.h;
+
+        let targetW, targetH;
+        if (options.width && options.height) {
+            targetW = options.width;
+            targetH = options.height;
+        } else {
+            const res = resolutionPresets[options.quality] || resolutionPresets.medium;
+            targetW = res.w;
+            targetH = res.h;
+        }
+        
+        // Garante que sejam strings para o comando do FFmpeg
+        targetW = String(targetW);
+        targetH = String(targetH);
 
         const safeProgress = typeof progressCallback === "function" ? progressCallback : () => { };
         
@@ -369,7 +380,9 @@ export class TranscodeService {
                     const opacity = clip.level !== undefined ? clip.level : 1;
                     
                     let chain = `[${map.index}:v]trim=start=${round(clip.offset)}:duration=${round(clip.duration)},setpts=PTS-STARTPTS`;
+                    
                     chain += `,scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2`;
+                    
                     chain += `,format=yuva420p,setsar=1`;
 
                     if (opacity < 1) {
@@ -387,6 +400,7 @@ export class TranscodeService {
                 
                 if (videoStreamsToConcat.length > 0) {
                     const concatInputs = videoStreamsToConcat.map(l => `[${l}]`).join("");
+                    
                     filterChains.push(`${concatInputs}concat=n=${videoStreamsToConcat.length}:v=1:a=0[base_video_raw]`);
                     filterChains.push(`[base_video_raw]fps=30[base_video]`);
                 }
@@ -413,7 +427,8 @@ export class TranscodeService {
                 }
                 
                 filterChains.push(`${imgChain}[${imgLabel}]`);
-                filterChains.push(`${lastBaseLabel}[${imgLabel}]overlay=0:0:enable='between(t,${startT},${endT})':eof_action=pass:shortest=1[${overlayOutLabel}]`);
+                
+                filterChains.push(`${lastBaseLabel}[${imgLabel}]overlay=(W-w)/2:(H-h)/2:enable='between(t,${startT},${endT})':eof_action=pass:shortest=1[${overlayOutLabel}]`);
                 
                 lastBaseLabel = `[${overlayOutLabel}]`;
             });
