@@ -22,11 +22,13 @@ export class RenderManager {
         document.getElementById("btn-render-confirm").onclick = () => {
             modal.classList.add('hidden');
             
-            // Captura as opções, incluindo o novo Formato
+            const formatInput = document.getElementById("render-format");
+            const formatVal = formatInput ? formatInput.value : 'mp4';
+
             const options = {
                 resolution: document.getElementById("render-resolution").value,
                 quality: document.getElementById("render-quality").value,
-                format: document.getElementById("render-format") ? document.getElementById("render-format").value : 'webm'
+                format: formatVal
             };
             this.renderProject(options);
         };
@@ -50,7 +52,7 @@ export class RenderManager {
         const elElapsed = document.getElementById('render-timer-elapsed');
         const elLog = document.getElementById('render-log-text');
         
-        if(elLog) elLog.innerText = "Preparando assets...";
+        if(elLog) elLog.innerText = "Iniciando motor...";
 
         this.timerInterval = setInterval(() => {
             const now = Date.now();
@@ -81,7 +83,7 @@ export class RenderManager {
             if(fill) fill.style.width = `${percentage}%`;
             if(textPerc) textPerc.innerText = `${percentage}%`;
             if(textSpeed) textSpeed.innerText = `${speed}x`;
-            if(textLog) textLog.innerText = `Renderizando... (${percentage}%)`;
+            if(textLog) textLog.innerText = `Processando... (${percentage}%)`;
 
             const elapsed = (Date.now() - this.renderStartTime) / 1000;
             if (ratio > 0.01) {
@@ -102,6 +104,24 @@ export class RenderManager {
         return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     }
 
+    async _optimizeImage(blob, targetW, targetH) {
+        try {
+            const bitmap = await createImageBitmap(blob);
+            const canvas = document.createElement('canvas');
+            const scale = Math.min(targetW / bitmap.width, targetH / bitmap.height);
+            const w = Math.round(bitmap.width * scale);
+            const h = Math.round(bitmap.height * scale);
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(bitmap, 0, 0, w, h);
+            return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        } catch (e) {
+            console.warn("Falha ao otimizar imagem, usando original:", e);
+            return blob;
+        }
+    }
+
     async renderProject(options = {}) {
         if (this.studio.tasks.length > 0) return alert("Aguarde tarefas pendentes...");
         
@@ -118,23 +138,23 @@ export class RenderManager {
 
         try {
             if (!this.studio.editor.transcoder.isLoaded) {
-                document.getElementById('render-log-text').innerText = "Carregando FFmpeg...";
+                document.getElementById('render-log-text').innerText = "Carregando núcleo FFmpeg...";
                 await this.studio.editor.transcoder.init();
             }
 
-            // 0. Configurações de Resolução Alvo (para recriar imagens)
-            const resolutionPresets = {
+            const resPresets = {
                 high: { w: 1920, h: 1080 },
                 medium: { w: 1280, h: 720 },
                 low: { w: 640, h: 480 },
                 proxy: { w: 640, h: 360 }
             };
-            const targetRes = resolutionPresets[options.quality] || resolutionPresets.medium;
+            const targetRes = resPresets[options.quality] || resPresets.medium;
 
-            // 1. Coleta e ordenação de clips
+            // 1. Coleta de Assets e Análise de Complexidade
             let allClips = [];
             let totalDuration = 0;
             const uniqueAssetIds = new Set();
+            let hasComplexContent = false; // Flag para forçar MP4
             
             this.studio.project.tracks.forEach(t => {
                 t.clips.forEach(c => {
@@ -142,6 +162,12 @@ export class RenderManager {
                     allClips.push(clipData);
                     uniqueAssetIds.add(c.assetId);
                     totalDuration = Math.max(totalDuration, c.start + c.duration);
+
+                    // Detecção de Complexidade:
+                    // Se for Imagem (Overlay) ou tiver Opacidade < 1, é complexo.
+                    const asset = this.studio.project.assets.find(a => a.id === c.assetId);
+                    if (asset && asset.type.startsWith('image')) hasComplexContent = true;
+                    if (c.level !== undefined && c.level < 1) hasComplexContent = true;
                 });
             });
 
@@ -149,82 +175,34 @@ export class RenderManager {
 
             if (allClips.length === 0) throw new Error("Timeline vazia.");
 
-            // 2. Processamento Inteligente (Imagens HD + Fader)
+            // 2. SWITCH AUTOMÁTICO PARA MP4 (PROTEÇÃO DE PERFORMANCE)
+            if (hasComplexContent && options.format === 'webm') {
+                console.warn("[Solutto Recorder] Detectado conteúdo complexo (Imagens/Opacidade). Alternando para MP4 para garantir performance.");
+                options.format = 'mp4';
+                // Atualiza UI para o usuário saber (opcional, ou apenas processa internamente)
+                document.getElementById('render-log-text').innerText = "Otimizando para MP4 (Detectado Imagens)...";
+            }
+
+            // 3. Preparação de Assets
             let assetsMap = {}; 
-            const assetsToProcess = [];
-            const assetsReady = [];
+            document.getElementById('render-log-text').innerText = `Otimizando assets (GPU)...`;
 
             for (const assetId of uniqueAssetIds) {
                 const asset = this.studio.project.assets.find(a => a.id === assetId);
                 if (!asset || asset.status !== 'ready') continue;
-
-                const needsFader = allClips.some(c => c.assetId === assetId && c.trackType === 'video' && c.level < 1);
-                // Verifica se é imagem E se temos o sourceBlob para recriar em HD
-                const needsHighResRebuild = (asset.originalType === 'image' && asset.sourceBlob);
-
-                if (needsFader || needsHighResRebuild) {
-                    assetsToProcess.push(asset);
-                } else {
-                    assetsReady.push(asset);
-                }
-            }
-
-            assetsReady.forEach(asset => { assetsMap[asset.id] = asset.blob; });
-
-            if (assetsToProcess.length > 0) {
-                document.getElementById('render-log-text').innerText = `Otimizando ${assetsToProcess.length} assets (HD/Fader)...`;
                 
-                await Promise.all(assetsToProcess.map(asset => {
-                    return this.studio.addTask(`Renderizando Asset: ${asset.name}`, async () => {
-                        if (!this.isRendering) return;
-                        
-                        let currentBlob = asset.blob;
+                let blobToUse = asset.sourceBlob || asset.blob;
 
-                        if (asset.originalType === 'image' && asset.sourceBlob) {
-                            try {
-                                const hdUrl = await this.studio.editor.transcoder.imageToVideo(
-                                    asset.sourceBlob, 
-                                    asset.baseDuration, 
-                                    { w: targetRes.w, h: targetRes.h } // Passa resolução alvo
-                                );
-                                const res = await fetch(hdUrl);
-                                currentBlob = await res.blob();
-                            } catch (err) {
-                                console.error(`Erro ao recriar imagem HD ${asset.name}`, err);
-                                // Mantém o blob original (proxy) se falhar
-                            }
-                        }
+                if (asset.type.startsWith('image')) {
+                    blobToUse = await this._optimizeImage(blobToUse, parseInt(targetRes.w), parseInt(targetRes.h));
+                }
 
-                        // Usa o currentBlob que pode ser o recém criado HD ou o original
-                        const clipRef = allClips.find(c => c.assetId === asset.id);
-                        const opacityLevel = clipRef ? clipRef.level : 1;
-
-                        if (opacityLevel < 1) {
-                            try {
-                                const url = await this.studio.editor.transcoder.processVideo(
-                                    currentBlob, 
-                                    "fader_" + asset.id, 
-                                    0, 
-                                    asset.baseDuration, 
-                                    "webm", 
-                                    { opacity: opacityLevel }
-                                );
-                                const res = await fetch(url);
-                                currentBlob = await res.blob();
-                            } catch (err) {
-                                console.error(`Erro fader asset ${asset.name}`, err);
-                            }
-                        }
-
-                        assetsMap[asset.id] = currentBlob;
-                    });
-                }));
+                assetsMap[assetId] = blobToUse;
             }
 
             if (!this.isRendering) throw new Error("Cancelado.");
 
-            // 3. Mixagem Final
-            document.getElementById('render-log-text').innerText = `Mixando em ${options.format.toUpperCase()}...`;
+            document.getElementById('render-log-text').innerText = `Gerando video (${options.format.toUpperCase()})...`;
             
             const progressCallback = (ratio, speed) => {
                 if(this.isRendering) this.updateProgress(ratio, speed);
@@ -240,6 +218,7 @@ export class RenderManager {
             
             const res = await fetch(url);
             this.studio.editor.videoBlob = await res.blob();
+            // Atualiza a extensão correta no editor (caso tenha mudado automaticamente)
             this.studio.editor.currentExtension = options.format === 'mp4' ? 'mp4' : 'webm';
             await this.studio.editor._loadVideo(url);
             

@@ -4,6 +4,8 @@
  * Responsável por inicializar o núcleo do FFmpeg e executar comandos de processamento.
  * */
 
+const round = (num, precision = 3) => parseFloat(num.toFixed(precision));
+
 export class TranscodeService {
     constructor() {
         this.ffmpeg = null;
@@ -228,153 +230,275 @@ export class TranscodeService {
      */
     async mixProject(allClips, assetsMap, totalDuration, progressCallback, options = {}) {
         if (!this.isLoaded) await this.init();
+
         const fetchFile = this._getFetchFile();
-        
-        const outputFormat = (options.format === 'mp4') ? 'mp4' : 'webm';
-        const intermediateName = `inter_mix_${Date.now()}.${outputFormat}`;
-        
-        const filesToClean = new Set([intermediateName]);
+        const reqFormat = options.format || 'mp4';
+        const isMp4 = reqFormat === 'mp4';
+        const outputFormat = isMp4 ? 'mp4' : 'webm';
+
+        const intermediateName = `intermediate_mix.${outputFormat}`;
+        const finalOutputName = `final_mix_output.${outputFormat}`;
+        const filesToClean = [intermediateName, finalOutputName];
+        const inputFiles = []; 
+
+        const qualityPresets = {
+            veryslow: { 
+                preset: "medium", crf: 22, 
+                webmDeadline: "good", webmCpu: 2, webmCrf: 10 
+            },
+            high: { 
+                preset: "fast", crf: 24, 
+                webmDeadline: "realtime", webmCpu: 4, webmCrf: 20 
+            },
+            medium: { 
+                preset: "superfast", crf: 27, 
+                webmDeadline: "realtime", webmCpu: 6, webmCrf: 25 
+            },
+            low: { 
+                preset: "ultrafast", crf: 30, 
+                webmDeadline: "realtime", webmCpu: 8, webmCrf: 35 
+            },
+            proxy: { 
+                preset: "ultrafast", crf: 35, 
+                webmDeadline: "realtime", webmCpu: 8, webmCrf: 45 
+            }
+        };
 
         const qualityKey = options.quality || 'medium';
-        const resPresets = {
-            high: {w:1920, h:1080}, medium: {w:1280, h:720}, low: {w:640, h:480}, proxy: {w:640, h:360}
+        let qConfig = qualityPresets[qualityKey] || qualityPresets.medium;
+
+        const resolutionPresets = {
+            high: { w: '1920', h: '1080' },
+            medium: { w: '1280', h: '720' },
+            low: { w: '640', h: '480' },
+            proxy: { w: '640', h: '360' }
         };
-        const res = resPresets[qualityKey] || resPresets.medium;
+        const res = resolutionPresets[options.quality] || resolutionPresets.medium;
+        const targetW = res.w;
+        const targetH = res.h;
 
         const safeProgress = typeof progressCallback === "function" ? progressCallback : () => { };
+        
         const progressHandler = (evt) => {
-            const msg = typeof evt === "string" ? evt : evt?.message;
-            if (typeof msg === "string" && msg.startsWith("frame=")) {
-                const t = msg.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
-                if (t && totalDuration > 0) {
-                    const p = t[1].split(':');
-                    const sec = (+p[0])*3600 + (+p[1])*60 + parseFloat(p[2]);
-                    safeProgress(Math.min(1, sec / totalDuration));
+            const message = typeof evt === "string" ? evt : evt && evt.message;
+            if (typeof message === "string" && message.indexOf("frame=") === 0) {
+                const timeMatch = message.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
+                const speedMatch = message.match(/speed=\s*([0-9\.]+)x/);
+                if (timeMatch && totalDuration > 0) {
+                    const [, h, m, s, cs] = timeMatch[1].match(/(\d{2}):(\d{2}):(\d{2})\.(\d{2})/).map(Number);
+                    const currentTime = h * 3600 + m * 60 + s + cs / 100;
+                    const speed = speedMatch ? speedMatch[1] : "N/A";
+                    try { safeProgress(Math.min(1, currentTime / totalDuration), speed); } catch (e) {}
                 }
             }
         };
 
         try {
-            // 1. Inputs
+            if (!assetsMap) throw new Error("assetsMap inválido");
+
+            const videoClips = [];
+            const imageClips = [];
+            const audioClips = [];
+
+            allClips.forEach(c => {
+                const asset = assetsMap[c.assetId];
+                if (!asset) return;
+                const isAudio = c.trackType === 'audio' || asset.type.startsWith('audio');
+                const isImage = asset.type.startsWith('image');
+                if (isAudio) audioClips.push(c);
+                else if (isImage) imageClips.push(c);
+                else videoClips.push(c);
+            });
+
+            imageClips.sort((a,b) => a.start - b.start);
+
             let inputCommands = [];
-            let assetFileMap = {};
+            let assetFileMap = {}; 
             let inputIndex = 0;
-            const probeList = []; 
 
-            for (const assetId in assetsMap) {
-                const blob = assetsMap[assetId];
-                if (!blob) continue;
+            const uniqueAssetIds = [...new Set(allClips.map(c => c.assetId))];
 
-                const isImg = blob.type.includes('image');
+            for (const assetId of uniqueAssetIds) {
+                const assetBlob = assetsMap[assetId];
+                if (!assetBlob) continue;
+
                 let ext = 'webm';
-                if (blob.type.includes('mp4')) ext = 'mp4';
-                else if (isImg) ext = blob.type.includes('jpeg') ? 'jpg' : 'png';
+                if (assetBlob.type.includes('png')) ext = 'png';
+                else if (assetBlob.type.includes('jpeg') || assetBlob.type.includes('jpg')) ext = 'jpg';
+                else if (assetBlob.type.includes('mp4')) ext = 'mp4';
+                else if (assetBlob.type.includes('gif')) ext = 'gif';
 
-                const vfsName = `src_${assetId}_${Date.now()}.${ext}`;
-                await this.ffmpeg.writeFile(vfsName, await fetchFile(blob));
-                filesToClean.add(vfsName);
-
-                assetFileMap[assetId] = { name: vfsName, index: inputIndex };
-
-                if (isImg) {
-                    inputCommands.push("-loop", "1");
-                    inputCommands.push("-t", (totalDuration + 5).toString());
-                    inputCommands.push("-i", vfsName);
+                const inputVFSName = `in_${assetId}.${ext}`;
+                try { await this.ffmpeg.readFile(inputVFSName); } 
+                catch { 
+                    await this.ffmpeg.writeFile(inputVFSName, await fetchFile(assetBlob));
+                    filesToClean.push(inputVFSName);
+                }
+                
+                const isImage = assetBlob.type.startsWith('image');
+                
+                assetFileMap[assetId] = { 
+                    index: inputIndex, 
+                    type: isImage ? 'image' : 'video'
+                };
+                
+                if (isImage) {
+                    inputCommands.push(
+                        "-loop", "1", 
+                        "-framerate", "30", 
+                        "-t", totalDuration.toString(), 
+                        "-i", inputVFSName
+                    );
                 } else {
-                    inputCommands.push("-i", vfsName);
-                    probeList.push("-i", vfsName);
+                    inputCommands.push("-i", inputVFSName);
                 }
                 inputIndex++;
             }
 
-            // 2. Probe (Audio)
-            const inputsWithAudio = new Set();
-            if (probeList.length > 0) {
-                let currIdx = -1;
-                const ph = (log) => {
-                    const m = log.message || log;
-                    if (typeof m !== 'string') return;
-                    const im = m.match(/Input #(\d+),/);
-                    if (im) currIdx = parseInt(im[1]);
-                    if (currIdx >= 0 && m.includes("Audio:")) inputsWithAudio.add(currIdx);
-                };
-                this.ffmpeg.on("log", ph);
-                try { await this.ffmpeg.exec(probeList); } catch(e){}
-                this.ffmpeg.off("log", ph);
-            }
-
-            // 3. Filter Complex
-            let fc = "";
-            let audios = [], videos = [];
-
-            // Audio
-            allClips.filter(c => c.trackType === 'audio' || (c.trackType === 'video' && !c.muted)).forEach(c => {
-                const m = assetFileMap[c.assetId];
-                if (!m) return;
-                
-                if (c.trackType === 'video' && !inputsWithAudio.has(m.index) && !c.assetId.includes('audio')) return;
-
-                const lbl = `aud_${c.id}`;
-                let chain = `[${m.index}:a]atrim=start=${c.offset}:duration=${c.duration},asetpts=N/SR/TB,volume=${c.level||1}`;
-                if (c.start > 0) chain += `,adelay=${Math.round(c.start*1000)}|${Math.round(c.start*1000)}`;
-                fc += chain + `[${lbl}];`;
-                audios.push(lbl);
-            });
-
-            // Video
-            allClips.filter(c => c.trackType === 'video').forEach(c => {
-                const m = assetFileMap[c.assetId];
-                if (!m) return;
-                
-                const lbl = `vid_${c.id}`;
-                let chain = `[${m.index}:v]trim=start=${c.offset}:duration=${c.duration},setpts=PTS-STARTPTS`;
-                
-                if ((c.level||1) < 1) chain += `,format=yuva420p,colorchannelmixer=aa=${c.level}`;
-                
-                chain += `,scale=${res.w}:${res.h}:force_original_aspect_ratio=decrease,pad=${res.w}:${res.h}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
-                chain += `,fps=30`;
-                
-                if (c.start > 0) chain += `,tpad=start=${c.start}:color=black:color_mode=preserve`;
-                fc += chain + `[${lbl}];`;
-                videos.push(lbl);
-            });
-
-            // Mix
-            if (audios.length > 0) fc += `${audios.map(l=>`[${l}]`).join('')}amix=inputs=${audios.length}:duration=longest[a_out];`;
-            else fc += `anullsrc=channel_layout=stereo:sample_rate=44100[a_out];`;
-
-            if (videos.length === 0) throw new Error("Sem video");
-            fc += `${videos.map(l=>`[${l}]`).join('')}concat=n=${videos.length}:v=1:a=0,format=yuv420p[v_out]`;
-
-            // 4. Encode
-            const cmd = [...inputCommands];
-            cmd.push("-filter_complex", fc);
-            cmd.push("-map", "[v_out]", "-map", "[a_out]");
+            const filterChains = [];
+            let videoStreamsToConcat = [];
             
-            if (outputFormat === 'mp4') {
-                cmd.push("-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart");
-                cmd.push("-crf", "23");
+            // BASE DE VÍDEO
+            if (videoClips.length === 0) {
+                filterChains.push(`color=c=black:s=${targetW}x=${targetH}:d=${totalDuration}[base_video]`);
             } else {
-                cmd.push("-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "8", "-c:a", "libvorbis");
-                cmd.push("-b:v", "2M");
+                videoClips.forEach((clip) => {
+                    const map = assetFileMap[clip.assetId];
+                    if (!map) return;
+                    const label = `v_seg_${clip.id}`;
+                    const opacity = clip.level !== undefined ? clip.level : 1;
+                    
+                    let chain = `[${map.index}:v]trim=start=${round(clip.offset)}:duration=${round(clip.duration)},setpts=PTS-STARTPTS`;
+                    chain += `,scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2`;
+                    chain += `,format=yuva420p,setsar=1`;
+
+                    if (opacity < 1) {
+                        const alphaVal = Math.floor(opacity * 255);
+                        chain += `,lutyuv=a=${alphaVal}`;
+                    }
+                    
+                    if (videoStreamsToConcat.length === 0 && clip.start > 0) {
+                        chain += `,tpad=start=${round(clip.start)}:color=black`;
+                    }
+                    
+                    filterChains.push(`${chain}[${label}]`);
+                    videoStreamsToConcat.push(label);
+                });
+                
+                if (videoStreamsToConcat.length > 0) {
+                    const concatInputs = videoStreamsToConcat.map(l => `[${l}]`).join("");
+                    filterChains.push(`${concatInputs}concat=n=${videoStreamsToConcat.length}:v=1:a=0[base_video_raw]`);
+                    filterChains.push(`[base_video_raw]fps=30[base_video]`);
+                }
+            }
+
+            // OVERLAYS
+            let lastBaseLabel = "[base_video]";
+
+            imageClips.forEach((clip, i) => {
+                const map = assetFileMap[clip.assetId];
+                if (!map) return;
+                
+                const imgLabel = `img_${i}`;
+                const overlayOutLabel = `vid_over_${i}`;
+                const opacity = clip.level !== undefined ? clip.level : 1;
+                const startT = round(clip.start);
+                const endT = round(clip.start + clip.duration);
+                
+                let imgChain = `[${map.index}:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,format=yuva420p,setsar=1`;
+                
+                if (opacity < 1) {
+                    const alphaVal = Math.floor(opacity * 255);
+                    imgChain += `,lutyuv=a=${alphaVal}`;
+                }
+                
+                filterChains.push(`${imgChain}[${imgLabel}]`);
+                filterChains.push(`${lastBaseLabel}[${imgLabel}]overlay=0:0:enable='between(t,${startT},${endT})':eof_action=pass:shortest=1[${overlayOutLabel}]`);
+                
+                lastBaseLabel = `[${overlayOutLabel}]`;
+            });
+
+            filterChains.push(`${lastBaseLabel}null[mixed_video]`);
+
+            // AUDIO
+            let audioStreams = [];
+            audioClips.forEach(clip => {
+                let index = assetFileMap[clip.assetId] ? assetFileMap[clip.assetId].index : -1;
+                if(index !== -1) {
+                     const aLabel = `a_${clip.id}`;
+                     const vol = clip.level !== undefined ? clip.level : 1;
+                     
+                     let aChain = `[${index}:a]atrim=start=${clip.offset}:duration=${clip.duration},asetpts=PTS-STARTPTS,volume=${vol}`;
+                     if (clip.start > 0) {
+                        const delayMs = Math.round(clip.start * 1000);
+                        aChain += `,adelay=${delayMs}|${delayMs}`;
+                     }
+                     filterChains.push(`${aChain}[${aLabel}]`);
+                     audioStreams.push(aLabel);
+                }
+            });
+            
+            if (audioStreams.length > 0) {
+                const amixInputs = audioStreams.map(l=>`[${l}]`).join('');
+                filterChains.push(`${amixInputs}amix=inputs=${audioStreams.length}[mixed_audio]`);
+            } else {
+                filterChains.push(`anullsrc=channel_layout=stereo:sample_rate=44100[mixed_audio]`);
+            }
+
+            const filterComplex = filterChains.join(';');
+
+            let encodeCommand = [...inputCommands];
+            encodeCommand.push("-filter_complex", filterComplex);
+            encodeCommand.push("-map", "[mixed_video]");
+            encodeCommand.push("-map", "[mixed_audio]");
+
+            if (isMp4) {
+                 encodeCommand.push("-c:v", "libx264");
+                 encodeCommand.push("-threads", "1"); 
+                 encodeCommand.push("-preset", qConfig.preset || "ultrafast"); 
+                 encodeCommand.push("-bf", "0"); 
+                 encodeCommand.push("-pix_fmt", "yuv420p");
+                 encodeCommand.push("-c:a", "aac");
+                 
+                 if(qConfig.bitrate) encodeCommand.push("-b:v", qConfig.bitrate);
+                 else encodeCommand.push("-crf", String(qConfig.crf));
+            } else {
+                 encodeCommand.push("-c:v", "libvpx");
+                 encodeCommand.push("-deadline", qConfig.webmDeadline || "realtime"); 
+                 encodeCommand.push("-cpu-used", String(qConfig.webmCpu)); 
+                 
+                 encodeCommand.push("-c:a", "libvorbis");
+                 encodeCommand.push("-auto-alt-ref", "0"); 
+                 
+                 if(qConfig.bitrate) encodeCommand.push("-b:v", qConfig.bitrate);
+                 else encodeCommand.push("-crf", String(qConfig.webmCrf), "-b:v", "0"); 
             }
             
-            cmd.push("-t", totalDuration.toString());
-            cmd.push(intermediateName);
+            encodeCommand.push("-t", totalDuration.toString());
+            encodeCommand.push(intermediateName);
 
             this.ffmpeg.on("log", progressHandler);
-            console.log("Mix CMD:", cmd.join(" "));
-            await this.ffmpeg.exec(cmd);
+            console.log("[FFmpeg OVERLAY MIX V22]:", encodeCommand.join(" "));
+
+            await this.ffmpeg.exec(encodeCommand);
+            
             this.ffmpeg.off("log", progressHandler);
+            safeProgress(1.0, 'Finalizando...');
+            
+            await this.ffmpeg.exec(['-i', intermediateName, '-c', 'copy', finalOutputName]);
+            
+            const data = await this.ffmpeg.readFile(finalOutputName);
+            const mimeType = `video/${outputFormat}`;
+            const resultBlob = new Blob([data.buffer], { type: mimeType });
+            
+            return URL.createObjectURL(resultBlob);
 
-            try { await this.ffmpeg.readFile(intermediateName); } catch(e){ throw new Error("Falha no Encode final"); }
-
-            const data = await this.ffmpeg.readFile(intermediateName);
-            return URL.createObjectURL(new Blob([data.buffer], { type: `video/${outputFormat}` }));
-
-        } catch (e) {
-            console.error(e);
-            throw e;
+        } catch (error) {
+            console.error("Erro Mixagem Overlay:", error);
+            if (error.message && error.message.includes("No such filter")) {
+                throw new Error("Erro interno de renderização (Sintaxe FFmpeg).");
+            }
+            throw error;
         } finally {
             for(const f of filesToClean) try { await this.ffmpeg.deleteFile(f); } catch(e){}
         }

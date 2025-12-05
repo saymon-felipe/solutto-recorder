@@ -112,7 +112,8 @@ export class UIManager {
                 
                 <div class="preview-container">
                     <div class="studio-preview">
-                        <div id="studio-preview-container"></div>
+                        <video id="studio-preview-video" style="position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;"></video>
+                        <audio id="studio-audio-preview"></audio>
                     </div>
                     <div class="preview-controls">
                         <button class="control-btn" id="btn-stop"><i class="fa-solid fa-stop"></i></button>
@@ -155,7 +156,7 @@ export class UIManager {
                             <label for="render-resolution">Resolução:</label>
                             <select id="render-resolution">
                                 <option value="low">480p</option>
-                                <option value="medium">720p (HD)</option>
+                                <option value="medium" selected>720p (HD)</option>
                                 <option value="high">1080p (Full HD)</option>
                             </select>
                         </div>
@@ -170,10 +171,11 @@ export class UIManager {
                         <div class="input-group">
                             <label for="render-format">Formato de Saída:</label>
                             <select id="render-format">
-                                <option value="webm" selected>WebM (Rápido)</option>
-                                <option value="mp4">MP4 (Lento)</option>
+                                <option value="webm" selected>WebM</option>
+                                <option value="mp4">MP4</option>
                             </select>
                         </div>
+                        <div class="input-group"><small>Em caso de composições que incluem imagens com transparência, o formato recomendado é MP4 pela qualidade e rapidez de renderização.</small></div>
                     </div>
                     <div class="modal-actions">
                         <button class="studio-btn" id="btn-render-cancel">Cancelar</button>

@@ -7,12 +7,14 @@ export class AssetManager {
 
     async importAsset(file, name = "Sem Nome") {
         const mime = file.type ? file.type.split('/')[0] : 'video';
+        const type = mime === 'image' ? 'image' : mime; 
+        
         const assetId = "asset_" + Date.now();
         
         const placeholder = {
             id: assetId,
-            name: (mime === 'image' ? "[IMG] " : "") + name,
-            type: mime === 'image' ? 'video' : mime,
+            name: (type === 'image' ? "[IMG] " : "") + name,
+            type: type === 'image' ? 'image' : (mime === 'image' ? 'video' : mime), // Correção para manter type='image'
             originalType: mime,
             blob: null, 
             sourceBlob: null,
@@ -28,7 +30,13 @@ export class AssetManager {
             const result = await this._createAsset(file, name, mime);
             const idx = this.studio.project.assets.findIndex(a => a.id === assetId);
             if (idx !== -1) {
-                this.studio.project.assets[idx] = { ...result, id: assetId, status: 'ready', sourceBlob: file, originalType: mime };
+                this.studio.project.assets[idx] = { 
+                    ...result, 
+                    id: assetId, 
+                    status: 'ready', 
+                    sourceBlob: file, 
+                    originalType: mime 
+                };
                 this.renderBin();
                 this.studio.timelineManager.renderTracks();
             }
@@ -41,12 +49,14 @@ export class AssetManager {
         const mime = mimeOverride || file.type.split('/')[0];
 
         if (mime === 'image') {
-            type = 'video'; name = "[IMG] " + name;
-            const url = await this.studio.editor.transcoder.imageToVideo(file, 5);
-            const res = await fetch(url);
-            blob = await res.blob(); 
+            type = 'image'; 
+            name = "[IMG] " + name;
+            const url = URL.createObjectURL(file);
             duration = 5;
-        } else if (mime === 'video' || mime === 'application') {
+            
+            return { blob, name, type, baseDuration: duration, url };
+        } 
+        else if (mime === 'video' || mime === 'application') {
             type = 'video'; duration = await getMediaDuration(blob);
         } else if (mime === 'audio') {
             type = 'audio'; duration = await getMediaDuration(blob);

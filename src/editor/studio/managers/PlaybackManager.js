@@ -4,19 +4,45 @@ export class PlaybackManager {
     constructor(studio) {
         this.studio = studio;
         this.isPlaying = false;
+        this.previewVideo = null;
+        this.previewAudio = null;
+        this.previewImageLayer = null; 
         
-        // Gerenciador de players por Track ID (Multi-track)
-        this.trackPlayers = new Map(); 
-
         this.lastPlayStartTime = 0;
         this.playedSinceLastSeek = false;
     }
 
     init() {
-        this.previewContainer = document.getElementById('studio-preview-container');
+        this.previewVideo = document.getElementById('studio-preview-video');
+        this.previewAudio = document.getElementById('studio-audio-preview');
+        
+        this._initImageLayer();
+
         this._bindPlayheadEvents();
         document.getElementById("btn-play-pause").onclick = () => this.togglePlayback();
         document.getElementById("btn-stop").onclick = () => this.stop();
+    }
+
+    _initImageLayer() {
+        const container = document.querySelector('.studio-preview');
+        if (container) {
+            let img = document.getElementById('studio-preview-image-overlay');
+            if (!img) {
+                img = document.createElement('img');
+                img.id = 'studio-preview-image-overlay';
+                img.style.position = 'absolute';
+                img.style.top = '0';
+                img.style.left = '0';
+                img.style.width = '100%';
+                img.style.height = '100%';
+                img.style.objectFit = 'contain';
+                img.style.pointerEvents = 'none';
+                img.style.display = 'none';
+                img.style.zIndex = '10'; 
+                container.appendChild(img);
+            }
+            this.previewImageLayer = img;
+        }
     }
 
     _bindPlayheadEvents() {
@@ -71,12 +97,8 @@ export class PlaybackManager {
     pause() {
         this.isPlaying = false;
         document.getElementById('btn-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
-        
-        this.trackPlayers.forEach(player => {
-            if(player.tagName === 'VIDEO' || player.tagName === 'AUDIO') {
-                player.pause();
-            }
-        });
+        if(this.previewVideo) this.previewVideo.pause();
+        if(this.previewAudio) this.previewAudio.pause();
 
         if (this.playedSinceLastSeek) {
              this.studio.project.currentTime = this.lastPlayStartTime;
@@ -88,14 +110,10 @@ export class PlaybackManager {
 
     stop() {
         this.isPlaying = false;
+        this.previewVideo.pause();
+        this.previewAudio.pause();
         document.getElementById('btn-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
         
-        this.trackPlayers.forEach(player => {
-            if(player.tagName === 'VIDEO' || player.tagName === 'AUDIO') {
-                player.pause();
-            }
-        });
-
         this.studio.project.currentTime = 0;
         this.updatePlayhead();
         this.syncPreview();
@@ -116,98 +134,106 @@ export class PlaybackManager {
 
     syncPreview() {
         const time = this.studio.project.currentTime;
+        const tracks = this.studio.project.tracks;
         
-        this.studio.project.tracks.forEach((track, index) => {
-            const clip = track.clips.find(c => time >= c.start && time < (c.start + c.duration));
-            this._syncTrackPlayer(track, clip, time, index);
-        });
+        let activeVideoClip = null;
+        let activeImageClip = null;
+
+        const videoTracks = tracks.filter(t => t.type === 'video');
+
+        for (const t of videoTracks) {
+            const clip = t.clips.find(c => time >= c.start && time < (c.start + c.duration));
+            if (!clip) continue;
+
+            const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
+            if (!asset) continue;
+
+            if (asset.type === 'video') {
+                activeVideoClip = clip; 
+            } else if (asset.type === 'image') {
+                activeImageClip = clip; 
+            }
+        }
+        
+        // 1. Sincroniza Vídeo de Fundo
+        if (!activeVideoClip && this.previewVideo) {
+            this.previewVideo.style.display = 'none';
+        }
+        this._syncPlayer(this.previewVideo, activeVideoClip, time);
+
+        // 2. Sincroniza Imagem de Overlay
+        this._syncImage(activeImageClip);
+
+        // 3. Sincroniza Áudio (Busca apenas em tracks de ÁUDIO)
+        let activeAudio = null;
+        const audioTracks = tracks.filter(t => t.type === 'audio');
+        for (const t of audioTracks) {
+            const clip = t.clips.find(c => time >= c.start && time < (c.start + c.duration));
+            if (clip) { activeAudio = clip; break; }
+        }
+        this._syncPlayer(this.previewAudio, activeAudio, time);
 
         const display = document.getElementById('studio-time-display');
-        if(display && window.fmtTime) display.innerText = window.fmtTime(time); 
+        if(display) display.innerText = fmtTime(time);
     }
 
-    _syncTrackPlayer(track, clip, globalTime, zIndex) {
+    _syncImage(clip) {
+        if (!this.previewImageLayer) return;
+
         if (!clip) {
-            if (this.trackPlayers.has(track.id)) {
-                const player = this.trackPlayers.get(track.id);
-                player.style.display = 'none';
-                if(player.pause) player.pause();
-            }
+            this.previewImageLayer.style.display = 'none';
+            this.previewImageLayer.src = "";
             return;
         }
 
         const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
-        if (!asset || asset.status !== 'ready') return;
-
-        let player = this._getTrackPlayer(track, asset);
-
-        // 1. Visibilidade e Camada
-        player.style.display = 'block';
-        player.style.zIndex = 100 - zIndex;
-        
-        const opacity = (clip.level !== undefined && clip.level !== null) ? clip.level : 1;
-        player.style.opacity = opacity;
-
-        // 3. Verifica troca de source
-        if (player.dataset.currentClipId !== clip.id) {
-            player.src = asset.url;
-            player.dataset.currentClipId = clip.id;
-            if (player.load) player.load();
+        if (!asset || asset.status !== 'ready') {
+            this.previewImageLayer.style.display = 'none';
+            return;
         }
 
-        // 4. Aplica Volume/Mute específicos
-        if (track.type === 'video') {
-            if (player.tagName === 'VIDEO') player.muted = clip.muted === true;
-        } else if (track.type === 'audio' && player.tagName === 'AUDIO') {
-            player.volume = clip.level; // Volume do áudio
+        const currentSrc = this.previewImageLayer.getAttribute('src');
+        if (currentSrc !== asset.url) {
+            this.previewImageLayer.src = asset.url;
         }
 
-        // 5. Sincronia de Tempo (Seek)
-        if (player.tagName !== 'IMG') {
-            let localTime = (globalTime - clip.start) + clip.offset;
-            
-            if (asset.baseDuration > 0 && localTime > asset.baseDuration) {
-                localTime = localTime % asset.baseDuration;
-            }
-
-            if (Math.abs(player.currentTime - localTime) > 0.2 || player.ended) {
-                player.currentTime = localTime;
-            }
-
-            if (this.isPlaying) {
-                if (player.paused) {
-                    const p = player.play();
-                    if(p) p.catch(e => {}); 
-                }
-            } else {
-                if (!player.paused) player.pause();
-            }
-        }
+        this.previewImageLayer.style.display = 'block';
+        // Aplica opacidade corretamente na imagem
+        this.previewImageLayer.style.opacity = clip.level !== undefined ? clip.level : 1;
     }
 
-    _getTrackPlayer(track, asset) {
-        let player = this.trackPlayers.get(track.id);
-        
-        const isImage = asset.originalType && asset.originalType.startsWith('image');
-        const desiredTag = track.type === 'audio' ? 'AUDIO' : (isImage ? 'IMG' : 'VIDEO');
+    _syncPlayer(player, clip, globalTime) {
+        if (!player) return;
+        if (clip) {
+            const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
+            if (!asset || asset.status !== 'ready') { player.style.display = 'none'; return; }
 
-        if (!player || player.tagName !== desiredTag) {
-            if (player) player.remove();
-
-            player = document.createElement(desiredTag.toLowerCase());
-            player.className = 'track-player';
-            player.id = `player-${track.id}`;
-            
-            if (track.type === 'video') {
-                if (this.previewContainer) this.previewContainer.appendChild(player);
-            } else {
-                player.style.display = 'none'; 
-                if (this.previewContainer) this.previewContainer.appendChild(player);
+            player.style.display = 'block';
+            if (player.dataset.currentClipId !== clip.id) {
+                player.src = asset.url;
+                player.dataset.currentClipId = clip.id;
+                player.load();
             }
 
-            this.trackPlayers.set(track.id, player);
-        }
+            // Aplica propriedades visuais apenas se for elemento de vídeo
+            if (player.tagName === 'VIDEO') {
+                player.style.opacity = clip.level !== undefined ? clip.level : 1;
+                player.muted = clip.muted === true;
+            }
+            // Aplica volume apenas se for elemento de áudio
+            if (player.tagName === 'AUDIO') {
+                player.volume = clip.level !== undefined ? clip.level : 1;
+            }
 
-        return player;
+            let localTime = (globalTime - clip.start) + clip.offset;
+            if (localTime > asset.baseDuration) localTime = localTime % asset.baseDuration;
+
+            if (Math.abs(player.currentTime - localTime) > 0.3 || player.ended) player.currentTime = localTime;
+            
+            if (this.isPlaying && player.paused) { const p = player.play(); if(p) p.catch(()=>{}); }
+            else if (!this.isPlaying && !player.paused) player.pause();
+        } else {
+            player.style.display = 'none'; player.pause(); player.dataset.currentClipId = "";
+        }
     }
 }
