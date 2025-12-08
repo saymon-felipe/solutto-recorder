@@ -24,24 +24,28 @@ export class PlaybackManager {
     }
 
     _initImageLayer() {
-        const container = document.querySelector('.studio-preview');
+        const container = document.getElementById('studio-preview-canvas'); 
+        
         if (container) {
             let img = document.getElementById('studio-preview-image-overlay');
             if (!img) {
                 img = document.createElement('img');
                 img.id = 'studio-preview-image-overlay';
+                
                 img.style.position = 'absolute';
                 img.style.top = '0';
                 img.style.left = '0';
                 img.style.width = '100%';
                 img.style.height = '100%';
-                img.style.objectFit = 'contain';
-                img.style.pointerEvents = 'none';
-                img.style.display = 'none';
-                img.style.zIndex = '10'; 
+                img.style.objectFit = 'contain'; 
+                img.style.pointerEvents = 'none'; 
+                img.style.display = 'none'; 
+                
                 container.appendChild(img);
             }
             this.previewImageLayer = img;
+        } else {
+            console.warn("[PlaybackManager] Canvas de preview não encontrado. Verifique UIManager.");
         }
     }
 

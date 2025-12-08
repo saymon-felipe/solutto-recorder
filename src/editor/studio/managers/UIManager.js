@@ -197,8 +197,10 @@ export class UIManager {
                 
                 <div class="preview-container">
                     <div class="studio-preview">
-                        <video id="studio-preview-video" style="position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;"></video>
-                        <audio id="studio-audio-preview"></audio>
+                        <div id="studio-preview-canvas" class="preview-canvas">
+                            <video id="studio-preview-video" crossorigin="anonymous"></video>
+                            <audio id="studio-audio-preview"></audio>
+                        </div>
                     </div>
                     <div class="preview-controls">
                         <button class="control-btn" id="btn-stop"><i class="fa-solid fa-stop"></i></button>
@@ -622,19 +624,28 @@ export class UIManager {
 
     // Atualiza o CSS do preview para refletir a proporção (Letterboxing)
     updatePreviewViewport() {
+        const canvas = document.getElementById('studio-preview-canvas');
         const vid = document.getElementById('studio-preview-video');
+        
+        // Default para Full HD se não houver settings
         const settings = this.studio.project.settings || { width: 1920, height: 1080 };
         
-        // Aplica aspect-ratio via CSS
-        vid.style.aspectRatio = `${settings.width} / ${settings.height}`;
+        if (!canvas || !vid) return;
+
+        // 1. Aplica o Aspect Ratio ao CANVAS (A "tela" do projeto)
+        // Usamos CSS aspect-ratio moderno para garantir a proporção
+        canvas.style.aspectRatio = `${settings.width} / ${settings.height}`;
         
-        // Garante que o vídeo se comporte como "contain" dentro dessa caixa
-        vid.style.width = 'auto';
-        vid.style.height = 'auto';
-        vid.style.maxWidth = '100%';
-        vid.style.maxHeight = '100%';
+        // 2. Reseta estilos do vídeo para evitar distorção
+        // O vídeo agora é apenas um "layer" dentro do canvas
+        vid.style.width = '100%';
+        vid.style.height = '100%';
         
-        // Fundo preto para letterboxing (já está no CSS, mas reforçando)
-        vid.parentElement.style.background = '#000';
+        // Importante: 'contain' garante que vemos todo o vídeo sem distorção inicial.
+        // Futuramente, para Pan/Crop, isso pode mudar para 'cover' ou tamanhos manuais.
+        vid.style.objectFit = 'contain'; 
+        
+        // Opcional: Log para debug
+        console.log(`[UIManager] Viewport atualizada para ${settings.width}x${settings.height}`);
     }
 }
