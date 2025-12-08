@@ -45,6 +45,8 @@ export class AssetManager {
                 this.studio.timelineManager.renderTracks();
             }
         });
+
+        this.studio.markUnsavedChanges();
     }
 
     async _createAsset(file, name, mimeOverride) {
@@ -66,6 +68,8 @@ export class AssetManager {
             type = 'audio'; duration = await getMediaDuration(blob);
         }
         
+        this.studio.markUnsavedChanges();
+        
         if (duration < 0.1) duration = 10; 
         return { blob, name, type, baseDuration: duration, url: URL.createObjectURL(blob) };
     }
@@ -74,6 +78,28 @@ export class AssetManager {
         const list = document.getElementById("studio-bin-list");
         if(!list) return;
         list.innerHTML = "";
+
+        const btnAdd = document.createElement("div");
+        btnAdd.id = "btn-studio-add";
+        btnAdd.className = "bin-item";
+        btnAdd.style.justifyContent = "center";
+        btnAdd.style.background = "#0078d7"; 
+        btnAdd.style.color = "#fff";
+        btnAdd.style.cursor = "pointer";
+        btnAdd.style.fontWeight = "600";
+        
+        btnAdd.innerHTML = `
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+            <span>&nbsp; Importar Mídia</span>
+        `;
+
+        btnAdd.onclick = () => {
+            const uploadInput = document.getElementById("studio-upload");
+            if (uploadInput) uploadInput.click();
+        };
+
+        list.appendChild(btnAdd);
+
         this.studio.project.assets.forEach(asset => {
             const item = document.createElement("div");
             item.className = `bin-item type-${asset.type} ${asset.status==='processing'?'processing':''}`;

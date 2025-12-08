@@ -40,10 +40,14 @@ export class ProjectStorage {
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction([this.storeName], "readwrite");
             const store = transaction.objectStore(this.storeName);
+            
             const request = store.put(projectData);
 
-            request.onsuccess = () => resolve(projectData.id);
-            request.onerror = (e) => reject(e.target.error);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = (e) => {
+                console.error("ProjectStorage: Falha ao salvar.", e.target.error);
+                reject(e.target.error);
+            };
         });
     }
 

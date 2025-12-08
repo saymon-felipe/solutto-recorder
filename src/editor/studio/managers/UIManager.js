@@ -148,21 +148,37 @@ export class UIManager {
         
         div.innerHTML = styles + `
             <div class="studio-toolbar">
-                <div style="font-weight:bold;">Solutto Studio</div>
-                
-                <button class="studio-btn" id="btn-studio-save" title="Salvar Projeto">
-                    <i class="fa-solid fa-floppy-disk"></i> Salvar
-                </button>
+                <div class="header-group">
+                    <span class="studio-app-logo">
+                        <i class="fa-solid fa-video"></i> Solutto Studio
+                    </span>
+                    
+                    <div class="project-toolbox">
+                        <button id="btn-toolbox-save" class="toolbox-btn" title="Salvar (Ctrl+S)">
+                            <i class="fa-solid fa-floppy-disk"></i>
+                        </button>
+                        <button id="btn-toolbox-save-as" class="toolbox-btn" title="Salvar Como...">
+                            <i class="fa-solid fa-file-export"></i>
+                        </button>
+                        <button id="btn-toolbox-settings" class="toolbox-btn" title="Configurações do Projeto">
+                            <i class="fa-solid fa-gear"></i>
+                        </button>
+                    </div>
 
-                <div class="zoom-control">
-                    <i class="fa-solid fa-minus"></i>
-                    <input type="range" id="studio-zoom-slider" min="5" max="600" value="100">
-                    <i class="fa-solid fa-plus"></i>
+                    <div class="project-info-container">
+                        <span id="header-project-name" class="header-p-name">Carregando...</span>
+                        <span id="header-project-status" class="header-p-status"></span>
+                    </div>
                 </div>
-                <div style="flex:1"></div>
-                <button class="studio-btn" id="btn-studio-add"><i class="fa-solid fa-plus"></i> Adicionar Mídia</button>
-                <button class="studio-btn primary" id="btn-studio-render"><i class="fa-solid fa-file-export"></i> Renderizar</button>
-                <button class="studio-btn" id="btn-studio-close"><i class="fa-solid fa-times"></i></button>
+
+                <div class="studio-controls">
+                    <button id="btn-studio-render" class="studio-btn primary">
+                        <i class="fa-solid fa-file-video"></i> Renderizar
+                    </button>
+                    <button id="btn-studio-close" class="studio-btn danger">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
             </div>
             
             <div class="studio-workspace">
@@ -297,6 +313,9 @@ export class UIManager {
                 <div class="vegas-modal project-settings-modal">
                     <div class="vegas-header">
                         <span><i class="fa-solid fa-clapperboard"></i> &nbsp; Novo Projeto</span>
+                        <button id="btn-ps-close" style="background: transparent; border: none; color: #aaa; cursor: pointer; padding: 0 5px;">
+                            <i class="fa-solid fa-times"></i>
+                        </button>
                     </div>
                     
                     <div class="vegas-body">
@@ -346,23 +365,80 @@ export class UIManager {
             </div>
         `;
         document.body.appendChild(div);
+
+        setTimeout(() => {
+            // Botões Header
+            document.getElementById('btn-toolbox-save').onclick = () => this.studio.saveProject();
+            document.getElementById('btn-toolbox-save-as').onclick = () => this.studio.saveProjectAs();
+            document.getElementById('btn-toolbox-settings').onclick = () => this.studio.openProjectSettings();
+            
+            // Botões Originais
+            document.getElementById('btn-studio-close').onclick = () => this.studio.toggleMode();
+            
+            // Atalho de Teclado (Ctrl+S)
+            document.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                    if (this.studio.isActive) {
+                        e.preventDefault();
+                        this.studio.saveProject();
+                    }
+                }
+            });
+        }, 0);
+
         this._bindEvents();
         this._bindTabEvents();
 
         this._bindProjectSettingsEvents();
     }
 
-    _bindEvents() {
-        const fileInput = document.getElementById("studio-upload");
+    updateProjectHeader(project, hasUnsavedChanges) {
+        const nameEl = document.getElementById('header-project-name');
+        const statusEl = document.getElementById('header-project-status');
+        if (!nameEl || !statusEl) return;
 
+        // Lógica: Projeto Novo (sem ID) vs Projeto Salvo
+        const isNewProject = !project.id; 
+        
+        if (isNewProject) {
+            // Caso: Não Salvo - <Hora Atual>
+            const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            nameEl.innerText = "Não Salvo";
+            statusEl.innerHTML = `&mdash; Iniciado às ${timeStr}`;
+            statusEl.style.color = "#aaa";
+        } else {
+            // Caso: Projeto Aberto
+            nameEl.innerText = project.name;
+            
+            if (hasUnsavedChanges) {
+                statusEl.innerHTML = `&bull; <span style="color: #ffb74d;">Alterações não salvas</span>`;
+            } else {
+                const lastSaved = project.lastSaved ? new Date(project.lastSaved) : new Date();
+                const dateStr = lastSaved.toLocaleString('pt-BR', { 
+                    day: '2-digit', month: '2-digit', hour: '2-digit', minute:'2-digit' 
+                });
+                statusEl.innerHTML = `&bull; Salvo em ${dateStr}`;
+                statusEl.style.color = "#4caf50"; // Verde suave para indicar sucesso
+            }
+        }
+    }
+
+    showToast(message) {
+        const container = document.getElementById('studio-toast-container') || document.getElementById('studio-app');
+        const toast = document.createElement('div');
+        toast.className = 'studio-toast';
+        toast.innerText = message;
+        container.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    _bindEvents() {
         // Formatos que o FFmpeg WASM suporta de forma estável
         const ALLOWED_EXTENSIONS = [
             'mp4', 'webm', 'mov', 'mkv', 'ogg', 'avi', // Vídeo
             'mp3', 'wav', 'ogg', 'aac', 'm4a', // Áudio
             'png', 'jpg', 'jpeg', 'gif' // Imagem
         ];
-
-        document.getElementById("btn-studio-add").onclick = () => fileInput.click();
 
         document.getElementById("studio-upload").onchange = async (e) => {
             const files = Array.from(e.target.files);
@@ -387,10 +463,6 @@ export class UIManager {
         };
 
         document.getElementById("btn-studio-close").onclick = () => this.studio.toggleMode();
-        document.getElementById('studio-zoom-slider').oninput = (e) => {
-            this.studio.timelineManager.setZoom(parseInt(e.target.value));
-        };
-        document.getElementById("btn-studio-save").onclick = () => this.studio.saveCurrentProject();
     }
 
     _bindTabEvents() {
@@ -468,8 +540,15 @@ export class UIManager {
     _bindProjectSettingsEvents() {
         const modal = document.getElementById('project-settings-modal');
         const btnConfirm = document.getElementById('btn-ps-confirm');
+        const btnClose = document.getElementById('btn-ps-close');
         const inpW = document.getElementById('ps-width');
         const inpH = document.getElementById('ps-height');
+        
+        if (btnClose) {
+            btnClose.onclick = () => {
+                modal.classList.add('hidden');
+            };
+        }
         
         // 1. Lógica dos Botões Seletores (Cards)
         const buttons = document.querySelectorAll('.ps-orientation-btn');

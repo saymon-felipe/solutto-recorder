@@ -227,6 +227,7 @@ export class TimelineManager {
         const newGroupId = "group_" + Date.now();
         this.selectedClips.forEach(selection => selection.clip.groupId = newGroupId);
         console.log("Clips vinculados:", newGroupId);
+        this.studio.markUnsavedChanges();
     }
     ungroupClips() {
         if (this.selectedClips.length === 0) return;
@@ -239,6 +240,7 @@ export class TimelineManager {
             });
             this.selectedClips = this.selectedClips.filter(s => s.clip.id === this.lastFocusedClipId);
         }
+        this.studio.markUnsavedChanges();
     }
     _handleSelection(e, clip, trackId, el) {
         this.lastFocusedClipId = clip.id;
@@ -506,6 +508,7 @@ export class TimelineManager {
         header.ondrop = (e) => {
             e.preventDefault(); e.stopPropagation(); header.style.background = "";
             const fromIndex = parseInt(e.dataTransfer.getData("text/plain"));
+            this.studio.markUnsavedChanges();
             if (!isNaN(fromIndex) && fromIndex !== index) this.studio.reorderTracks(fromIndex, index);
         };
     }
@@ -546,6 +549,7 @@ export class TimelineManager {
                     window.removeEventListener('mouseup', onUp);
                     
                     this._clearSelection();
+                    this.studio.markUnsavedChanges();
 
                     if(!didMove) {
                         const x = ev.clientX - rect.left;
@@ -629,6 +633,9 @@ export class TimelineManager {
             };
             window.addEventListener('mouseup', onMouseUpCheck);
         };
+
+        this.studio.markUnsavedChanges();
+
         return el;
     }
 
@@ -668,7 +675,7 @@ export class TimelineManager {
             if(handle) handle.title = `Nível: ${Math.round(newLevel*100)}%`;
             syncPreview();
         };
-        const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+        const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); this.studio.markUnsavedChanges(); };
         window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
     }
 
@@ -716,6 +723,7 @@ export class TimelineManager {
             if(el) el.style.pointerEvents = 'auto'; 
             window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); 
             this.renderTracks(); 
+            this.studio.markUnsavedChanges();
         };
         window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
     }
@@ -734,6 +742,7 @@ export class TimelineManager {
         const onUp = () => { 
             window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); 
             this.renderTracks();
+            this.studio.markUnsavedChanges();
         };
         window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
     }
@@ -747,6 +756,7 @@ export class TimelineManager {
             assetId: asset.id, start: startTime, offset: 0, duration: asset.baseDuration, 
             type: asset.type, name: asset.name, level: 1.0, groupId: providedGroupId
         };
+        this.studio.markUnsavedChanges();
         track.clips.push(clip);
         this.renderTracks();
     }
@@ -757,6 +767,7 @@ export class TimelineManager {
             if (track) track.clips = track.clips.filter(c => c.id !== sel.clip.id);
         });
         this.selectedClips = [];
+        this.studio.markUnsavedChanges();
         this.renderTracks();
     }
     splitClip() {
@@ -775,6 +786,7 @@ export class TimelineManager {
         };
         track.clips.push(newClip);
         this._clearSelection(); 
+        this.studio.markUnsavedChanges();
         this.renderTracks();
     }
 }

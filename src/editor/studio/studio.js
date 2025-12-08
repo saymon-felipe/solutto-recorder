@@ -38,6 +38,8 @@ export class StudioManager {
         this.renderManager = new RenderManager(this);
         
         this.projectStorage = new ProjectStorage(); 
+
+        this.hasUnsavedChanges = false;
     }
 
     async init() {
@@ -61,6 +63,7 @@ export class StudioManager {
 
         // Aplica o aspecto visual inicial ao player
         this.uiManager.updatePreviewViewport();
+        this.uiManager.updateRecentProjectsList();
 
         // Lógica da Modal de Novo Projeto
         if (this.isFreshInit) {
@@ -69,6 +72,16 @@ export class StudioManager {
         } else {
             // Se já carregamos um projeto existente, limpamos qualquer gravação pendente para não confundir
             await this.clearPendingRecordingId();
+        }
+
+        this.uiManager.updateProjectHeader(this.project, this.hasUnsavedChanges);
+    }
+
+    markUnsavedChanges() {
+        this.hasUnsavedChanges = true;
+
+        if (this.uiManager) {
+            this.uiManager.updateProjectHeader(this.project, true);
         }
     }
 
@@ -203,6 +216,94 @@ export class StudioManager {
         }
     }
 
+    /**
+     * Salva o projeto atual.
+     * Lógica: Se já tem ID, atualiza. Se não tem (Novo Projeto), chama o Salvar Como.
+     */
+    async saveProject() {
+        if (this.tasks.length > 0) return alert("Aguarde o processamento de assets antes de salvar.");
+
+        if (!this.project.id || this.project.name === "Novo Projeto") {
+            return this.saveProjectAs();
+        }
+
+        await this._performSave(this.project.id, this.project.name);
+
+        this.project.lastSaved = Date.now();
+    
+        this.hasUnsavedChanges = false;
+        
+        this.uiManager.updateProjectHeader(this.project, false);
+        
+        this.uiManager.showToast("Projeto salvo com sucesso!");
+    }
+
+    /**
+     * Cria uma CÓPIA do projeto atual com um novo ID.
+     */
+    async saveProjectAs() {
+        if (this.tasks.length > 0) return alert("Aguarde o processamento de assets antes de salvar.");
+
+        const defaultName = this.project.name !== "Novo Projeto" ? `${this.project.name} (Cópia)` : `Meu Projeto`;
+        const name = prompt("Salvar projeto como:", defaultName);
+        if (!name) return;
+
+        // Gera um NOVO ID para criar uma nova entrada no banco
+        const newId = Date.now();
+        await this._performSave(newId, name);
+    }
+
+    /**
+     * Método interno que executa a persistência no ProjectStorage.
+     */
+    async _performSave(id, name) {
+        this.project.id = id;
+        this.project.name = name;
+        this.project.lastSaved = Date.now();
+
+        const assetsToSave = this.project.assets.map(a => ({
+            id: a.id,
+            name: a.name,
+            type: a.type,
+            baseDuration: a.baseDuration,
+            status: 'ready',
+            blob: a.blob,
+            sourceBlob: a.sourceBlob
+        }));
+
+        const projectData = {
+            id: this.project.id,
+            name: this.project.name,
+            lastSaved: this.project.lastSaved,
+            settings: this.project.settings, 
+            tracks: this.project.tracks,
+            assets: assetsToSave,
+            zoom: this.project.zoom,
+            duration: this.project.duration
+        };
+
+        try {
+            await this.projectStorage.saveProject(projectData);
+            
+            // Atualiza UI
+            this.uiManager.updateRecentProjectsList();
+            
+            // Feedback simples (pode ser melhorado com um Toast)
+            this.uiManager.showToast("Projeto salvo com sucesso!");
+            
+        } catch (e) {
+            console.error("Erro ao salvar:", e);
+            alert("Erro ao salvar projeto: " + e.message);
+        }
+    }
+
+    /**
+     * Abre o modal de configurações (Resolução/Orientação)
+     */
+    openProjectSettings() {
+        this.uiManager.promptProjectSettings();
+    }
+
     async loadProject(projectId) {
         if (this.project.assets.length > 0 && !confirm("Carregar projeto? As alterações não salvas atuais serão perdidas.")) return;
 
@@ -234,6 +335,8 @@ export class StudioManager {
             
             const slider = document.getElementById('studio-zoom-slider');
             if(slider) slider.value = this.project.zoom;
+
+            this.uiManager.updateProjectHeader(this.project, false);
 
         } catch (e) {
             console.error(e);
@@ -278,6 +381,8 @@ export class StudioManager {
              const videoTrack = this.project.tracks.find(t => t.type === 'video');
              if (videoTrack) this.timelineManager.addClipToTrack(videoTrack.id, asset, startTime, null);
         }
+
+        this.markUnsavedChanges();
     }
 
     addTrack(type) {
@@ -290,12 +395,14 @@ export class StudioManager {
         };
         this.project.tracks.push(newTrack);
         this.timelineManager.renderTracks();
+        this.markUnsavedChanges();
     }
 
     reorderTracks(fromIndex, toIndex) {
         const item = this.project.tracks.splice(fromIndex, 1)[0];
         this.project.tracks.splice(toIndex, 0, item);
         this.timelineManager.renderTracks();
+        this.markUnsavedChanges();
     }
 
     moveClipToTrack(clip, targetTrackId) {
@@ -308,6 +415,7 @@ export class StudioManager {
 
         currentTrack.clips = currentTrack.clips.filter(c => c.id !== clip.id);
         targetTrack.clips.push(clip);
+        this.markUnsavedChanges();
         return true;
     }
 }
