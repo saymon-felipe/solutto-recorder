@@ -205,25 +205,14 @@ export class PlaybackManager {
         if (track.type === 'video') {
             const div = document.createElement('div');
             div.className = `track-layer track-${track.id}`;
-            div.style.position = 'absolute';
-            div.style.top = '0';
-            div.style.left = '0';
-            div.style.width = '100%';
-            div.style.height = '100%';
-            div.style.pointerEvents = 'none'; 
+            div.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; overflow:hidden;';
             
             const vid = document.createElement('video');
-            vid.style.width = '100%';
-            vid.style.height = '100%';
-            vid.style.objectFit = 'contain'; 
-            vid.style.display = 'none';
+            vid.style.cssText = 'width:100%; height:100%; object-fit:contain; display:none; transform-origin: center center; will-change: transform;';
             vid.crossOrigin = "anonymous"; 
             
             const img = document.createElement('img');
-            img.style.width = '100%';
-            img.style.height = '100%';
-            img.style.objectFit = 'contain';
-            img.style.display = 'none';
+            img.style.cssText = 'width:100%; height:100%; object-fit:contain; display:none; transform-origin: center center; will-change: transform;';
 
             div.appendChild(vid);
             div.appendChild(img);
@@ -248,6 +237,8 @@ export class PlaybackManager {
         if (!clip) {
             videoEl.style.display = 'none';
             videoEl.pause();
+            videoEl.style.transform = 'none';
+            imgEl.style.transform = 'none';
             imgEl.style.display = 'none';
             videoEl.dataset.currentClipId = ""; 
             return;
@@ -283,7 +274,7 @@ export class PlaybackManager {
         videoEl.style.opacity = clip.level !== undefined ? clip.level : 1;
         videoEl.muted = clip.muted === true; 
 
-        this._applyClipTransform(imgEl, clip);
+        this._applyClipTransform(videoEl, clip);
 
         let localTime = (globalTime - clip.start) + clip.offset;
         if (asset.baseDuration && localTime > asset.baseDuration) {

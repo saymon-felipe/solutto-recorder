@@ -457,7 +457,7 @@ export class TimelineManager {
             track.clips.forEach(clip => {
                 const clipEl = this._createClipElement(clip, track.id);
 
-                if (['video', 'image'].includes(clip.type)) {
+                if (track.type !== 'audio' && ['video', 'image'].includes(clip.type)) {
                     const btnPan = document.createElement('div');
                     btnPan.className = 'clip-tool-btn pan-crop-btn';
                     btnPan.innerHTML = '<i class="fa-solid fa-crop-simple"></i>';
