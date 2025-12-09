@@ -113,7 +113,7 @@ export class TimelineManager {
                 this._stepPlayhead(1); 
             }
 
-            if (e.code === 'KeyS') this.splitClip();
+            if (!e.ctrlKey && e.code === 'KeyS') this.splitClip();
             if (e.code === 'Delete') this.deleteClips();
             
             if (e.code === 'KeyG') this.groupClips();

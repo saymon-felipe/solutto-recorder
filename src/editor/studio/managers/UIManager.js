@@ -611,14 +611,18 @@ export class UIManager {
 
             if (w > 2560 || h > 2560) return alert("A resolução máxima é 2K (2560px) para garantir performance.");
 
-            // Salva no Projeto
+            const oldSettings = this.studio.project.settings || {};
+            const hasChanged = oldSettings.width !== w || oldSettings.height !== h;
+
             this.studio.project.settings = { width: w, height: h };
             
-            // Atualiza o Preview e Fecha
+            if (!this.studio.isFreshInit && hasChanged) {
+                this.studio.markUnsavedChanges();
+            }
+
             this.updatePreviewViewport();
             modal.classList.add('hidden');
 
-            // Carrega gravação pendente se for inicialização
             if (this.studio.isFreshInit) {
                 this.studio.isFreshInit = false;
                 await this.studio.checkForPendingRecording();
@@ -628,30 +632,42 @@ export class UIManager {
 
     promptProjectSettings() {
         const modal = document.getElementById('project-settings-modal');
+        const inpW = document.getElementById('ps-width');
+        const inpH = document.getElementById('ps-height');
+        const btnConfirm = document.getElementById('btn-ps-confirm'); 
+        const buttons = document.querySelectorAll('.ps-orientation-btn');
         
-        // Recupera valores atuais do projeto se existirem
         if (this.studio.project.settings) {
-            document.getElementById('ps-width').value = this.studio.project.settings.width;
-            document.getElementById('ps-height').value = this.studio.project.settings.height;
+            const { width, height } = this.studio.project.settings;
+            inpW.value = width;
+            inpH.value = height;
+
+            buttons.forEach(btn => btn.classList.remove('selected'));
+            const mode = width >= height ? 'landscape' : 'portrait';
+            const targetBtn = document.querySelector(`.ps-orientation-btn[data-mode="${mode}"]`);
+            if (targetBtn) targetBtn.classList.add('selected');
+        } else {
+             document.querySelector('.ps-orientation-btn[data-mode="landscape"]')?.classList.add('selected');
+        }
+
+        if (this.studio.project.id) {
+            btnConfirm.innerHTML = `Salvar Alterações <i class="fa-solid fa-check" style="margin-left:5px"></i>`;
+        } else {
+            btnConfirm.innerHTML = `Criar Projeto <i class="fa-solid fa-arrow-right" style="margin-left:5px"></i>`;
         }
         
         modal.classList.remove('hidden');
     }
 
-    // Atualiza o CSS do preview para refletir a proporção (Letterboxing)
     updatePreviewViewport() {
         const canvas = document.getElementById('studio-preview-canvas');
         
-        // Default para Full HD se não houver settings
         const settings = this.studio.project.settings || { width: 1920, height: 1080 };
         
         if (!canvas) return;
 
-        // 1. Aplica o Aspect Ratio ao CANVAS (A "tela" do projeto)
-        // Usamos CSS aspect-ratio moderno para garantir a proporção
         canvas.style.aspectRatio = `${settings.width} / ${settings.height}`;
         
-        // Opcional: Log para debug
         console.log(`[UIManager] Viewport atualizada para ${settings.width}x${settings.height}`);
     }
 }

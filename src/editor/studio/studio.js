@@ -322,6 +322,7 @@ export class StudioManager {
                 name: data.name,
                 tracks: data.tracks,
                 assets: restoredAssets,
+                settings: data.settings || { width: 1280, height: 720 }, 
                 zoom: data.zoom || 100,
                 duration: data.duration || 300,
                 currentTime: 0
@@ -333,10 +334,14 @@ export class StudioManager {
             this.playbackManager.updatePlayhead();
             this.playbackManager.syncPreview();
             
+            this.uiManager.updatePreviewViewport();
+
             const slider = document.getElementById('studio-zoom-slider');
             if(slider) slider.value = this.project.zoom;
 
             this.uiManager.updateProjectHeader(this.project, false);
+            
+            this.uiManager.showToast(`Projeto "${this.project.name}" carregado.`);
 
         } catch (e) {
             console.error(e);
