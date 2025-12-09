@@ -4,23 +4,32 @@ export class PlaybackManager {
     constructor(studio) {
         this.studio = studio;
         this.isPlaying = false;
-        this.previewVideo = null;
-        this.previewAudio = null;
-        this.previewImageLayer = null; 
         
+        this.trackLayers = new Map();
+        
+        this.container = null;
         this.lastPlayStartTime = 0;
         this.playedSinceLastSeek = false;
     }
 
     init() {
-        this.previewVideo = document.getElementById('studio-preview-video');
-        this.previewAudio = document.getElementById('studio-audio-preview');
+        this.container = document.getElementById('studio-preview-canvas');
         
-        this._initImageLayer();
+        if (!this.container) {
+            console.warn("[PlaybackManager] Container de preview não encontrado. Verifique UIManager.");
+            return;
+        }
+
+        this.container.style.position = 'relative';
+        this.container.style.overflow = 'hidden';
 
         this._bindPlayheadEvents();
-        document.getElementById("btn-play-pause").onclick = () => this.togglePlayback();
-        document.getElementById("btn-stop").onclick = () => this.stop();
+        
+        const btnPlay = document.getElementById("btn-play-pause");
+        const btnStop = document.getElementById("btn-stop");
+        
+        if(btnPlay) btnPlay.onclick = () => this.togglePlayback();
+        if(btnStop) btnStop.onclick = () => this.stop();
     }
 
     _initImageLayer() {
@@ -100,9 +109,13 @@ export class PlaybackManager {
 
     pause() {
         this.isPlaying = false;
-        document.getElementById('btn-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
-        if(this.previewVideo) this.previewVideo.pause();
-        if(this.previewAudio) this.previewAudio.pause();
+        const btn = document.getElementById('btn-play-pause');
+        if(btn) btn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        
+        this.trackLayers.forEach(layer => {
+            if (layer.videoEl) layer.videoEl.pause();
+            if (layer.audioEl) layer.audioEl.pause();
+        });
 
         if (this.playedSinceLastSeek) {
              this.studio.project.currentTime = this.lastPlayStartTime;
@@ -114,9 +127,20 @@ export class PlaybackManager {
 
     stop() {
         this.isPlaying = false;
-        this.previewVideo.pause();
-        this.previewAudio.pause();
-        document.getElementById('btn-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
+
+        this.trackLayers.forEach(layer => {
+            if (layer.videoEl) {
+                layer.videoEl.pause();
+                layer.videoEl.currentTime = 0;
+            }
+            if (layer.audioEl) {
+                layer.audioEl.pause();
+                layer.audioEl.currentTime = 0;
+            }
+        });
+
+        const btn = document.getElementById('btn-play-pause');
+        if(btn) btn.innerHTML = '<i class="fa-solid fa-play"></i>';
         
         this.studio.project.currentTime = 0;
         this.updatePlayhead();
@@ -140,104 +164,175 @@ export class PlaybackManager {
         const time = this.studio.project.currentTime;
         const tracks = this.studio.project.tracks;
         
-        let activeVideoClip = null;
-        let activeImageClip = null;
-
-        const videoTracks = tracks.filter(t => t.type === 'video');
-
-        for (const t of videoTracks) {
-            const clip = t.clips.find(c => time >= c.start && time < (c.start + c.duration));
-            if (!clip) continue;
-
-            const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
-            if (!asset) continue;
-
-            if (asset.type === 'video') {
-                activeVideoClip = clip; 
-            } else if (asset.type === 'image') {
-                activeImageClip = clip; 
+        const currentTrackIds = new Set(tracks.map(t => t.id));
+        for (const [trackId, layer] of this.trackLayers) {
+            if (!currentTrackIds.has(trackId)) {
+                if (layer.container) layer.container.remove();
+                if (layer.audioEl) { layer.audioEl.pause(); layer.audioEl.src = ""; } 
+                this.trackLayers.delete(trackId);
             }
         }
-        
-        // 1. Sincroniza Vídeo de Fundo
-        if (!activeVideoClip && this.previewVideo) {
-            this.previewVideo.style.display = 'none';
-        }
-        this._syncPlayer(this.previewVideo, activeVideoClip, time);
 
-        // 2. Sincroniza Imagem de Overlay
-        this._syncImage(activeImageClip);
+        const totalTracks = tracks.length;
 
-        // 3. Sincroniza Áudio (Busca apenas em tracks de ÁUDIO)
-        let activeAudio = null;
-        const audioTracks = tracks.filter(t => t.type === 'audio');
-        for (const t of audioTracks) {
-            const clip = t.clips.find(c => time >= c.start && time < (c.start + c.duration));
-            if (clip) { activeAudio = clip; break; }
-        }
-        this._syncPlayer(this.previewAudio, activeAudio, time);
+        tracks.forEach((track, index) => {
+            let layer = this.trackLayers.get(track.id);
+            if (!layer) {
+                layer = this._createTrackLayer(track);
+                this.trackLayers.set(track.id, layer);
+            }
+
+            if (layer.container) {
+                layer.container.style.zIndex = totalTracks - index;
+            }
+
+            const activeClip = track.clips.find(c => time >= c.start && time < (c.start + c.duration));
+            
+            if (track.type === 'video') {
+                this._syncVideoTrack(layer, activeClip, time);
+            } else if (track.type === 'audio') {
+                this._syncAudioTrack(layer, activeClip, time);
+            }
+        });
 
         const display = document.getElementById('studio-time-display');
         if(display) display.innerText = fmtTime(time);
     }
 
-    _syncImage(clip) {
-        if (!this.previewImageLayer) return;
+    _createTrackLayer(track) {
+        const layer = { type: track.type };
+
+        if (track.type === 'video') {
+            const div = document.createElement('div');
+            div.className = `track-layer track-${track.id}`;
+            div.style.position = 'absolute';
+            div.style.top = '0';
+            div.style.left = '0';
+            div.style.width = '100%';
+            div.style.height = '100%';
+            div.style.pointerEvents = 'none'; 
+            
+            const vid = document.createElement('video');
+            vid.style.width = '100%';
+            vid.style.height = '100%';
+            vid.style.objectFit = 'contain'; 
+            vid.style.display = 'none';
+            vid.crossOrigin = "anonymous"; 
+            
+            const img = document.createElement('img');
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.objectFit = 'contain';
+            img.style.display = 'none';
+
+            div.appendChild(vid);
+            div.appendChild(img);
+            
+            if (this.container) this.container.appendChild(div);
+
+            layer.container = div;
+            layer.videoEl = vid;
+            layer.imgEl = img;
+        } else {
+            const aud = new Audio();
+            aud.crossOrigin = "anonymous";
+            layer.audioEl = aud;
+        }
+
+        return layer;
+    }
+
+    _syncVideoTrack(layer, clip, globalTime) {
+        const { videoEl, imgEl } = layer;
 
         if (!clip) {
-            this.previewImageLayer.style.display = 'none';
-            this.previewImageLayer.src = "";
+            videoEl.style.display = 'none';
+            videoEl.pause();
+            imgEl.style.display = 'none';
+            videoEl.dataset.currentClipId = ""; 
             return;
         }
 
         const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
-        if (!asset || asset.status !== 'ready') {
-            this.previewImageLayer.style.display = 'none';
+        if (!asset || asset.status !== 'ready') return; 
+
+        const isImage = asset.type === 'image';
+        
+        if (isImage) {
+            videoEl.style.display = 'none';
+            videoEl.pause();
+            
+            if (imgEl.src !== asset.url) {
+                imgEl.src = asset.url;
+            }
+            imgEl.style.display = 'block';
+            imgEl.style.opacity = clip.level !== undefined ? clip.level : 1;
             return;
         }
 
-        const currentSrc = this.previewImageLayer.getAttribute('src');
-        if (currentSrc !== asset.url) {
-            this.previewImageLayer.src = asset.url;
+        imgEl.style.display = 'none';
+        
+        if (videoEl.dataset.currentClipId !== clip.id) {
+            videoEl.src = asset.url;
+            videoEl.dataset.currentClipId = clip.id;
+            videoEl.load();
         }
 
-        this.previewImageLayer.style.display = 'block';
-        // Aplica opacidade corretamente na imagem
-        this.previewImageLayer.style.opacity = clip.level !== undefined ? clip.level : 1;
+        videoEl.style.display = 'block';
+        videoEl.style.opacity = clip.level !== undefined ? clip.level : 1;
+        videoEl.muted = clip.muted === true; 
+
+        let localTime = (globalTime - clip.start) + clip.offset;
+        if (asset.baseDuration && localTime > asset.baseDuration) {
+            localTime = localTime % asset.baseDuration;
+        }
+
+        if (Math.abs(videoEl.currentTime - localTime) > 0.3 || videoEl.ended) {
+            videoEl.currentTime = localTime;
+        }
+
+        if (this.isPlaying && videoEl.paused) {
+            const p = videoEl.play();
+            if(p) p.catch(() => {});
+        } else if (!this.isPlaying && !videoEl.paused) {
+            videoEl.pause();
+        }
     }
 
-    _syncPlayer(player, clip, globalTime) {
-        if (!player) return;
-        if (clip) {
-            const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
-            if (!asset || asset.status !== 'ready') { player.style.display = 'none'; return; }
+    _syncAudioTrack(layer, clip, globalTime) {
+        const { audioEl } = layer;
+        
+        if (!clip) {
+            audioEl.pause();
+            audioEl.dataset.currentClipId = "";
+            return;
+        }
 
-            player.style.display = 'block';
-            if (player.dataset.currentClipId !== clip.id) {
-                player.src = asset.url;
-                player.dataset.currentClipId = clip.id;
-                player.load();
-            }
+        const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
+        if (!asset || asset.status !== 'ready') return;
 
-            // Aplica propriedades visuais apenas se for elemento de vídeo
-            if (player.tagName === 'VIDEO') {
-                player.style.opacity = clip.level !== undefined ? clip.level : 1;
-                player.muted = clip.muted === true;
-            }
-            // Aplica volume apenas se for elemento de áudio
-            if (player.tagName === 'AUDIO') {
-                player.volume = clip.level !== undefined ? clip.level : 1;
-            }
+        if (audioEl.dataset.currentClipId !== clip.id) {
+            audioEl.src = asset.url;
+            audioEl.dataset.currentClipId = clip.id;
+            audioEl.load();
+        }
 
-            let localTime = (globalTime - clip.start) + clip.offset;
-            if (localTime > asset.baseDuration) localTime = localTime % asset.baseDuration;
+        audioEl.volume = clip.level !== undefined ? clip.level : 1;
 
-            if (Math.abs(player.currentTime - localTime) > 0.3 || player.ended) player.currentTime = localTime;
-            
-            if (this.isPlaying && player.paused) { const p = player.play(); if(p) p.catch(()=>{}); }
-            else if (!this.isPlaying && !player.paused) player.pause();
-        } else {
-            player.style.display = 'none'; player.pause(); player.dataset.currentClipId = "";
+        let localTime = (globalTime - clip.start) + clip.offset;
+        if (asset.baseDuration && localTime > asset.baseDuration) {
+            localTime = localTime % asset.baseDuration;
+        }
+
+        if (Math.abs(audioEl.currentTime - localTime) > 0.3 || audioEl.ended) {
+            audioEl.currentTime = localTime;
+        }
+
+        if (this.isPlaying && audioEl.paused) {
+            const p = audioEl.play();
+            if(p) p.catch(() => {});
+        } else if (!this.isPlaying && !audioEl.paused) {
+            audioEl.pause();
         }
     }
 }

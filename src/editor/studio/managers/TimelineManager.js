@@ -509,6 +509,7 @@ export class TimelineManager {
             e.preventDefault(); e.stopPropagation(); header.style.background = "";
             const fromIndex = parseInt(e.dataTransfer.getData("text/plain"));
             this.studio.markUnsavedChanges();
+            this.studio.historyManager.recordState();
             if (!isNaN(fromIndex) && fromIndex !== index) this.studio.reorderTracks(fromIndex, index);
         };
     }
@@ -550,6 +551,7 @@ export class TimelineManager {
                     
                     this._clearSelection();
                     this.studio.markUnsavedChanges();
+                    this.studio.historyManager.recordState();
 
                     if(!didMove) {
                         const x = ev.clientX - rect.left;
@@ -625,7 +627,7 @@ export class TimelineManager {
                         const rect = lane.getBoundingClientRect();
                         const x = ev.clientX - rect.left;
                         // Snap no click do clipe
-                        const rawTime = Math.max(0, x / this.studio.project.zoom);
+                        const rawTime = Math.max(0, (x - 120) / this.studio.project.zoom);
                         this._seekToTime(this._snapToFrame(rawTime));
                     }
                 }
@@ -635,6 +637,7 @@ export class TimelineManager {
         };
 
         this.studio.markUnsavedChanges();
+        this.studio.historyManager.recordState();
 
         return el;
     }
@@ -646,13 +649,6 @@ export class TimelineManager {
         this.lastSeekTime = time; 
         this.playedSinceLastSeek = false; 
     }
-
-    _seekToPixel(x) {
-        const trackX = x; 
-        const rawTime = Math.max(0, (trackX - 120) / this.studio.project.zoom);
-        // Garante snap ao mover a agulha via clique externo (se houver)
-        this._seekToTime(this._snapToFrame(rawTime));
-    }
     
     _startFader(e, clip, el) {
         const startY = e.clientY;
@@ -663,33 +659,68 @@ export class TimelineManager {
         const handle = el.querySelector('.fader-handle');
         const syncPreview = this.studio.playbackManager.syncPreview.bind(this.studio.playbackManager);
 
+        const preFaderState = this.studio.historyManager._createSnapshot();
+        let didChange = false;
+
         const onMove = (ev) => {
             const deltaY = ev.clientY - startY;
             const change = deltaY / height;
+            
             let newLevel = Math.max(0, Math.min(1, startLevel - change));
-            clip.level = newLevel;
-            const topPercent = (1 - newLevel) * 100;
-            if(line) line.style.top = topPercent + "%";
-            if(handle) handle.style.top = topPercent + "%";
-            if(overlay) overlay.style.opacity = 1 - newLevel;
-            if(handle) handle.title = `Nível: ${Math.round(newLevel*100)}%`;
-            syncPreview();
+            
+            if (Math.abs(clip.level - newLevel) > 0.01) {
+                clip.level = newLevel;
+                didChange = true;
+
+                const topPercent = (1 - newLevel) * 100;
+                if(line) line.style.top = topPercent + "%";
+                if(handle) handle.style.top = topPercent + "%";
+                if(overlay) overlay.style.opacity = 1 - newLevel;
+                if(handle) handle.title = `Nível: ${Math.round(newLevel*100)}%`;
+                
+                syncPreview();
+            }
         };
-        const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); this.studio.markUnsavedChanges(); };
-        window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+
+        const onUp = () => { 
+            window.removeEventListener("mousemove", onMove); 
+            window.removeEventListener("mouseup", onUp); 
+            
+            if (didChange) {
+                this.studio.historyManager.pushManualState(preFaderState);
+            }
+
+            this.studio.markUnsavedChanges(); 
+        };
+
+        window.addEventListener("mousemove", onMove); 
+        window.addEventListener("mouseup", onUp);
     }
 
     _startMove(e, clickedClip, el) {
         const startX = e.clientX;
-        el.style.pointerEvents = 'none';
+        
+        const preMoveState = this.studio.historyManager._createSnapshot();
+        let didActuallyChange = false;
+
+        if(el) el.style.pointerEvents = 'none';
+
         const draggingItems = this.selectedClips.map(item => {
             const domEl = item.clip.id === clickedClip.id ? el : this._findDomElement(item.clip.id);
             return {
-                clip: item.clip, trackId: item.trackId, startStart: item.clip.start, el: domEl
+                clip: item.clip, 
+                trackId: item.trackId, 
+                startStart: item.clip.start, 
+                el: domEl
             };
         });
+
         const onMove = (ev) => {
             const deltaPx = ev.clientX - startX;
+            
+            if (Math.abs(deltaPx) < 2 && !didActuallyChange) return;
+            
+            didActuallyChange = true;
             const deltaTime = deltaPx / this.studio.project.zoom;
             
             const elementBelow = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -699,19 +730,23 @@ export class TimelineManager {
             
             draggingItems.forEach(item => {
                 let rawNewStart = Math.max(0, item.startStart + deltaTime);
-                let newStart = this._snapToFrame(rawNewStart); // Snap do Clipe!
+                let newStart = this._snapToFrame(rawNewStart); 
                 
                 item.clip.start = newStart;
+                
                 if (item.el) item.el.style.left = (newStart * this.studio.project.zoom) + "px";
                 
                 if (targetTrackId && targetTrackId !== item.trackId) { 
                     const currentTrack = this.studio.project.tracks.find(t => t.id === item.trackId);
                     const targetTrack = this.studio.project.tracks.find(t => t.id === targetTrackId);
+                    
                     if (currentTrack && targetTrack && currentTrack.type === targetTrack.type) {
                         currentTrack.clips = currentTrack.clips.filter(c => c.id !== item.clip.id);
                         targetTrack.clips.push(item.clip);
+                        
                         const newLane = trackEl.querySelector('.track-lane');
                         if (newLane && item.el) newLane.appendChild(item.el);
+                        
                         item.trackId = targetTrackId;
                         const selRef = this.selectedClips.find(s => s.clip.id === item.clip.id);
                         if (selRef) selRef.trackId = targetTrackId;
@@ -719,32 +754,61 @@ export class TimelineManager {
                 }
             });
         };
+
         const onUp = () => { 
             if(el) el.style.pointerEvents = 'auto'; 
-            window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); 
+            
+            window.removeEventListener("mousemove", onMove); 
+            window.removeEventListener("mouseup", onUp); 
+            
+            if (didActuallyChange) {
+                this.studio.historyManager.pushManualState(preMoveState);
+                console.log("[Timeline] Movimento finalizado e estado salvo.");
+            }
+
             this.renderTracks(); 
             this.studio.markUnsavedChanges();
         };
-        window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+
+        window.addEventListener("mousemove", onMove); 
+        window.addEventListener("mouseup", onUp);
     }
 
     _startResize(e, clip, el, baseDuration) {
         const startX = e.clientX; 
         const startW = clip.duration * this.studio.project.zoom;
+        
+        const preResizeState = this.studio.historyManager._createSnapshot();
+        let didResize = false;
+
         const onMove = (ev) => {
-            let newW = Math.max(10, startW + (ev.clientX - startX));
+            const delta = ev.clientX - startX;
+            if (Math.abs(delta) < 2 && !didResize) return;
+
+            didResize = true;
+            let newW = Math.max(10, startW + delta);
             const rawDur = newW / this.studio.project.zoom;
-            const newDur = this._snapToFrame(rawDur); // Snap no redimensionamento
+            const newDur = this._snapToFrame(rawDur); 
             
             clip.duration = newDur;
-            el.style.width = (newDur * this.studio.project.zoom) + "px"; // Atualiza com a largura snappada
+            el.style.width = (newDur * this.studio.project.zoom) + "px"; 
         };
+
         const onUp = () => { 
-            window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); 
+            window.removeEventListener("mousemove", onMove); 
+            window.removeEventListener("mouseup", onUp); 
+            
+            if (didResize) {
+                this.studio.historyManager.pushManualState(preResizeState);
+                console.log("[Timeline] Resize finalizado e estado salvo.");
+            }
+
             this.renderTracks();
             this.studio.markUnsavedChanges();
         };
-        window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+
+        window.addEventListener("mousemove", onMove); 
+        window.addEventListener("mouseup", onUp);
     }
 
     addClipToTrack(trackId, asset, startTime, providedGroupId = null) {
@@ -759,6 +823,7 @@ export class TimelineManager {
         this.studio.markUnsavedChanges();
         track.clips.push(clip);
         this.renderTracks();
+        this.studio.historyManager.recordState();
     }
     deleteClips() {
         if (this.selectedClips.length === 0) return;
@@ -769,6 +834,7 @@ export class TimelineManager {
         this.selectedClips = [];
         this.studio.markUnsavedChanges();
         this.renderTracks();
+        this.studio.historyManager.recordState();
     }
     splitClip() {
         const targetClip = this.selectedClips.length > 0 ? this.selectedClips[0].clip : null;
@@ -788,5 +854,6 @@ export class TimelineManager {
         this._clearSelection(); 
         this.studio.markUnsavedChanges();
         this.renderTracks();
+        this.studio.historyManager.recordState();
     }
 }

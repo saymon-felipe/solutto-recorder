@@ -1,6 +1,9 @@
+import { HistoryManager } from './HistoryManager.js';
+
 export class UIManager {
     constructor(studio) {
         this.studio = studio;
+        this.studio.historyManager = new HistoryManager(studio);
     }
 
     buildUI() {
@@ -197,10 +200,7 @@ export class UIManager {
                 
                 <div class="preview-container">
                     <div class="studio-preview">
-                        <div id="studio-preview-canvas" class="preview-canvas">
-                            <video id="studio-preview-video" crossorigin="anonymous"></video>
-                            <audio id="studio-audio-preview"></audio>
-                        </div>
+                        <div id="studio-preview-canvas" class="preview-canvas" style="position: relative; overflow: hidden;"></div>
                     </div>
                     <div class="preview-controls">
                         <button class="control-btn" id="btn-stop"><i class="fa-solid fa-stop"></i></button>
@@ -465,6 +465,22 @@ export class UIManager {
         };
 
         document.getElementById("btn-studio-close").onclick = () => this.studio.toggleMode();
+
+        document.addEventListener('keydown', (e) => {
+            if (!this.studio.isActive) return;
+            
+            if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !e.shiftKey) {
+                e.preventDefault();
+                this.studio.historyManager.undo();
+            }
+
+            if ((e.ctrlKey || e.metaKey) && ((e.shiftKey && e.code === 'KeyZ') || e.code === 'KeyY')) {
+                e.preventDefault();
+                this.studio.historyManager.redo();
+            }
+        });
     }
 
     _bindTabEvents() {
@@ -625,25 +641,15 @@ export class UIManager {
     // Atualiza o CSS do preview para refletir a proporção (Letterboxing)
     updatePreviewViewport() {
         const canvas = document.getElementById('studio-preview-canvas');
-        const vid = document.getElementById('studio-preview-video');
         
         // Default para Full HD se não houver settings
         const settings = this.studio.project.settings || { width: 1920, height: 1080 };
         
-        if (!canvas || !vid) return;
+        if (!canvas) return;
 
         // 1. Aplica o Aspect Ratio ao CANVAS (A "tela" do projeto)
         // Usamos CSS aspect-ratio moderno para garantir a proporção
         canvas.style.aspectRatio = `${settings.width} / ${settings.height}`;
-        
-        // 2. Reseta estilos do vídeo para evitar distorção
-        // O vídeo agora é apenas um "layer" dentro do canvas
-        vid.style.width = '100%';
-        vid.style.height = '100%';
-        
-        // Importante: 'contain' garante que vemos todo o vídeo sem distorção inicial.
-        // Futuramente, para Pan/Crop, isso pode mudar para 'cover' ou tamanhos manuais.
-        vid.style.objectFit = 'contain'; 
         
         // Opcional: Log para debug
         console.log(`[UIManager] Viewport atualizada para ${settings.width}x${settings.height}`);
