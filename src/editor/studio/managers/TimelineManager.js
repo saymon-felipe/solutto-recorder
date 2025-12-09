@@ -456,6 +456,41 @@ export class TimelineManager {
             this._bindLaneEvents(lane, track);
             track.clips.forEach(clip => {
                 const clipEl = this._createClipElement(clip, track.id);
+
+                if (['video', 'image'].includes(clip.type)) {
+                    const btnPan = document.createElement('div');
+                    btnPan.className = 'clip-tool-btn pan-crop-btn';
+                    btnPan.innerHTML = '<i class="fa-solid fa-crop-simple"></i>';
+                    btnPan.title = "Pan/Crop";
+                    
+                    btnPan.style.cssText = `
+                        position: absolute;
+                        bottom: 2px;
+                        right: 2px;
+                        width: 20px;
+                        height: 20px;
+                        background: rgba(0,0,0,0.7);
+                        color: white;
+                        border-radius: 3px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 10px;
+                        cursor: pointer;
+                        z-index: 100; /* Aumentei o z-index por segurança */
+                    `;
+
+                    btnPan.onmousedown = (e) => {
+                        e.preventDefault();  
+                        e.stopPropagation();
+                        
+                        console.log("Entrou no Pan/Crop:", clip.name);
+                        this.studio.uiManager.openPanCropModal(clip);
+                    };
+
+                    clipEl.appendChild(btnPan);
+                }
+
                 lane.appendChild(clipEl);
             });
             container.appendChild(el);

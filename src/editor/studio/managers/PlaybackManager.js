@@ -267,6 +267,7 @@ export class PlaybackManager {
             }
             imgEl.style.display = 'block';
             imgEl.style.opacity = clip.level !== undefined ? clip.level : 1;
+            this._applyClipTransform(imgEl, clip);
             return;
         }
 
@@ -281,6 +282,8 @@ export class PlaybackManager {
         videoEl.style.display = 'block';
         videoEl.style.opacity = clip.level !== undefined ? clip.level : 1;
         videoEl.muted = clip.muted === true; 
+
+        this._applyClipTransform(imgEl, clip);
 
         let localTime = (globalTime - clip.start) + clip.offset;
         if (asset.baseDuration && localTime > asset.baseDuration) {
@@ -297,6 +300,30 @@ export class PlaybackManager {
         } else if (!this.isPlaying && !videoEl.paused) {
             videoEl.pause();
         }
+    }
+
+    _applyClipTransform(element, clip) {
+        if (!clip || !element) return;
+        
+        const t = clip.transform || { 
+            x: 0, y: 0, 
+            width: 100, height: 100, 
+            rotation: 0 
+        };
+
+        const transform = `
+            translate(-50%, -50%) 
+            translate(${t.x}px, ${t.y}px) 
+            rotate(${t.rotation}deg) 
+            scale(${t.width / 100}, ${t.height / 100})
+        `;
+
+        element.style.transform = transform;
+        
+        element.style.position = 'absolute';
+        element.style.left = '50%';
+        element.style.top = '50%';
+        element.style.transformOrigin = 'center center';
     }
 
     _syncAudioTrack(layer, clip, globalTime) {

@@ -4,6 +4,9 @@ export class UIManager {
     constructor(studio) {
         this.studio = studio;
         this.studio.historyManager = new HistoryManager(studio);
+
+        this.activeClip = null;
+        this.pancropZoom = 1;
     }
 
     buildUI() {
@@ -146,6 +149,108 @@ export class UIManager {
                 }
 
                 @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+                #modal-pan-crop {
+                    min-width: 600px;
+                    min-height: 400px;
+                    resize: both; /* Permite redimensionar a janela */
+                    overflow: hidden; /* Oculta o handler nativo feio, controlamos via flex */
+                    display: flex;
+                    flex-direction: column;
+                    background-color: #1e1e1e;
+                    border: 1px solid #333;
+                    box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+                }
+
+                .pc-layout {
+                    display: flex;
+                    flex: 1;
+                    overflow: hidden; /* Impede scroll na janela inteira */
+                    height: 100%;
+                }
+
+                .pc-workspace {
+                    flex: 1;
+                    background: #111;
+                    position: relative;
+                    overflow: hidden;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background-image: radial-gradient(#333 1px, transparent 1px);
+                    background-size: 20px 20px;
+                }
+
+                .pc-sidebar {
+                    width: 280px;
+                    min-width: 250px;
+                    background: #252526;
+                    border-left: 1px solid #333;
+                    padding: 15px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 15px;
+                    overflow-y: auto;
+                    z-index: 10;
+                }
+
+                /* Inputs Modernos */
+                .pc-input-group {
+                    background: #2d2d30;
+                    padding: 10px;
+                    border-radius: 6px;
+                    border: 1px solid #3e3e42;
+                }
+                .pc-label {
+                    display: block;
+                    font-size: 11px;
+                    color: #aaa;
+                    margin-bottom: 8px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    font-weight: 600;
+                }
+                .pc-row { display: flex; gap: 8px; align-items: center; }
+                
+                .pc-input {
+                    background: #181818;
+                    border: 1px solid #444;
+                    color: #fff;
+                    padding: 6px 8px;
+                    border-radius: 4px;
+                    font-family: 'Consolas', monospace;
+                    font-size: 12px;
+                    width: 100%;
+                    transition: border-color 0.2s;
+                }
+                .pc-input:focus { border-color: #0078d7; outline: none; }
+                
+                .pc-checkbox-label {
+                    font-size: 12px;
+                    color: #ddd;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    cursor: pointer;
+                    user-select: none;
+                }
+
+                .vegas-btn {
+                    background: #3a3a3d;
+                    border: 1px solid #555;
+                    color: white;
+                    padding: 8px 15px;
+                    cursor: pointer;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    transition: background 0.2s;
+                }
+                .vegas-btn:hover { background: #505055; }
+                
+                /* Handler de Redimensionamento do Modal Customizado (visual) */
+                ::-webkit-resizer {
+                    background-color: transparent;
+                }
             </style>
         `;
         
@@ -365,7 +470,63 @@ export class UIManager {
                     </div>
                 </div>
             </div>
+
+            <div id="modal-pan-crop" class="hidden" style="position: fixed; top: 50%; left: 50%; width: 900px; height: 600px; z-index: 2000;">
+                <div class="vegas-header" id="pc-header" style="cursor: move; padding: 10px 15px; background: #333; border-bottom: 1px solid #111; flex-shrink: 0;">
+                    <span style="font-weight:600; color:#eee;"><i class="fa-solid fa-crop-simple"></i> &nbsp;Pan/Crop Event FX</span>
+                    <button id="btn-pc-close" style="background:transparent; border:none; color:#aaa; cursor:pointer; font-size:14px;"><i class="fa-solid fa-times"></i></button>
+                </div>
+                
+                <div class="pc-layout">
+                    <div class="pc-workspace" id="pancrop-workspace">
+                        <canvas id="pancrop-canvas"></canvas>
+                        <div style="position: absolute; bottom: 10px; left: 10px; color: #555; font-size: 10px; pointer-events: none;">
+                            Mouse Wheel: Zoom Workspace | Drag: Move/Resize
+                        </div>
+                    </div>
+
+                    <div class="pc-sidebar">
+                        
+                        <div class="pc-input-group">
+                            <label class="pc-label"><i class="fa-solid fa-arrows-up-down-left-right"></i> Posição (Offset Px)</label>
+                            <div class="pc-row">
+                                <input type="number" id="pc-pos-x" class="pc-input" placeholder="X">
+                                <input type="number" id="pc-pos-y" class="pc-input" placeholder="Y">
+                            </div>
+                        </div>
+
+                        <div class="pc-input-group">
+                            <label class="pc-label"><i class="fa-solid fa-expand"></i> Dimensão (Zoom %)</label>
+                            <div class="pc-row">
+                                <input type="number" id="pc-width" class="pc-input" step="1" placeholder="W">
+                                <input type="number" id="pc-height" class="pc-input" step="1" placeholder="H">
+                            </div>
+                            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #3e3e42;">
+                                <label class="pc-checkbox-label">
+                                    <input type="checkbox" id="pc-lock-aspect"> 
+                                    <i class="fa-solid fa-link"></i> Bloquear Proporção
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="pc-input-group">
+                            <label class="pc-label"><i class="fa-solid fa-rotate"></i> Rotação (Graus)</label>
+                            <div class="pc-row">
+                                <input type="range" id="pc-rot-slider" min="-180" max="180" step="1" style="flex:1; cursor:pointer;">
+                                <input type="number" id="pc-rotation" class="pc-input" style="width: 60px; text-align:center;">
+                            </div>
+                        </div>
+
+                        <div style="margin-top: auto;">
+                            <button id="pc-btn-reset" class="vegas-btn" style="width: 100%;">
+                                <i class="fa-solid fa-rotate-left"></i> Resetar Transformação
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         `;
+        
         document.body.appendChild(div);
 
         setTimeout(() => {
@@ -425,6 +586,411 @@ export class UIManager {
         }
     }
 
+    openPanCropModal(clip) {
+        this.activeClip = clip;
+        this.pancropZoom = 1;
+        const modal = document.getElementById('modal-pan-crop');
+        const btnClose = document.getElementById('btn-pc-close');
+        
+        if(!modal) return;
+
+        if (!modal.style.top || modal.style.top === "50%") {
+            const rect = modal.getBoundingClientRect();
+            modal.style.top = `${(window.innerHeight - 600)/2}px`;
+            modal.style.left = `${(window.innerWidth - 900)/2}px`;
+            modal.style.transform = "none";
+        }
+
+        if (!clip.transform) {
+            clip.transform = {
+                x: 0, y: 0,
+                width: 100, // %
+                height: 100, // %
+                rotation: 0,
+                maintainAspect: true
+            };
+        }
+
+        modal.classList.remove('hidden');
+
+        if (btnClose) btnClose.onclick = () => this.closePanCropModal();
+        
+        this._bindPanCropControls();     // Inputs
+        this._makeDraggable(modal);      // Janela
+        this._initCanvasInteractions();  // Canvas Interativo (Visual Editing)
+        this._renderPanCropCanvas();     // Desenho inicial
+    }
+
+    closePanCropModal() {
+        const modal = document.getElementById('modal-pan-crop');
+        if(modal) modal.classList.add('hidden');
+        this.activeClip = null;
+    }
+
+    _refreshActiveModalState() {
+        const modal = document.getElementById('modal-pan-crop');
+        
+        if (this.activeClip && modal && !modal.classList.contains('hidden')) {
+            const currentId = this.activeClip.id;
+            
+            let foundClip = null;
+            
+            if (this.studio.project && this.studio.project.tracks) {
+                for (const track of this.studio.project.tracks) {
+                    const c = track.clips.find(clip => clip.id === currentId);
+                    if (c) {
+                        foundClip = c;
+                        break;
+                    }
+                }
+            }
+
+            if (foundClip) {
+                console.log("Recuperando referência do clip após Undo:", foundClip.name);
+                this.activeClip = foundClip; 
+                
+                if (this._updatePanCropInputs) this._updatePanCropInputs(); 
+                
+                this._renderPanCropCanvas(); 
+            } else {
+                this.closePanCropModal();
+            }
+        }
+    }
+
+    _makeDraggable(elmnt) {
+        const header = document.getElementById("pc-header");
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        
+        if (!header) return;
+
+        header.onmousedown = (e) => {
+            e.preventDefault();
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            document.onmouseup = closeDragElement;
+            document.onmousemove = elementDrag;
+        };
+
+        function elementDrag(e) {
+            e.preventDefault();
+            pos1 = pos3 - e.clientX;
+            pos2 = pos4 - e.clientY;
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
+            elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
+        }
+
+        function closeDragElement() {
+            document.onmouseup = null;
+            document.onmousemove = null;
+        }
+    }
+
+    _bindPanCropControls() {
+        if (!this.activeClip) return;
+        const t = this.activeClip.transform;
+        
+        const ids = ['pc-pos-x', 'pc-pos-y', 'pc-width', 'pc-height', 'pc-rotation', 'pc-rot-slider', 'pc-lock-aspect', 'pc-btn-reset'];
+        const els = {};
+        ids.forEach(id => els[id] = document.getElementById(id));
+
+        if(!els['pc-pos-x']) return;
+
+        // Set Values
+        const updateUIFromData = () => {
+            els['pc-pos-x'].value = Math.round(this.activeClip.transform.x);
+            els['pc-pos-y'].value = Math.round(this.activeClip.transform.y);
+            els['pc-width'].value = Math.round(this.activeClip.transform.width);
+            els['pc-height'].value = Math.round(this.activeClip.transform.height);
+            els['pc-rotation'].value = Math.round(this.activeClip.transform.rotation);
+            els['pc-rot-slider'].value = Math.round(this.activeClip.transform.rotation);
+            els['pc-lock-aspect'].checked = this.activeClip.transform.maintainAspect;
+        };
+
+        updateUIFromData();
+
+        // Update Logic
+        const commitChange = (recordHistory = false) => {
+            const t = this.activeClip.transform;
+            const lock = els['pc-lock-aspect'].checked;
+            
+            let newW = parseFloat(els['pc-width'].value) || 100;
+            let newH = parseFloat(els['pc-height'].value) || 100;
+
+            if (lock && document.activeElement === els['pc-width']) {
+                const ratio = t.height / t.width; 
+                if(t.width !== 0) newH = newW * (t.height / t.width);
+            } else if (lock && document.activeElement === els['pc-height']) {
+                if(t.height !== 0) newW = newH * (t.width / t.height);
+            }
+
+            this.activeClip.transform = {
+                x: parseFloat(els['pc-pos-x'].value) || 0,
+                y: parseFloat(els['pc-pos-y'].value) || 0,
+                width: newW,
+                height: newH,
+                rotation: parseFloat(els['pc-rotation'].value) || 0,
+                maintainAspect: lock
+            };
+
+            if (lock) updateUIFromData();
+
+            this.studio.markUnsavedChanges();
+            this._renderPanCropCanvas();
+            if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+            
+            if (recordHistory) this.studio.historyManager.recordState();
+        };
+
+        // Bind Listeners
+        ['pc-pos-x', 'pc-pos-y', 'pc-width', 'pc-height', 'pc-rotation'].forEach(k => {
+            els[k].oninput = () => commitChange(false);
+            els[k].onchange = () => commitChange(true);
+        });
+
+        els['pc-rot-slider'].oninput = (e) => {
+            els['pc-rotation'].value = e.target.value;
+            commitChange(false);
+        };
+        els['pc-rot-slider'].onchange = () => commitChange(true);
+
+        els['pc-lock-aspect'].onchange = () => commitChange(true);
+
+        els['pc-btn-reset'].onclick = () => {
+            this.activeClip.transform = { x: 0, y: 0, width: 100, height: 100, rotation: 0, maintainAspect: true };
+            updateUIFromData();
+            commitChange(true);
+        };
+        
+        this._updatePanCropInputs = updateUIFromData;
+    }
+
+    _initCanvasInteractions() {
+        const canvas = document.getElementById('pancrop-canvas');
+        if (!canvas) return;
+
+        const newCanvas = canvas.cloneNode(true);
+        canvas.parentNode.replaceChild(newCanvas, canvas);
+        
+        let isDragging = false;
+        let dragMode = null; 
+        let startX = 0, startY = 0;
+        let initialTransform = null;
+        
+        newCanvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            
+            // Fator de zoom (10% por tick)
+            const delta = Math.sign(e.deltaY) * -1;
+            const factor = 1.1;
+
+            if (delta > 0) this.pancropZoom *= factor;
+            else this.pancropZoom /= factor;
+
+            // Limites de Zoom (0.1x até 5x)
+            this.pancropZoom = Math.max(0.1, Math.min(5, this.pancropZoom));
+
+            this._renderPanCropCanvas();
+        }, { passive: false });
+
+        // --- Helpers ---
+        const getMousePos = (evt) => {
+            const rect = newCanvas.getBoundingClientRect();
+            return {
+                x: evt.clientX - rect.left - newCanvas.width / 2,
+                y: evt.clientY - rect.top - newCanvas.height / 2
+            };
+        };
+
+        const rotatePoint = (x, y, angleDeg) => {
+            const rad = -angleDeg * Math.PI / 180;
+            return {
+                x: x * Math.cos(rad) - y * Math.sin(rad),
+                y: x * Math.sin(rad) + y * Math.cos(rad)
+            };
+        };
+
+        // --- Mouse Down (Hit Test) ---
+        newCanvas.onmousedown = (e) => {
+            if (!this.activeClip) return;
+            const mouse = getMousePos(e);
+            const t = this.activeClip.transform;
+            const projectW = (this.studio.project.settings || {width:1920}).width;
+            const projectH = (this.studio.project.settings || {height:1080}).height;
+
+            const scaleFit = Math.min(newCanvas.width / projectW, newCanvas.height / projectH) * 0.7 * this.pancropZoom;
+
+            // Converter mouse visual para espaço do objeto
+            const visualOffsetX = t.x * scaleFit; 
+            const visualOffsetY = t.y * scaleFit;
+            
+            const relX = mouse.x - visualOffsetX;
+            const relY = mouse.y - visualOffsetY;
+
+            const unrotated = rotatePoint(relX, relY, t.rotation);
+            
+            const objW = (projectW * (t.width / 100)) * scaleFit;
+            const objH = (projectH * (t.height / 100)) * scaleFit;
+            const halfW = objW / 2;
+            const halfH = objH / 2;
+
+            const handleSize = 8; 
+
+            if (Math.abs(unrotated.x - (-halfW)) < handleSize && Math.abs(unrotated.y - (-halfH)) < handleSize) dragMode = 'tl';
+            else if (Math.abs(unrotated.x - (halfW)) < handleSize && Math.abs(unrotated.y - (-halfH)) < handleSize) dragMode = 'tr';
+            else if (Math.abs(unrotated.x - (-halfW)) < handleSize && Math.abs(unrotated.y - (halfH)) < handleSize) dragMode = 'bl';
+            else if (Math.abs(unrotated.x - (halfW)) < handleSize && Math.abs(unrotated.y - (halfH)) < handleSize) dragMode = 'br';
+            else if (unrotated.x >= -halfW && unrotated.x <= halfW && unrotated.y >= -halfH && unrotated.y <= halfH) dragMode = 'move';
+            else return; 
+
+            isDragging = true;
+            startX = mouse.x;
+            startY = mouse.y;
+            initialTransform = { ...t };
+            
+            newCanvas.dataset.scaleFit = scaleFit;
+        };
+
+        // --- Mouse Move (Drag) ---
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging || !this.activeClip) return;
+            e.preventDefault();
+
+            const rect = newCanvas.getBoundingClientRect();
+            const currentX = e.clientX - rect.left - newCanvas.width / 2;
+            const currentY = e.clientY - rect.top - newCanvas.height / 2;
+            
+            const deltaX = currentX - startX;
+            const deltaY = currentY - startY;
+
+            // Recupera o scaleFit calculado no mousedown (consistência durante o drag)
+            const scaleFit = parseFloat(newCanvas.dataset.scaleFit || 1);
+            
+            const projectW = (this.studio.project.settings || {width:1920}).width;
+            const projectH = (this.studio.project.settings || {height:1080}).height;
+
+            const t = this.activeClip.transform;
+            const initT = initialTransform;
+
+            if (dragMode === 'move') {
+                t.x = initT.x + (deltaX / scaleFit);
+                t.y = initT.y + (deltaY / scaleFit);
+            } 
+            else {
+                const d = rotatePoint(deltaX, deltaY, initT.rotation);
+                
+                const dPercentW = ((d.x / scaleFit) / projectW) * 100;
+                const dPercentH = ((d.y / scaleFit) / projectH) * 100;
+
+                let newW = initT.width;
+                let newH = initT.height;
+
+                if (dragMode === 'br') { newW += dPercentW; newH += dPercentH; }
+                else if (dragMode === 'bl') { newW -= dPercentW; newH += dPercentH; }
+                else if (dragMode === 'tr') { newW += dPercentW; newH -= dPercentH; }
+                else if (dragMode === 'tl') { newW -= dPercentW; newH -= dPercentH; }
+
+                if (initT.maintainAspect) {
+                    const ratio = initT.width / initT.height;
+                    if (Math.abs(newW - initT.width) > Math.abs(newH - initT.height)) {
+                        newH = newW / ratio;
+                    } else {
+                        newW = newH * ratio;
+                    }
+                }
+                t.width = Math.max(1, newW);
+                t.height = Math.max(1, newH);
+            }
+
+            this.studio.markUnsavedChanges();
+            this._renderPanCropCanvas();
+            if(this._updatePanCropInputs) this._updatePanCropInputs();
+            if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                dragMode = null;
+                this.studio.historyManager.recordState();
+            }
+        });
+    }
+
+    _renderPanCropCanvas() {
+        const canvas = document.getElementById('pancrop-canvas');
+        if (!canvas || !this.activeClip) return;
+        
+        const parent = canvas.parentElement;
+        canvas.width = parent.clientWidth;
+        canvas.height = parent.clientHeight;
+        
+        const ctx = canvas.getContext('2d');
+        const { width: projectW, height: projectH } = this.studio.project.settings || { width: 1920, height: 1080 };
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const scaleFit = Math.min(canvas.width / projectW, canvas.height / projectH) * 0.7 * this.pancropZoom;
+        
+        ctx.save();
+        ctx.translate(canvas.width/2, canvas.height/2);
+        
+        // Desenhar Viewport (Tracejado)
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        const viewW = projectW * scaleFit;
+        const viewH = projectH * scaleFit;
+        ctx.strokeRect(-viewW/2, -viewH/2, viewW, viewH);
+        ctx.setLineDash([]);
+
+        // Label do Zoom (Feedback Visual)
+        ctx.fillStyle = "#555";
+        ctx.font = "10px monospace";
+        const zoomPct = Math.round(this.pancropZoom * 100);
+        ctx.fillText(`${projectW}x${projectH} (${zoomPct}%)`, -viewW/2, -viewH/2 - 5);
+
+        const t = this.activeClip.transform;
+        
+        ctx.translate(t.x * scaleFit, t.y * scaleFit);
+        ctx.rotate(t.rotation * Math.PI / 180);
+        
+        const objW = (projectW * (t.width / 100)) * scaleFit;
+        const objH = (projectH * (t.height / 100)) * scaleFit;
+        
+        ctx.fillStyle = 'rgba(0, 120, 215, 0.2)';
+        ctx.strokeStyle = '#0078d7';
+        ctx.lineWidth = 2;
+        ctx.fillRect(-objW/2, -objH/2, objW, objH);
+        ctx.strokeRect(-objW/2, -objH/2, objW, objH);
+        
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(0, 0, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Handles
+        const handleSize = 8;
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#0078d7';
+        
+        const handles = [
+            { x: -objW/2, y: -objH/2 },
+            { x: objW/2, y: -objH/2 },
+            { x: -objW/2, y: objH/2 },
+            { x: objW/2, y: objH/2 }
+        ];
+
+        handles.forEach(h => {
+            ctx.fillRect(h.x - handleSize/2, h.y - handleSize/2, handleSize, handleSize);
+            ctx.strokeRect(h.x - handleSize/2, h.y - handleSize/2, handleSize, handleSize);
+        });
+
+        ctx.restore();
+    }
+
     showToast(message) {
         const container = document.getElementById('studio-toast-container') || document.getElementById('studio-app');
         const toast = document.createElement('div');
@@ -474,11 +1040,13 @@ export class UIManager {
             if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !e.shiftKey) {
                 e.preventDefault();
                 this.studio.historyManager.undo();
+                this._refreshActiveModalState();
             }
 
             if ((e.ctrlKey || e.metaKey) && ((e.shiftKey && e.code === 'KeyZ') || e.code === 'KeyY')) {
                 e.preventDefault();
                 this.studio.historyManager.redo();
+                this._refreshActiveModalState();
             }
         });
     }
