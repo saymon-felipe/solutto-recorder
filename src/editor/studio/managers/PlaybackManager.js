@@ -226,7 +226,6 @@ export class PlaybackManager {
 
     /**
      * Desenha o frame composto no Canvas.
-     * CORRIGIDO: Seleciona corretamente Video ou Imagem e aplica transformações.
      */
     _drawCompositeFrame(ctx, cvWidth, cvHeight) {
         ctx.fillStyle = '#000000';
@@ -243,7 +242,6 @@ export class PlaybackManager {
             const layer = this.trackLayers.get(track.id);
             if (!layer) return;
 
-            // --- CORREÇÃO: Lógica robusta de seleção de elemento ---
             let domEl = null;
             if (layer.videoEl && layer.videoEl.style.display !== 'none') {
                 domEl = layer.videoEl;
@@ -251,25 +249,26 @@ export class PlaybackManager {
                 domEl = layer.imgEl;
             }
 
-            // Se não encontrou elemento visível ou vídeo não carregado, pula
             if (!domEl) return;
             if (domEl.tagName === 'VIDEO' && domEl.readyState < 2) return;
             
             ctx.save();
             
             let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
+            
+            // Aplica o fator de Fade
+            const fadeFactor = this._calculateFadeFactor(clip, currentTime);
+            alpha *= fadeFactor;
+
             ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
 
-            // --- CORREÇÃO: Defaults de Transformação (Spread operator) ---
             const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
             
-            // Aplica Matriz de Transformação (Pan/Crop)
             ctx.translate(cvWidth/2, cvHeight/2);
             ctx.translate(t.x, t.y);
             ctx.rotate(t.rotation * Math.PI / 180);
             ctx.scale(t.width/100, t.height/100);
 
-            // Object Fit Contain no Canvas
             const nw = domEl.videoWidth || domEl.naturalWidth || cvWidth;
             const nh = domEl.videoHeight || domEl.naturalHeight || cvHeight;
             
@@ -366,9 +365,13 @@ export class PlaybackManager {
         if(!asset) return;
 
         let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
+        
+        // Aplica o fator de Fade
+        const fadeFactor = this._calculateFadeFactor(clip, time);
+        alpha *= fadeFactor;
+        
         alpha = Math.max(0, Math.min(1, alpha));
 
-        // Aplica Transform no DOM (para preview visual fora da renderização)
         const applyDOMTransform = (el) => {
             this._applyClipTransform(el, clip);
         };
@@ -377,7 +380,7 @@ export class PlaybackManager {
             videoEl.style.display = 'none'; videoEl.pause();
             if(imgEl.src !== asset.url) imgEl.src = asset.url;
             imgEl.style.display = 'block'; 
-            imgEl.style.opacity = alpha;
+            imgEl.style.opacity = alpha; // Opacidade calculada
             applyDOMTransform(imgEl);
             return;
         }
@@ -389,7 +392,7 @@ export class PlaybackManager {
             videoEl.load();
         }
         videoEl.style.display = 'block';
-        videoEl.style.opacity = alpha;
+        videoEl.style.opacity = alpha; // Opacidade calculada
         videoEl.muted = clip.muted === true;
         applyDOMTransform(videoEl);
 
@@ -430,6 +433,36 @@ export class PlaybackManager {
         element.style.transformOrigin = 'center center';
     }
 
+    /**
+     * Calcula o fator de atenuação (0.0 a 1.0) baseado no Fade In/Out do clipe.
+     * Usa uma curva senoidal (Ease-In-Out) para suavidade igual ao visual da timeline.
+     */
+    _calculateFadeFactor(clip, globalTime) {
+        if (!clip) return 1;
+
+        const timeInClip = globalTime - clip.start;
+        const duration = clip.duration;
+        const fadeIn = clip.fadeIn || 0;
+        const fadeOut = clip.fadeOut || 0;
+
+        let factor = 1.0;
+
+        // Lógica de Fade In
+        if (fadeIn > 0 && timeInClip < fadeIn) {
+            const progress = Math.max(0, timeInClip / fadeIn);
+            // Fórmula Ease-In-Out Sine: 0.5 * (1 - cos(p * pi))
+            factor = 0.5 * (1 - Math.cos(progress * Math.PI));
+        } 
+        // Lógica de Fade Out
+        else if (fadeOut > 0 && timeInClip > (duration - fadeOut)) {
+            const remaining = duration - timeInClip;
+            const progress = Math.max(0, remaining / fadeOut);
+            factor = 0.5 * (1 - Math.cos(progress * Math.PI));
+        }
+
+        return Math.max(0, Math.min(1, factor));
+    }
+
     _syncAudioTrack(layer, clip, time) {
         const { audioEl } = layer;
         if(!audioEl) return;
@@ -449,6 +482,11 @@ export class PlaybackManager {
 
         let vol = clip.level !== undefined ? clip.level : (clip.volume || 1);
         if(vol > 1) vol = vol/100;
+        
+        // Aplica o fator de Fade ao volume
+        const fadeFactor = this._calculateFadeFactor(clip, time);
+        vol *= fadeFactor;
+
         audioEl.volume = Math.max(0, Math.min(1, vol));
         audioEl.muted = layer.muted || false;
 
@@ -459,15 +497,7 @@ export class PlaybackManager {
         }
 
         const isRendering = this.studio.renderManager && this.studio.renderManager.isRendering;
-        
-        // CORREÇÃO CRÍTICA:
-        // Só toca se estiver 'playing' OU 'rendering', MAS...
-        // Se estiver renderizando e nós PAUSAMOS explicitamente (fase de conversão), NÃO toque.
         const shouldPlay = this.isPlaying || (isRendering && this.isPlaying); 
-
-        // Na prática, durante o render, this.isPlaying é true. 
-        // Quando entra no _finishRender, chamamos pause(), this.isPlaying vira false.
-        // Então shouldPlay vira false, e o áudio para.
         
         if (shouldPlay) {
             if(audioEl.paused) audioEl.play().catch(()=>{});

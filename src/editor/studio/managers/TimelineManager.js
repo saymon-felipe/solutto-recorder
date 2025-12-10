@@ -278,7 +278,10 @@ export class TimelineManager {
             const toDeselect = this.selectedClips.filter(s => s.clip.id !== this.lastFocusedClipId);
             toDeselect.forEach(item => {
                 const domEl = this._findDomElement(item.clip.id);
-                if(domEl) domEl.classList.remove('selected');
+                if(domEl) {
+                    domEl.classList.remove('selected');
+                    domEl.style.borderColor = 'transparent'; 
+                }
             });
             this.selectedClips = this.selectedClips.filter(s => s.clip.id === this.lastFocusedClipId);
         }
@@ -310,13 +313,19 @@ export class TimelineManager {
         if (!this.selectedClips.some(s => s.clip.id === clip.id)) {
             this.selectedClips.push({ clip, trackId });
             const el = domElement || this._findDomElement(clip.id);
-            if (el) el.classList.add('selected');
+            if (el) {
+                el.classList.add('selected');
+                el.style.borderColor = '#2196F3';
+            }
         }
     }
 
     _removeFromSelection(clipId) {
         const domEl = this._findDomElement(clipId);
-        if (domEl) domEl.classList.remove('selected');
+        if (domEl) {
+            domEl.classList.remove('selected');
+            domEl.style.borderColor = 'transparent';
+        }
         this.selectedClips = this.selectedClips.filter(s => s.clip.id !== clipId);
     }
 
@@ -339,7 +348,10 @@ export class TimelineManager {
     _clearSelection() {
         this.selectedClips.forEach(s => {
             const domEl = this._findDomElement(s.clip.id);
-            if(domEl) domEl.classList.remove('selected');
+            if(domEl) {
+                domEl.classList.remove('selected');
+                domEl.style.borderColor = 'transparent'; 
+            }
         });
         this.selectedClips = [];
     }
@@ -579,12 +591,26 @@ export class TimelineManager {
         const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
         if(!asset) return document.createElement('div');
 
+        if (typeof clip.fadeIn === 'undefined') clip.fadeIn = 0;
+        if (typeof clip.fadeOut === 'undefined') clip.fadeOut = 0;
+
         const el = document.createElement("div");
         el.className = `clip type-${clip.type}`;
         el.dataset.clipId = clip.id;
         
+        // 1. border-box: garante que a borda não aumente o tamanho total.
+        // 2. border-width fixo: reserva o espaço da borda para não haver pulo no clique.
+        el.style.boxSizing = "border-box";
+        el.style.borderWidth = "2px";
+        el.style.borderStyle = "solid";
+        
         const isSelected = this.selectedClips.some(s => s.clip.id === clip.id);
-        if (isSelected) el.classList.add('selected');
+        if (isSelected) {
+            el.classList.add('selected');
+            el.style.borderColor = '#2196F3'; // Azul de seleção
+        } else {
+            el.style.borderColor = 'transparent'; // Borda invisível (mas ocupa espaço)
+        }
         
         el.style.left = (clip.start * this.studio.project.zoom) + "px";
         el.style.width = (clip.duration * this.studio.project.zoom) + "px";
@@ -592,16 +618,31 @@ export class TimelineManager {
         const faderTop = (1 - clip.level) * 100;
         const isVideo = clip.type === 'video';
 
+        // O SVG agora é posicionado em -2px (top/left) e cresce +4px (width/height)
+        // para cobrir exatamente a área da borda, garantindo que o fade vá até o limite visual.
         el.innerHTML = `
-            <div class="fader-handle" data-action="fader" style="top: ${faderTop}%" title="Nível: ${Math.round(clip.level*100)}%"></div>
+            <svg class="fade-curve-layer" preserveAspectRatio="none" style="position:absolute; top:-2px; left:-2px; width:calc(100% + 4px); height:calc(100% + 4px); pointer-events:none; z-index:1; opacity:0.6;">
+                <path class="fade-path-fill" fill="rgba(0,0,0,0.2)" d=""></path>
+                <path class="fade-path-stroke" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="1.5" vector-effect="non-scaling-stroke" d=""></path>
+            </svg>
+
+            <div class="fade-handle fade-in" data-action="fade-in" title="Fade In: 0.0s"></div>
+            <div class="fade-handle fade-out" data-action="fade-out" title="Fade Out: 0.0s"></div>
+
+            <div class="fader-handle" data-action="fader" style="top: ${faderTop}%; z-index: 25;" title="Nível: ${Math.round(clip.level*100)}%"></div>
             <div class="fader-line" style="top: ${faderTop}%"></div>
             ${isVideo ? `<div class="clip-opacity-overlay" style="opacity: ${1 - clip.level}"></div>` : ''}
             
-            <div class="clip-name">${clip.name}</div>
-            <div class="resize-handle right" data-action="resize"></div>
+            <div class="clip-name" style="z-index:6; position:relative;">${clip.name}</div>
+            <div class="resize-handle right" data-action="resize" style="z-index: 25;"></div>
         `;
+        
+        this._injectFadeStyles(el);
+        
+        // Renderiza visual inicial. Usa requestAnimationFrame para garantir 
+        // que o elemento já tenha altura calculada pelo browser.
+        requestAnimationFrame(() => this._updateFadeVisuals(clip, el));
 
-        // Marcadores de Loop
         if (clip.duration > asset.baseDuration) {
             const loops = Math.floor(clip.duration / asset.baseDuration);
             for(let i=1; i<=loops; i++) {
@@ -612,16 +653,19 @@ export class TimelineManager {
             }
         }
 
-        // Eventos do Clip (Mover, Resize, Fader)
         el.onmousedown = (e) => {
             e.stopPropagation(); 
-            
             const startX = e.clientX;
             const startY = e.clientY;
+            const action = e.target.dataset.action;
+
+            if (action === 'fade-in' || action === 'fade-out') {
+                this._startFade(e, clip, el, action);
+                return;
+            }
 
             this._handleSelection(e, clip, trackId, el);
             
-            const action = e.target.dataset.action;
             if (action === 'resize') {
                 this._startResize(e, clip, el, asset.baseDuration);
             } else if (action === 'fader') {
@@ -630,10 +674,9 @@ export class TimelineManager {
                 this._startMove(e, clip, el);
             }
 
-            // Snap no clique se não arrastou
             const onMouseUpCheck = (ev) => {
                 const dist = Math.sqrt(Math.pow(ev.clientX - startX, 2) + Math.pow(ev.clientY - startY, 2));
-                if (dist < 5) {
+                if (dist < 5 && !action) { 
                     const lane = el.closest('.track-lane');
                     if (lane) {
                         const rect = lane.getBoundingClientRect();
@@ -651,6 +694,131 @@ export class TimelineManager {
         this.studio.historyManager.recordState();
 
         return el;
+    }
+
+    /**
+     * Injeta estilos e comportamentos visuais para os handles de fade.
+     * Ajustado: top: -2px para alinhar com a borda (Box Model fix).
+     */
+    _injectFadeStyles(el) {
+        const normalColor = '#2196F3';
+        const hoverColor = '#64B5F6'; 
+
+        const handleStyle = `
+            position: absolute; top: -2px; width: 10px; height: 10px; 
+            background-color: ${normalColor}; border: 1px solid rgba(255,255,255,0.8); 
+            z-index: 30; cursor: ew-resize;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            transition: background-color 0.1s ease;
+        `;
+        
+        const setupHandle = (handle, isLeft) => {
+            if (!handle) return;
+            
+            handle.style.cssText = handleStyle + (isLeft 
+                ? "left: 0; border-bottom-right-radius: 4px;" 
+                : "right: 0; border-bottom-left-radius: 4px;"
+            );
+            
+            handle.onmouseenter = () => handle.style.backgroundColor = hoverColor;
+            handle.onmouseleave = () => handle.style.backgroundColor = normalColor;
+        };
+
+        setupHandle(el.querySelector('.fade-in'), true);
+        setupHandle(el.querySelector('.fade-out'), false);
+    }
+
+    _startFade(e, clip, el, type) {
+        const startX = e.clientX;
+        const initialFadeIn = clip.fadeIn || 0;
+        const initialFadeOut = clip.fadeOut || 0;
+        const duration = clip.duration;
+        const zoom = this.studio.project.zoom;
+
+        const preState = this.studio.historyManager._createSnapshot();
+        let didChange = false;
+
+        const onMove = (ev) => {
+            const deltaPx = ev.clientX - startX;
+            const deltaSec = deltaPx / zoom;
+            
+            didChange = true;
+
+            if (type === 'fade-in') {
+                let newVal = Math.max(0, initialFadeIn + deltaSec);
+                newVal = Math.min(newVal, duration - initialFadeOut); // Não cruzar com fade out
+                clip.fadeIn = newVal;
+                
+                const handle = el.querySelector('.fade-in');
+                if(handle) handle.title = `Fade In: ${newVal.toFixed(2)}s`;
+
+            } else {
+                // Fade out: arrastar p/ esquerda (negativo) aumenta o tempo de fade
+                let newVal = Math.max(0, initialFadeOut - deltaSec);
+                newVal = Math.min(newVal, duration - initialFadeIn); // Não cruzar com fade in
+                clip.fadeOut = newVal;
+                
+                const handle = el.querySelector('.fade-out');
+                if(handle) handle.title = `Fade Out: ${newVal.toFixed(2)}s`;
+            }
+
+            this._updateFadeVisuals(clip, el);
+        };
+
+        const onUp = () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            if (didChange) this.studio.historyManager.pushManualState(preState);
+            this.studio.markUnsavedChanges();
+        };
+
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+    }
+
+    _updateFadeVisuals(clip, el) {
+        const zoom = this.studio.project.zoom;
+        const w = clip.duration * zoom;
+        const h = el.offsetHeight || 50; 
+        
+        const fiW = (clip.fadeIn || 0) * zoom;
+        const foW = (clip.fadeOut || 0) * zoom;
+        
+        // Nível atual (Teto da curva)
+        const level = (clip.level !== undefined) ? clip.level : 1;
+        const yTop = (1 - level) * h; // Calcula quantos pixels descer
+
+        // Aplica translação Y para os handles acompanharem o teto
+        const handleIn = el.querySelector('.fade-in');
+        const handleOut = el.querySelector('.fade-out');
+        
+        // translate(X, Y) -> Move horizontalmente pelo Fade, verticalmente pelo Nível
+        if(handleIn) handleIn.style.transform = `translate(${fiW}px, ${yTop}px)`;
+        if(handleOut) handleOut.style.transform = `translate(-${foW}px, ${yTop}px)`;
+
+        // SVG Drawing 
+        let d = `M 0,${h}`; 
+        
+        if (fiW > 0) {
+            d += ` C ${fiW/2},${h} ${fiW/2},${yTop} ${fiW},${yTop}`;
+        } else {
+            d += ` L 0,${yTop}`;
+        }
+        
+        d += ` L ${w - foW},${yTop}`;
+        
+        if (foW > 0) {
+            d += ` C ${w - foW/2},${yTop} ${w - foW/2},${h} ${w},${h}`;
+        } else {
+            d += ` L ${w},${h}`;
+        }
+
+        const fillD = d + ` L 0,${h} Z`; 
+        
+        const pathFill = el.querySelector('.fade-path-fill');
+        const pathStroke = el.querySelector('.fade-path-stroke');
+        if(pathFill) pathFill.setAttribute('d', fillD);
+        if(pathStroke) pathStroke.setAttribute('d', d);
     }
 
     // =========================================================================
@@ -759,6 +927,8 @@ export class TimelineManager {
                 if(overlay) overlay.style.opacity = 1 - newLevel;
                 if(handle) handle.title = `Nível: ${Math.round(newLevel*100)}%`;
                 
+                this._updateFadeVisuals(clip, el);
+                
                 syncPreview();
             }
         };
@@ -857,33 +1027,167 @@ export class TimelineManager {
         window.addEventListener("mouseup", onUp);
     }
 
+    /**
+     * Atualiza a linha guia magnética com offset corrigido e altura dinâmica.
+     */
+    _updateSnapLine(time, visible, top = 0, height = 0) {
+        let line = document.getElementById('timeline-snap-guide');
+        const tracksContainer = document.getElementById('studio-tracks');
+        
+        if (!visible) {
+            if (line) line.style.display = 'none';
+            return;
+        }
+
+        if (!line) {
+            line = document.createElement('div');
+            line.id = 'timeline-snap-guide';
+            // Usa translateX(-50%) para centralizar o traço exato no pixel do tempo
+            line.style.cssText = `
+                position: absolute;
+                width: 2px;
+                background-color: #4fc3f7; 
+                box-shadow: 0 0 8px #ff9800, 0 0 3px orange;
+                z-index: 9999;
+                pointer-events: none;
+                display: none;
+                transform: translateX(-50%);
+            `;
+            if (tracksContainer) tracksContainer.appendChild(line);
+        }
+
+        // Garante que esteja no container correto
+        if (tracksContainer && !tracksContainer.contains(line)) {
+            tracksContainer.appendChild(line);
+        }
+
+        const headerOffset = 120; 
+        const pos = (time * this.studio.project.zoom) + headerOffset;
+        
+        line.style.left = `${pos}px`;
+        line.style.top = `${top}px`;
+        line.style.height = `${height}px`;
+        line.style.display = 'block';
+    }
+
     _startResize(e, clip, el, baseDuration) {
         const startX = e.clientX; 
         const startW = clip.duration * this.studio.project.zoom;
+        const tracksContainer = document.getElementById('studio-tracks');
+        
+        // Coordenadas do container para cálculo relativo
+        const containerRect = tracksContainer.getBoundingClientRect();
+        
+        // Dados verticais do Clip ATUAL (que está sendo redimensionado)
+        const activeRect = el.getBoundingClientRect();
+        // Converte para coordenadas relativas ao container (considerando scroll)
+        const activeTop = (activeRect.top - containerRect.top) + tracksContainer.scrollTop;
+        const activeBottom = (activeRect.bottom - containerRect.top) + tracksContainer.scrollTop;
+
+        // 1. Mapeia pontos de snap com suas posições verticais (Top/Bottom)
+        const snapPoints = [];
+        
+        this.studio.project.tracks.forEach(track => {
+            track.clips.forEach(c => {
+                if (c.id === clip.id) return; 
+                
+                const cEl = this._findDomElement(c.id);
+                let top = 0, bottom = 0;
+                
+                if (cEl) {
+                    const r = cEl.getBoundingClientRect();
+                    top = (r.top - containerRect.top) + tracksContainer.scrollTop;
+                    bottom = (r.bottom - containerRect.top) + tracksContainer.scrollTop;
+                } else {
+                    // Fallback se o elemento não estiver renderizado (usa altura estimada da track)
+                    top = (track.index || 0) * 100; 
+                    bottom = top + 80; 
+                }
+
+                // Registra início e fim deste clip como ímãs
+                snapPoints.push({ time: c.start, top, bottom });
+                snapPoints.push({ time: c.start + c.duration, top, bottom });
+            });
+        });
+
+        // Adiciona a agulha (Playhead) como ímã global (altura total)
+        snapPoints.push({ 
+            time: this.studio.project.currentTime, 
+            top: 0, 
+            bottom: tracksContainer.scrollHeight 
+        });
         
         const preResizeState = this.studio.historyManager._createSnapshot();
         let didResize = false;
+
+        const SNAP_THRESHOLD_PX = 10; 
 
         const onMove = (ev) => {
             const delta = ev.clientX - startX;
             if (Math.abs(delta) < 2 && !didResize) return;
 
             didResize = true;
-            let newW = Math.max(10, startW + delta);
-            const rawDur = newW / this.studio.project.zoom;
-            const newDur = this._snapToFrame(rawDur); 
+            
+            let rawWidth = Math.max(10, startW + delta);
+            let rawDur = rawWidth / this.studio.project.zoom;
+            
+            const projectedEndTime = clip.start + rawDur;
+            
+            // 2. Lógica de Colisão
+            let bestSnapPoint = null;
+            let minDistancePx = Infinity;
+
+            for (const pointData of snapPoints) {
+                const distTime = Math.abs(pointData.time - projectedEndTime);
+                const distPx = distTime * this.studio.project.zoom;
+
+                if (distPx <= SNAP_THRESHOLD_PX && distPx < minDistancePx) {
+                    minDistancePx = distPx;
+                    bestSnapPoint = pointData;
+                }
+            }
+
+            let newDur;
+
+            if (bestSnapPoint) {
+                newDur = bestSnapPoint.time - clip.start;
+                
+                // A linha conecta o topo mais alto ao fundo mais baixo
+                // entre os dois elementos envolvidos (Clip Atual e Ímã)
+                const minTop = Math.min(activeTop, bestSnapPoint.top);
+                const maxBottom = Math.max(activeBottom, bestSnapPoint.bottom);
+                const lineHeight = maxBottom - minTop;
+                
+                this._updateSnapLine(bestSnapPoint.time, true, minTop, lineHeight);
+            } else {
+                newDur = this._snapToFrame(rawDur); 
+                this._updateSnapLine(0, false);
+            }
+            
+            if (newDur < (1 / 30)) newDur = (1 / 30);
+
+            // [VALIDAÇÃO FADE] Ajusta fades se o clip ficar menor que a soma deles
+            if ( (clip.fadeIn + clip.fadeOut) > newDur ) {
+                if (clip.fadeIn > newDur) clip.fadeIn = newDur;
+                clip.fadeOut = Math.max(0, newDur - clip.fadeIn);
+            }
             
             clip.duration = newDur;
             el.style.width = (newDur * this.studio.project.zoom) + "px"; 
+            
+            // [ATUALIZAÇÃO VISUAL] Redesenha a curva de fade (S-Curve) em tempo real
+            this._updateFadeVisuals(clip, el);
         };
 
         const onUp = () => { 
             window.removeEventListener("mousemove", onMove); 
             window.removeEventListener("mouseup", onUp); 
             
+            this._updateSnapLine(0, false); // Limpa a linha
+
             if (didResize) {
                 this.studio.historyManager.pushManualState(preResizeState);
-                console.log("[Timeline] Resize finalizado e estado salvo.");
+                console.log("[Timeline] Resize finalizado.");
             }
 
             this.renderTracks();
