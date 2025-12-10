@@ -1,20 +1,33 @@
 import { HistoryManager } from './HistoryManager.js';
 
+/**
+ * UIManager
+ * Responsável por construir a interface DOM, gerenciar modais (Settings, Pan/Crop),
+ * atualizar feedbacks visuais (Status Bar, Header) e manipular eventos de upload.
+ */
 export class UIManager {
+    
     constructor(studio) {
         this.studio = studio;
         this.studio.historyManager = new HistoryManager(studio);
 
+        // Estado do editor Pan/Crop
         this.activeClip = null;
         this.pancropZoom = 1;
     }
+
+    // =========================================================================
+    // CONSTRUÇÃO DA INTERFACE (DOM & CSS)
+    // =========================================================================
 
     buildUI() {
         const div = document.createElement("div");
         div.id = "studio-app";
 
+        // CSS Injetado diretamente para garantir encapsulamento
         const styles = `
             <style>
+                /* --- MODAIS E PAINEIS --- */
                 .vegas-modal {
                     background-color: #2d2d30;
                     color: #e0e0e0;
@@ -34,6 +47,8 @@ export class UIManager {
                     display: flex; justify-content: space-between; align-items: center;
                 }
                 .vegas-body { padding: 20px; }
+                
+                /* --- STATS GRID (RENDER) --- */
                 .vegas-stats-grid {
                     display: grid;
                     grid-template-columns: 1fr 1fr;
@@ -46,6 +61,7 @@ export class UIManager {
                 .vegas-stat-item { display: flex; flex-direction: column; font-size: 11px; color: #aaa; }
                 .vegas-stat-value { font-size: 14px; color: #fff; font-family: 'Consolas', 'Monaco', monospace; margin-top: 2px; }
                 
+                /* --- PROGRESS BAR --- */
                 .vegas-progress-track {
                     height: 18px;
                     background-color: #1e1e1e;
@@ -55,7 +71,7 @@ export class UIManager {
                 }
                 .vegas-progress-fill {
                     height: 100%;
-                    background: linear-gradient(to bottom, #00b7eb, #007acc); /* Azul Profissional */
+                    background: linear-gradient(to bottom, #00b7eb, #007acc);
                     width: 0%;
                     transition: width 0.2s;
                 }
@@ -81,6 +97,7 @@ export class UIManager {
                 }
                 .vegas-btn-abort:hover { background: #c42b1c; border-color: #c42b1c; color: white; }
 
+                /* --- PROJECT SETTINGS SELECTOR --- */
                 .ps-orientation-selector {
                     display: flex;
                     gap: 15px;
@@ -103,7 +120,7 @@ export class UIManager {
                 }
                 .ps-orientation-btn:hover { background: #3e3e3e; }
                 .ps-orientation-btn.selected {
-                    border-color: #0078d7; /* Azul Sony Vegas */
+                    border-color: #0078d7;
                     background: #252526;
                     color: white;
                     box-shadow: 0 0 10px rgba(0, 120, 215, 0.2);
@@ -112,7 +129,7 @@ export class UIManager {
                 .ps-orientation-btn span { font-size: 13px; font-weight: 600; }
                 .ps-orientation-btn small { font-size: 10px; color: #777; font-weight: normal; }
 
-                /* Toggle Avançado */
+                /* --- ADVANCED OPTIONS TOGGLE --- */
                 .ps-advanced-toggle {
                     color: #00b7eb;
                     cursor: pointer;
@@ -127,7 +144,6 @@ export class UIManager {
                 .ps-advanced-toggle i { transition: transform 0.2s; }
                 .ps-advanced-toggle.open i { transform: rotate(90deg); }
 
-                /* Container Avançado (Inputs) */
                 .ps-advanced-options {
                     display: none;
                     background: #1e1e1e;
@@ -138,23 +154,23 @@ export class UIManager {
                 }
                 .ps-advanced-options.show { display: block; animation: fadeIn 0.3s; }
 
-                /* Correção do Rodapé (Botão grudado) */
                 .ps-footer {
                     padding: 15px 20px;
                     background: #252526;
                     border-top: 1px solid #3e3e3e;
                     display: flex;
-                    justify-content: flex-end; /* Alinha à direita */
+                    justify-content: flex-end;
                     gap: 10px;
                 }
 
                 @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 
+                /* --- PAN/CROP MODAL --- */
                 #modal-pan-crop {
                     min-width: 600px;
                     min-height: 400px;
-                    resize: both; /* Permite redimensionar a janela */
-                    overflow: hidden; /* Oculta o handler nativo feio, controlamos via flex */
+                    resize: both;
+                    overflow: hidden;
                     display: flex;
                     flex-direction: column;
                     background-color: #1e1e1e;
@@ -165,7 +181,7 @@ export class UIManager {
                 .pc-layout {
                     display: flex;
                     flex: 1;
-                    overflow: hidden; /* Impede scroll na janela inteira */
+                    overflow: hidden;
                     height: 100%;
                 }
 
@@ -194,7 +210,7 @@ export class UIManager {
                     z-index: 10;
                 }
 
-                /* Inputs Modernos */
+                /* --- INPUTS MODERNOS --- */
                 .pc-input-group {
                     background: #2d2d30;
                     padding: 10px;
@@ -247,13 +263,11 @@ export class UIManager {
                 }
                 .vegas-btn:hover { background: #505055; }
                 
-                /* Handler de Redimensionamento do Modal Customizado (visual) */
-                ::-webkit-resizer {
-                    background-color: transparent;
-                }
+                ::-webkit-resizer { background-color: transparent; }
             </style>
         `;
         
+        // Estrutura HTML Principal
         div.innerHTML = styles + `
             <div class="studio-toolbar">
                 <div class="header-group">
@@ -352,7 +366,7 @@ export class UIManager {
                                 <option value="high">1080p (Full HD)</option>
                             </select>
                         </div>
-                        <div class="input-group">
+                        <div class="input-group" style="opacity: 0; position: absolute; left: -99999px; top: -99999px;">
                             <label for="render-quality">Qualidade (Preset):</label>
                             <select id="render-quality">
                                 <option value="veryfast">Baixa (Mais Rápido)</option>
@@ -363,11 +377,10 @@ export class UIManager {
                         <div class="input-group">
                             <label for="render-format">Formato de Saída:</label>
                             <select id="render-format">
-                                <option value="webm" selected>WebM</option>
-                                <option value="mp4">MP4</option>
+                                <option value="webm" selected>WebM (Original)</option>
+                                <option value="mp4">MP4 (Lento)</option>
                             </select>
                         </div>
-                        <div class="input-group"><small>Em caso de composições que incluem imagens com transparência, o formato recomendado é MP4 pela qualidade e rapidez de renderização.</small></div>
                     </div>
                     <div class="modal-actions">
                         <button class="studio-btn" id="btn-render-cancel">Cancelar</button>
@@ -383,7 +396,6 @@ export class UIManager {
                         <span id="render-percentage-text">0%</span>
                     </div>
                     <div class="vegas-body">
-                        
                         <div class="vegas-stats-grid">
                             <div class="vegas-stat-item">
                                 <span>Tempo Decorrido</span>
@@ -409,9 +421,7 @@ export class UIManager {
                         
                         <div class="vegas-log-box" id="render-log-text">Inicializando motor de renderização...</div>
 
-                        <button id="btn-render-abort" class="vegas-btn-abort">
-                            Cancelar
-                        </button>
+                        <button id="btn-render-abort" class="vegas-btn-abort">Cancelar</button>
                     </div>
                 </div>
             </div>
@@ -529,6 +539,7 @@ export class UIManager {
         
         document.body.appendChild(div);
 
+        // Binding inicial assíncrono para garantir que elementos existam
         setTimeout(() => {
             // Botões Header
             document.getElementById('btn-toolbox-save').onclick = () => this.studio.saveProject();
@@ -551,26 +562,26 @@ export class UIManager {
 
         this._bindEvents();
         this._bindTabEvents();
-
         this._bindProjectSettingsEvents();
     }
+
+    // =========================================================================
+    // GERENCIAMENTO DO HEADER E STATUS DO PROJETO
+    // =========================================================================
 
     updateProjectHeader(project, hasUnsavedChanges) {
         const nameEl = document.getElementById('header-project-name');
         const statusEl = document.getElementById('header-project-status');
         if (!nameEl || !statusEl) return;
 
-        // Lógica: Projeto Novo (sem ID) vs Projeto Salvo
         const isNewProject = !project.id; 
         
         if (isNewProject) {
-            // Caso: Não Salvo - <Hora Atual>
             const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
             nameEl.innerText = "Não Salvo";
             statusEl.innerHTML = `&mdash; Iniciado às ${timeStr}`;
             statusEl.style.color = "#aaa";
         } else {
-            // Caso: Projeto Aberto
             nameEl.innerText = project.name;
             
             if (hasUnsavedChanges) {
@@ -581,10 +592,154 @@ export class UIManager {
                     day: '2-digit', month: '2-digit', hour: '2-digit', minute:'2-digit' 
                 });
                 statusEl.innerHTML = `&bull; Salvo em ${dateStr}`;
-                statusEl.style.color = "#4caf50"; // Verde suave para indicar sucesso
+                statusEl.style.color = "#4caf50"; 
             }
         }
     }
+
+    updateStatusBar(tasks) {
+        const bar = document.getElementById('studio-status-bar');
+        const text = document.getElementById('studio-status-text');
+        const btn = document.getElementById('btn-studio-render');
+
+        if (tasks.length > 0) {
+            bar.classList.remove('hidden');
+            const current = tasks[tasks.length - 1];
+            text.innerText = `${current.label} (${tasks.length}...)`;
+            if (btn) btn.disabled = true;
+        } else {
+            bar.classList.add('hidden');
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    showToast(message) {
+        const container = document.getElementById('studio-toast-container') || document.getElementById('studio-app');
+        const toast = document.createElement('div');
+        toast.className = 'studio-toast';
+        toast.innerText = message;
+        container.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    // =========================================================================
+    // MODAL: CONFIGURAÇÕES DO PROJETO
+    // =========================================================================
+
+    promptProjectSettings() {
+        const modal = document.getElementById('project-settings-modal');
+        const inpW = document.getElementById('ps-width');
+        const inpH = document.getElementById('ps-height');
+        const btnConfirm = document.getElementById('btn-ps-confirm'); 
+        const buttons = document.querySelectorAll('.ps-orientation-btn');
+        
+        // Popula valores atuais
+        if (this.studio.project.settings) {
+            const { width, height } = this.studio.project.settings;
+            inpW.value = width;
+            inpH.value = height;
+
+            buttons.forEach(btn => btn.classList.remove('selected'));
+            const mode = width >= height ? 'landscape' : 'portrait';
+            const targetBtn = document.querySelector(`.ps-orientation-btn[data-mode="${mode}"]`);
+            if (targetBtn) targetBtn.classList.add('selected');
+        } else {
+             document.querySelector('.ps-orientation-btn[data-mode="landscape"]')?.classList.add('selected');
+        }
+
+        // Texto do Botão (Criar vs Salvar)
+        if (this.studio.project.id) {
+            btnConfirm.innerHTML = `Salvar Alterações <i class="fa-solid fa-check" style="margin-left:5px"></i>`;
+        } else {
+            btnConfirm.innerHTML = `Criar Projeto <i class="fa-solid fa-arrow-right" style="margin-left:5px"></i>`;
+        }
+        
+        modal.classList.remove('hidden');
+    }
+
+    _bindProjectSettingsEvents() {
+        const modal = document.getElementById('project-settings-modal');
+        const btnConfirm = document.getElementById('btn-ps-confirm');
+        const btnClose = document.getElementById('btn-ps-close');
+        const inpW = document.getElementById('ps-width');
+        const inpH = document.getElementById('ps-height');
+        
+        if (btnClose) {
+            btnClose.onclick = () => modal.classList.add('hidden');
+        }
+        
+        // Lógica dos Botões Seletores (Cards)
+        const buttons = document.querySelectorAll('.ps-orientation-btn');
+        buttons.forEach(btn => {
+            btn.onclick = () => {
+                buttons.forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+
+                const mode = btn.dataset.mode;
+                if (mode === 'landscape') {
+                    inpW.value = 1920;
+                    inpH.value = 1080;
+                } else if (mode === 'portrait') {
+                    inpW.value = 1080;
+                    inpH.value = 1920;
+                }
+            };
+        });
+
+        // Toggle Avançado
+        const toggleBtn = document.getElementById('btn-toggle-advanced');
+        const advContainer = document.getElementById('ps-advanced-container');
+        
+        toggleBtn.onclick = () => {
+            const isHidden = !advContainer.classList.contains('show');
+            if (isHidden) {
+                advContainer.classList.add('show');
+                toggleBtn.classList.add('open');
+            } else {
+                advContainer.classList.remove('show');
+                toggleBtn.classList.remove('open');
+            }
+        };
+
+        // Confirmação
+        btnConfirm.onclick = async () => {
+            const w = parseInt(inpW.value);
+            const h = parseInt(inpH.value);
+
+            if (w > 2560 || h > 2560) return alert("A resolução máxima é 2K (2560px) para garantir performance.");
+
+            const oldSettings = this.studio.project.settings || {};
+            const hasChanged = oldSettings.width !== w || oldSettings.height !== h;
+
+            this.studio.project.settings = { width: w, height: h };
+            
+            if (!this.studio.isFreshInit && hasChanged) {
+                this.studio.markUnsavedChanges();
+            }
+
+            this.updatePreviewViewport();
+            modal.classList.add('hidden');
+
+            if (this.studio.isFreshInit) {
+                this.studio.isFreshInit = false;
+                await this.studio.checkForPendingRecording();
+            }
+        };
+    }
+
+    updatePreviewViewport() {
+        const canvas = document.getElementById('studio-preview-canvas');
+        const settings = this.studio.project.settings || { width: 1920, height: 1080 };
+        
+        if (!canvas) return;
+
+        canvas.style.aspectRatio = `${settings.width} / ${settings.height}`;
+        console.log(`[UIManager] Viewport atualizada para ${settings.width}x${settings.height}`);
+    }
+
+    // =========================================================================
+    // SISTEMA PAN/CROP (EVENT FX)
+    // =========================================================================
 
     openPanCropModal(clip) {
         this.activeClip = clip;
@@ -592,8 +747,9 @@ export class UIManager {
         const modal = document.getElementById('modal-pan-crop');
         const btnClose = document.getElementById('btn-pc-close');
         
-        if(!modal) return;
+        if (!modal) return;
 
+        // Centraliza se for a primeira abertura
         if (!modal.style.top || modal.style.top === "50%") {
             const rect = modal.getBoundingClientRect();
             modal.style.top = `${(window.innerHeight - 600)/2}px`;
@@ -601,6 +757,7 @@ export class UIManager {
             modal.style.transform = "none";
         }
 
+        // Inicializa dados se não existirem
         if (!clip.transform) {
             clip.transform = {
                 x: 0, y: 0,
@@ -615,10 +772,10 @@ export class UIManager {
 
         if (btnClose) btnClose.onclick = () => this.closePanCropModal();
         
-        this._bindPanCropControls();     // Inputs
-        this._makeDraggable(modal);      // Janela
-        this._initCanvasInteractions();  // Canvas Interativo (Visual Editing)
-        this._renderPanCropCanvas();     // Desenho inicial
+        this._bindPanCropControls();     // Binda os inputs numéricos
+        this._makeDraggable(modal);      // Torna a janela arrastável
+        this._initCanvasInteractions();  // Inicializa a canvas interativa
+        this._renderPanCropCanvas();     // Desenha o estado inicial
     }
 
     closePanCropModal() {
@@ -630,9 +787,9 @@ export class UIManager {
     _refreshActiveModalState() {
         const modal = document.getElementById('modal-pan-crop');
         
+        // Se o modal estiver aberto durante um Undo/Redo, precisamos reconectar a referência do clipe
         if (this.activeClip && modal && !modal.classList.contains('hidden')) {
             const currentId = this.activeClip.id;
-            
             let foundClip = null;
             
             if (this.studio.project && this.studio.project.tracks) {
@@ -648,9 +805,7 @@ export class UIManager {
             if (foundClip) {
                 console.log("Recuperando referência do clip após Undo:", foundClip.name);
                 this.activeClip = foundClip; 
-                
                 if (this._updatePanCropInputs) this._updatePanCropInputs(); 
-                
                 this._renderPanCropCanvas(); 
             } else {
                 this.closePanCropModal();
@@ -690,15 +845,14 @@ export class UIManager {
 
     _bindPanCropControls() {
         if (!this.activeClip) return;
-        const t = this.activeClip.transform;
         
         const ids = ['pc-pos-x', 'pc-pos-y', 'pc-width', 'pc-height', 'pc-rotation', 'pc-rot-slider', 'pc-lock-aspect', 'pc-btn-reset'];
         const els = {};
         ids.forEach(id => els[id] = document.getElementById(id));
 
-        if(!els['pc-pos-x']) return;
+        if (!els['pc-pos-x']) return;
 
-        // Set Values
+        // Função para atualizar UI baseada nos dados do clip
         const updateUIFromData = () => {
             els['pc-pos-x'].value = Math.round(this.activeClip.transform.x);
             els['pc-pos-y'].value = Math.round(this.activeClip.transform.y);
@@ -711,7 +865,7 @@ export class UIManager {
 
         updateUIFromData();
 
-        // Update Logic
+        // Função para commitar alterações
         const commitChange = (recordHistory = false) => {
             const t = this.activeClip.transform;
             const lock = els['pc-lock-aspect'].checked;
@@ -719,8 +873,8 @@ export class UIManager {
             let newW = parseFloat(els['pc-width'].value) || 100;
             let newH = parseFloat(els['pc-height'].value) || 100;
 
+            // Mantém Aspect Ratio se travado
             if (lock && document.activeElement === els['pc-width']) {
-                const ratio = t.height / t.width; 
                 if(t.width !== 0) newH = newW * (t.height / t.width);
             } else if (lock && document.activeElement === els['pc-height']) {
                 if(t.height !== 0) newW = newH * (t.width / t.height);
@@ -744,7 +898,7 @@ export class UIManager {
             if (recordHistory) this.studio.historyManager.recordState();
         };
 
-        // Bind Listeners
+        // Binda Listeners nos inputs
         ['pc-pos-x', 'pc-pos-y', 'pc-width', 'pc-height', 'pc-rotation'].forEach(k => {
             els[k].oninput = () => commitChange(false);
             els[k].onchange = () => commitChange(true);
@@ -771,6 +925,7 @@ export class UIManager {
         const canvas = document.getElementById('pancrop-canvas');
         if (!canvas) return;
 
+        // Clone para remover listeners antigos
         const newCanvas = canvas.cloneNode(true);
         canvas.parentNode.replaceChild(newCanvas, canvas);
         
@@ -779,23 +934,20 @@ export class UIManager {
         let startX = 0, startY = 0;
         let initialTransform = null;
         
+        // Zoom na Workspace (Wheel)
         newCanvas.addEventListener('wheel', (e) => {
             e.preventDefault();
-            
-            // Fator de zoom (10% por tick)
             const delta = Math.sign(e.deltaY) * -1;
             const factor = 1.1;
 
             if (delta > 0) this.pancropZoom *= factor;
             else this.pancropZoom /= factor;
 
-            // Limites de Zoom (0.1x até 5x)
             this.pancropZoom = Math.max(0.1, Math.min(5, this.pancropZoom));
-
             this._renderPanCropCanvas();
         }, { passive: false });
 
-        // --- Helpers ---
+        // Helpers Matemáticos
         const getMousePos = (evt) => {
             const rect = newCanvas.getBoundingClientRect();
             return {
@@ -822,22 +974,20 @@ export class UIManager {
 
             const scaleFit = Math.min(newCanvas.width / projectW, newCanvas.height / projectH) * 0.7 * this.pancropZoom;
 
-            // Converter mouse visual para espaço do objeto
+            // Transforma coordenadas do mouse para o espaço local do objeto
             const visualOffsetX = t.x * scaleFit; 
             const visualOffsetY = t.y * scaleFit;
-            
             const relX = mouse.x - visualOffsetX;
             const relY = mouse.y - visualOffsetY;
-
             const unrotated = rotatePoint(relX, relY, t.rotation);
             
             const objW = (projectW * (t.width / 100)) * scaleFit;
             const objH = (projectH * (t.height / 100)) * scaleFit;
             const halfW = objW / 2;
             const halfH = objH / 2;
-
             const handleSize = 8; 
 
+            // Detecta onde clicou (Handles ou Corpo)
             if (Math.abs(unrotated.x - (-halfW)) < handleSize && Math.abs(unrotated.y - (-halfH)) < handleSize) dragMode = 'tl';
             else if (Math.abs(unrotated.x - (halfW)) < handleSize && Math.abs(unrotated.y - (-halfH)) < handleSize) dragMode = 'tr';
             else if (Math.abs(unrotated.x - (-halfW)) < handleSize && Math.abs(unrotated.y - (halfH)) < handleSize) dragMode = 'bl';
@@ -849,7 +999,6 @@ export class UIManager {
             startX = mouse.x;
             startY = mouse.y;
             initialTransform = { ...t };
-            
             newCanvas.dataset.scaleFit = scaleFit;
         };
 
@@ -864,8 +1013,6 @@ export class UIManager {
             
             const deltaX = currentX - startX;
             const deltaY = currentY - startY;
-
-            // Recupera o scaleFit calculado no mousedown (consistência durante o drag)
             const scaleFit = parseFloat(newCanvas.dataset.scaleFit || 1);
             
             const projectW = (this.studio.project.settings || {width:1920}).width;
@@ -879,8 +1026,8 @@ export class UIManager {
                 t.y = initT.y + (deltaY / scaleFit);
             } 
             else {
+                // Resize com rotação compensada
                 const d = rotatePoint(deltaX, deltaY, initT.rotation);
-                
                 const dPercentW = ((d.x / scaleFit) / projectW) * 100;
                 const dPercentH = ((d.y / scaleFit) / projectH) * 100;
 
@@ -932,12 +1079,13 @@ export class UIManager {
         
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
+        // Calcula escala para caber na tela mantendo proporção
         const scaleFit = Math.min(canvas.width / projectW, canvas.height / projectH) * 0.7 * this.pancropZoom;
         
         ctx.save();
         ctx.translate(canvas.width/2, canvas.height/2);
         
-        // Desenhar Viewport (Tracejado)
+        // Desenha Viewport (Tracejado)
         ctx.strokeStyle = '#555';
         ctx.lineWidth = 1;
         ctx.setLineDash([5, 5]);
@@ -946,12 +1094,13 @@ export class UIManager {
         ctx.strokeRect(-viewW/2, -viewH/2, viewW, viewH);
         ctx.setLineDash([]);
 
-        // Label do Zoom (Feedback Visual)
+        // Label do Zoom
         ctx.fillStyle = "#555";
         ctx.font = "10px monospace";
         const zoomPct = Math.round(this.pancropZoom * 100);
         ctx.fillText(`${projectW}x${projectH} (${zoomPct}%)`, -viewW/2, -viewH/2 - 5);
 
+        // Desenha Objeto
         const t = this.activeClip.transform;
         
         ctx.translate(t.x * scaleFit, t.y * scaleFit);
@@ -966,12 +1115,13 @@ export class UIManager {
         ctx.fillRect(-objW/2, -objH/2, objW, objH);
         ctx.strokeRect(-objW/2, -objH/2, objW, objH);
         
+        // Centro
         ctx.fillStyle = '#fff';
         ctx.beginPath();
         ctx.arc(0, 0, 4, 0, Math.PI * 2);
         ctx.fill();
 
-        // Handles
+        // Handles (Cantos)
         const handleSize = 8;
         ctx.fillStyle = '#fff';
         ctx.strokeStyle = '#0078d7';
@@ -991,21 +1141,15 @@ export class UIManager {
         ctx.restore();
     }
 
-    showToast(message) {
-        const container = document.getElementById('studio-toast-container') || document.getElementById('studio-app');
-        const toast = document.createElement('div');
-        toast.className = 'studio-toast';
-        toast.innerText = message;
-        container.appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
-    }
+    // =========================================================================
+    // EVENTOS GERAIS E SISTEMA DE ARQUIVOS
+    // =========================================================================
 
     _bindEvents() {
-        // Formatos que o FFmpeg WASM suporta de forma estável
         const ALLOWED_EXTENSIONS = [
             'mp4', 'webm', 'mov', 'mkv', 'ogg', 'avi', // Vídeo
-            'mp3', 'wav', 'ogg', 'aac', 'm4a', // Áudio
-            'png', 'jpg', 'jpeg', 'gif' // Imagem
+            'mp3', 'wav', 'ogg', 'aac', 'm4a',         // Áudio
+            'png', 'jpg', 'jpeg', 'gif'                // Imagem
         ];
 
         document.getElementById("studio-upload").onchange = async (e) => {
@@ -1019,14 +1163,13 @@ export class UIManager {
                 if (ALLOWED_EXTENSIONS.includes(ext)) {
                     validFiles.push(file);
                 } else {
-                    alert(`O formato de arquivo *.${ext} não é suportado pelo Studio. Formatos aceitos incluem: ${ALLOWED_EXTENSIONS.slice(0, 8).join(', ')}...`);
+                    alert(`O formato de arquivo *.${ext} não é suportado pelo Studio.`);
                 }
             }
 
             for (const f of validFiles) {
                 await this.studio.assetManager.importAsset(f, f.name);
             }
-            // Limpa o input para permitir o upload do mesmo arquivo novamente
             e.target.value = '';
         };
 
@@ -1034,15 +1177,16 @@ export class UIManager {
 
         document.addEventListener('keydown', (e) => {
             if (!this.studio.isActive) return;
-            
             if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
 
+            // Undo (Ctrl+Z)
             if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !e.shiftKey) {
                 e.preventDefault();
                 this.studio.historyManager.undo();
                 this._refreshActiveModalState();
             }
 
+            // Redo (Ctrl+Shift+Z ou Ctrl+Y)
             if ((e.ctrlKey || e.metaKey) && ((e.shiftKey && e.code === 'KeyZ') || e.code === 'KeyY')) {
                 e.preventDefault();
                 this.studio.historyManager.redo();
@@ -1065,22 +1209,6 @@ export class UIManager {
                 if (targetContent) targetContent.classList.remove('hidden');
             };
         });
-    }
-
-    updateStatusBar(tasks) {
-        const bar = document.getElementById('studio-status-bar');
-        const text = document.getElementById('studio-status-text');
-        const btn = document.getElementById('btn-studio-render');
-
-        if (tasks.length > 0) {
-            bar.classList.remove('hidden');
-            const current = tasks[tasks.length - 1];
-            text.innerText = `${current.label} (${tasks.length}...)`;
-            if (btn) btn.disabled = true;
-        } else {
-            bar.classList.add('hidden');
-            if (btn) btn.disabled = false;
-        }
     }
 
     async updateRecentProjectsList() {
@@ -1121,121 +1249,5 @@ export class UIManager {
         } catch (e) {
             console.error("Erro ao listar projetos:", e);
         }
-    }
-
-    _bindProjectSettingsEvents() {
-        const modal = document.getElementById('project-settings-modal');
-        const btnConfirm = document.getElementById('btn-ps-confirm');
-        const btnClose = document.getElementById('btn-ps-close');
-        const inpW = document.getElementById('ps-width');
-        const inpH = document.getElementById('ps-height');
-        
-        if (btnClose) {
-            btnClose.onclick = () => {
-                modal.classList.add('hidden');
-            };
-        }
-        
-        // 1. Lógica dos Botões Seletores (Cards)
-        const buttons = document.querySelectorAll('.ps-orientation-btn');
-        buttons.forEach(btn => {
-            btn.onclick = () => {
-                // Remove seleção anterior
-                buttons.forEach(b => b.classList.remove('selected'));
-                // Adiciona na atual
-                btn.classList.add('selected');
-
-                // Define valores baseados no modo
-                const mode = btn.dataset.mode;
-                if (mode === 'landscape') {
-                    inpW.value = 1920;
-                    inpH.value = 1080;
-                } else if (mode === 'portrait') {
-                    inpW.value = 1080;
-                    inpH.value = 1920;
-                }
-            };
-        });
-
-        // 2. Lógica do Toggle Avançado
-        const toggleBtn = document.getElementById('btn-toggle-advanced');
-        const advContainer = document.getElementById('ps-advanced-container');
-        
-        toggleBtn.onclick = () => {
-            const isHidden = !advContainer.classList.contains('show');
-            if (isHidden) {
-                advContainer.classList.add('show');
-                toggleBtn.classList.add('open');
-            } else {
-                advContainer.classList.remove('show');
-                toggleBtn.classList.remove('open');
-            }
-        };
-
-        // 3. Botão Confirmar
-        btnConfirm.onclick = async () => {
-            const w = parseInt(inpW.value);
-            const h = parseInt(inpH.value);
-
-            if (w > 2560 || h > 2560) return alert("A resolução máxima é 2K (2560px) para garantir performance.");
-
-            const oldSettings = this.studio.project.settings || {};
-            const hasChanged = oldSettings.width !== w || oldSettings.height !== h;
-
-            this.studio.project.settings = { width: w, height: h };
-            
-            if (!this.studio.isFreshInit && hasChanged) {
-                this.studio.markUnsavedChanges();
-            }
-
-            this.updatePreviewViewport();
-            modal.classList.add('hidden');
-
-            if (this.studio.isFreshInit) {
-                this.studio.isFreshInit = false;
-                await this.studio.checkForPendingRecording();
-            }
-        };
-    }
-
-    promptProjectSettings() {
-        const modal = document.getElementById('project-settings-modal');
-        const inpW = document.getElementById('ps-width');
-        const inpH = document.getElementById('ps-height');
-        const btnConfirm = document.getElementById('btn-ps-confirm'); 
-        const buttons = document.querySelectorAll('.ps-orientation-btn');
-        
-        if (this.studio.project.settings) {
-            const { width, height } = this.studio.project.settings;
-            inpW.value = width;
-            inpH.value = height;
-
-            buttons.forEach(btn => btn.classList.remove('selected'));
-            const mode = width >= height ? 'landscape' : 'portrait';
-            const targetBtn = document.querySelector(`.ps-orientation-btn[data-mode="${mode}"]`);
-            if (targetBtn) targetBtn.classList.add('selected');
-        } else {
-             document.querySelector('.ps-orientation-btn[data-mode="landscape"]')?.classList.add('selected');
-        }
-
-        if (this.studio.project.id) {
-            btnConfirm.innerHTML = `Salvar Alterações <i class="fa-solid fa-check" style="margin-left:5px"></i>`;
-        } else {
-            btnConfirm.innerHTML = `Criar Projeto <i class="fa-solid fa-arrow-right" style="margin-left:5px"></i>`;
-        }
-        
-        modal.classList.remove('hidden');
-    }
-
-    updatePreviewViewport() {
-        const canvas = document.getElementById('studio-preview-canvas');
-        
-        const settings = this.studio.project.settings || { width: 1920, height: 1080 };
-        
-        if (!canvas) return;
-
-        canvas.style.aspectRatio = `${settings.width} / ${settings.height}`;
-        
-        console.log(`[UIManager] Viewport atualizada para ${settings.width}x${settings.height}`);
     }
 }

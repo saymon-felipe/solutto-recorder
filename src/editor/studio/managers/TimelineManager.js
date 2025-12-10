@@ -1,48 +1,55 @@
-import { getHeaderWidth } from '../utils.js'; // fmtTime removido, usaremos formatação interna SMPTE
+import { getHeaderWidth } from '../utils.js'; 
 
 const FPS = 30;
-const FRAME_DURATION = 1 / FPS;
 
+/**
+ * TimelineManager
+ * Gerencia a lógica da linha do tempo, incluindo:
+ * - Manipulação de zoom e scroll
+ * - Renderização da régua e trilhas (tracks)
+ * - Lógica de seleção, movimentação e redimensionamento de clipes
+ * - Precisão de frames (Frame-perfect snapping)
+ */
 export class TimelineManager {
+    
     constructor(studio) {
         this.studio = studio;
+        
+        // Estado de Seleção e Foco
         this.selectedClips = [];
-        this.isScrubbing = false;
         this.lastFocusedClipId = null;
+        this.isScrubbing = false;
 
-        // Cache para virtualização da régua
+        // Cache para virtualização da régua (Performance)
         this.rulerTicksData = []; 
         this.lastRenderedRange = { start: -1, end: -1 };
     }
 
     init() {
         this._bindEvents();
-        // Inicializa com zoom ajustado
+        // Inicializa com um nível de zoom confortável
         this.setZoom(this.studio.project.zoom - 1);
     }
 
+    // =========================================================================
+    // EVENTOS GLOBAIS (Scroll, Zoom, Teclado)
+    // =========================================================================
+
     _bindEvents() {
         const scrollArea = document.getElementById('studio-scroll-area');
+        
         if (scrollArea) {
             scrollArea.addEventListener('scroll', () => {
                 this._syncRuler(scrollArea.scrollLeft);
             });
             
             scrollArea.addEventListener('wheel', (e) => {
-                if (e.ctrlKey) {
-                    // Zoom logic placeholder
-                }
-
+                if (e.ctrlKey) { /* Zoom logic */ }
                 e.preventDefault();
-                    
                 const project = this.studio.project;
                 const oldZoom = project.zoom;
-                
                 const delta = e.deltaY > 0 ? 0.9 : 1.1;
-                let newZoom = oldZoom * delta;
-
-                newZoom = Math.max(10, Math.min(newZoom, 600));
-
+                let newZoom = Math.max(10, Math.min(oldZoom * delta, 600));
                 if (newZoom === oldZoom) return;
 
                 const currentTime = project.currentTime;
@@ -56,20 +63,20 @@ export class TimelineManager {
             });
         }
 
-        // Seek na Régua
         const ruler = document.getElementById('timeline-ruler-container');
-        if(ruler) {
+        if (ruler) {
             ruler.onmousedown = (e) => {
+                // CORREÇÃO: Bloqueia Seek na régua se estiver renderizando
+                if (this.studio.renderManager && this.studio.renderManager.isRendering) return;
+
                 const ticks = document.querySelector('.ruler-ticks');
                 const rect = ticks.getBoundingClientRect();
-                
                 this.isScrubbing = true;
                 let didMove = false;
                 
                 const onMove = (mv) => {
                     didMove = true; 
                     const mx = mv.clientX - rect.left;
-                    // Conversão Frame-Perfect
                     const rawTime = Math.max(0, mx / this.studio.project.zoom);
                     this._seekToTime(this._snapToFrame(rawTime));
                 };
@@ -95,6 +102,15 @@ export class TimelineManager {
         // Atalhos de Teclado
         document.addEventListener('keydown', (e) => {
             if (!this.studio.isActive) return;
+            
+            // --- CORREÇÃO: TRAVA DE RENDERIZAÇÃO ---
+            // Se estiver renderizando, ignora qualquer comando de teclado (Espaço, Delete, S, etc)
+            if (this.studio.renderManager && this.studio.renderManager.isRendering) {
+                console.log("Comando bloqueado durante renderização.");
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
 
             if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
             
@@ -103,31 +119,23 @@ export class TimelineManager {
                 this.studio.playbackManager.togglePlayback(); 
             }
 
-            // Navegação Frame a Frame
-            if (e.code === 'ArrowLeft') {
-                e.preventDefault();
-                this._stepPlayhead(-1); 
-            }
-            if (e.code === 'ArrowRight') {
-                e.preventDefault();
-                this._stepPlayhead(1); 
-            }
+            if (e.code === 'ArrowLeft') { e.preventDefault(); this._stepPlayhead(-1); }
+            if (e.code === 'ArrowRight') { e.preventDefault(); this._stepPlayhead(1); }
 
             if (!e.ctrlKey && e.code === 'KeyS') this.splitClip();
             if (e.code === 'Delete') this.deleteClips();
-            
             if (e.code === 'KeyG') this.groupClips();
             if (e.code === 'KeyU') this.ungroupClips();
         });
     }
 
-    // =========================================
-    // LÓGICA DE TEMPO E FRAMES (Novo Core)
-    // =========================================
+    // =========================================================================
+    // LÓGICA DE TEMPO E FRAMES (Core Precision)
+    // =========================================================================
 
     /**
      * Arredonda um tempo flutuante para o frame exato mais próximo.
-     * Ex: 1.03333 -> 1.0333333 (Frame 31)
+     * Ex: 1.03333 -> 1.0333333 (Frame 31 no FPS 30)
      */
     _snapToFrame(time) {
         const frameIndex = Math.round(time * FPS);
@@ -135,7 +143,7 @@ export class TimelineManager {
     }
 
     /**
-     * Formata o tempo em HH:MM:SS;FF (SMPTE style)
+     * Formata o tempo em HH:MM:SS;FF (Estilo SMPTE).
      */
     _fmtSMPTE(time) {
         const totalFrames = Math.round(time * FPS);
@@ -148,58 +156,27 @@ export class TimelineManager {
 
         const pad = (n) => n.toString().padStart(2, '0');
 
-        // Se houver horas, mostra, senão simplifica para MM:SS;FF
         if (hours > 0) {
             return `${pad(hours)}:${pad(minutes)}:${pad(seconds)};${pad(frames)}`;
         }
         return `${pad(minutes)}:${pad(seconds)};${pad(frames)}`;
     }
 
-    _stepPlayhead(direction) {
-        // Avança ou retrocede exatamente 1 frame
-        const currentFrame = Math.round(this.studio.project.currentTime * FPS);
-        const newFrame = currentFrame + direction;
-        const newTime = Math.max(0, newFrame / FPS);
-        
-        this._seekToTime(newTime);
-        this._ensurePlayheadVisible();
-    }
-
-    _ensurePlayheadVisible() {
-        const scrollArea = document.getElementById('studio-scroll-area');
-        if (!scrollArea) return;
-
-        const playheadPos = this.studio.project.currentTime * this.studio.project.zoom;
-        const startVisible = scrollArea.scrollLeft;
-        const endVisible = startVisible + scrollArea.clientWidth;
-
-        if (playheadPos < startVisible) {
-            scrollArea.scrollLeft = playheadPos - 50;
-        } else if (playheadPos > endVisible) {
-            scrollArea.scrollLeft = playheadPos - scrollArea.clientWidth + 50;
-        }
-    }
-
     /**
-     * Define os intervalos da régua baseados em FRAMES.
-     * Retorna o intervalo em frames (major e minor).
+     * Define os intervalos da régua baseados em FRAMES para precisão visual.
      */
     _getFrameIntervals(zoom) {
         // Zoom = pixels por segundo
-        // 1 frame = 1/30s.
-        // Se zoom = 300px/s, 1 frame = 10px (visível)
-        // Se zoom = 30px/s, 1 frame = 1px (muito denso)
-        
         let majorFrames, minorFrames, showMinor;
 
         if (zoom >= 200) { 
             // Super Zoom: Mostra cada frame
-            majorFrames = 5;  // Marca forte a cada 5 frames
-            minorFrames = 1;  // Marca fraca a cada 1 frame
+            majorFrames = 5;  
+            minorFrames = 1;  
             showMinor = true;
         } else if (zoom >= 100) {
             majorFrames = 15; // Meio segundo
-            minorFrames = 5;  // 5 frames
+            minorFrames = 5;  
             showMinor = true;
         } else if (zoom >= 50) {
             majorFrames = 30; // 1 segundo
@@ -218,9 +195,72 @@ export class TimelineManager {
         return { majorFrames, minorFrames, showMinor };
     }
 
-    // =========================================
-    // SELEÇÃO E GRUPOS (Mantido)
-    // =========================================
+    // =========================================================================
+    // CONTROLE DA AGULHA (PLAYHEAD)
+    // =========================================================================
+
+    updatePlayheadPosition() {
+        const currentTime = this.studio.project.currentTime;
+        const zoom = this.studio.project.zoom || 10;
+        const pixelsPerSecond = 10 * (zoom / 10);
+        const headerWidth = 120; // Ajuste conforme utils.js
+        
+        const position = headerWidth + (currentTime * pixelsPerSecond);
+        
+        const playhead = document.getElementById('studio-playhead');
+        const line = document.getElementById('studio-playhead-line');
+        
+        if (playhead) playhead.style.left = `${position}px`;
+        if (line) line.style.left = `${position}px`;
+        
+        this._autoScrollTimeline(position);
+    }
+
+    _stepPlayhead(direction) {
+        // Avança ou retrocede exatamente 1 frame
+        const currentFrame = Math.round(this.studio.project.currentTime * FPS);
+        const newFrame = currentFrame + direction;
+        const newTime = Math.max(0, newFrame / FPS);
+        
+        this._seekToTime(newTime);
+        this._ensurePlayheadVisible();
+    }
+
+    _seekToTime(time) {
+        this.studio.project.currentTime = time;
+        this.studio.playbackManager.updatePlayhead();
+        this.studio.playbackManager.syncPreview();
+        this.lastSeekTime = time; 
+        this.playedSinceLastSeek = false; 
+    }
+
+    _ensurePlayheadVisible() {
+        const scrollArea = document.getElementById('studio-scroll-area');
+        if (!scrollArea) return;
+
+        const playheadPos = this.studio.project.currentTime * this.studio.project.zoom;
+        const startVisible = scrollArea.scrollLeft;
+        const endVisible = startVisible + scrollArea.clientWidth;
+
+        if (playheadPos < startVisible) {
+            scrollArea.scrollLeft = playheadPos - 50;
+        } else if (playheadPos > endVisible) {
+            scrollArea.scrollLeft = playheadPos - scrollArea.clientWidth + 50;
+        }
+    }
+
+    _autoScrollTimeline(pos) {
+        const area = document.getElementById('studio-scroll-area');
+        if (area) {
+            if (pos > area.scrollLeft + area.clientWidth) {
+                area.scrollLeft = pos - 100;
+            }
+        }
+    }
+
+    // =========================================================================
+    // SELEÇÃO E GRUPOS
+    // =========================================================================
 
     groupClips() {
         if (this.selectedClips.length < 2) return;
@@ -229,9 +269,11 @@ export class TimelineManager {
         console.log("Clips vinculados:", newGroupId);
         this.studio.markUnsavedChanges();
     }
+
     ungroupClips() {
         if (this.selectedClips.length === 0) return;
         this.selectedClips.forEach(selection => selection.clip.groupId = null);
+        
         if (this.lastFocusedClipId) {
             const toDeselect = this.selectedClips.filter(s => s.clip.id !== this.lastFocusedClipId);
             toDeselect.forEach(item => {
@@ -242,9 +284,11 @@ export class TimelineManager {
         }
         this.studio.markUnsavedChanges();
     }
+
     _handleSelection(e, clip, trackId, el) {
         this.lastFocusedClipId = clip.id;
         const alreadySelected = this.selectedClips.some(s => s.clip.id === clip.id);
+        
         if (e.ctrlKey) {
             if (alreadySelected) {
                 this._removeFromSelection(clip.id);
@@ -261,6 +305,7 @@ export class TimelineManager {
             }
         }
     }
+
     _addToSelection(clip, trackId, domElement = null) {
         if (!this.selectedClips.some(s => s.clip.id === clip.id)) {
             this.selectedClips.push({ clip, trackId });
@@ -268,11 +313,13 @@ export class TimelineManager {
             if (el) el.classList.add('selected');
         }
     }
+
     _removeFromSelection(clipId) {
         const domEl = this._findDomElement(clipId);
         if (domEl) domEl.classList.remove('selected');
         this.selectedClips = this.selectedClips.filter(s => s.clip.id !== clipId);
     }
+
     _selectGroup(groupId) {
         this.studio.project.tracks.forEach(track => {
             track.clips.forEach(c => {
@@ -283,10 +330,12 @@ export class TimelineManager {
             });
         });
     }
+
     _deselectGroup(groupId) {
         const groupItems = this.selectedClips.filter(s => s.clip.groupId === groupId);
         groupItems.forEach(item => this._removeFromSelection(item.clip.id));
     }
+
     _clearSelection() {
         this.selectedClips.forEach(s => {
             const domEl = this._findDomElement(s.clip.id);
@@ -294,13 +343,14 @@ export class TimelineManager {
         });
         this.selectedClips = [];
     }
+
     _findDomElement(clipId) {
         return document.querySelector(`.clip[data-clip-id="${clipId}"]`);
     }
 
-    // =========================================
-    // RENDERIZAÇÃO E ZOOM
-    // =========================================
+    // =========================================================================
+    // RENDERIZAÇÃO (Régua e Tracks)
+    // =========================================================================
 
     setZoom(newZoom) {
         this.studio.project.zoom = Math.max(1, Math.min(newZoom, 600));
@@ -336,7 +386,7 @@ export class TimelineManager {
 
     renderRuler() {
         const container = document.querySelector('.ruler-ticks');
-        if(!container) return;
+        if (!container) return;
         
         const zoom = this.studio.project.zoom;
         let maxTime = this.studio.project.duration;
@@ -357,14 +407,7 @@ export class TimelineManager {
         // Obtém intervalos em FRAMES
         const { majorFrames, minorFrames, showMinor } = this._getFrameIntervals(zoom);
         
-        // Intervalos em segundos para o loop
-        const majorSec = majorFrames / FPS;
-        const minorSec = minorFrames / FPS;
-
         this.rulerTicksData = [];
-        let t = 0;
-        
-        // Renderiza baseado em FRAMES para evitar erro de float point acumulado
         let currentFrame = 0;
         const maxFrames = maxTime * FPS;
 
@@ -383,12 +426,10 @@ export class TimelineManager {
                 this.rulerTicksData.push({
                     type: 'minor',
                     left: pos,
-                    label: null // Minors não têm label para limpar a UI
+                    label: null
                 });
             }
 
-            // Otimização: Avança pelo menor intervalo visível
-            // Se showMinor for false, avança direto pelo major
             const step = showMinor ? minorFrames : majorFrames;
             currentFrame += step;
         }
@@ -406,6 +447,7 @@ export class TimelineManager {
     _renderVisibleTicks(scrollLeft, viewportWidth) {
         const container = document.querySelector('.ruler-ticks');
         if(!container) return;
+
         const buffer = 300; 
         const startX = scrollLeft - buffer;
         const endX = scrollLeft + viewportWidth + buffer;
@@ -427,8 +469,10 @@ export class TimelineManager {
     renderTracks() {
         const container = document.getElementById("studio-tracks");
         if(!container) return;
+        
         container.innerHTML = "";
         this._renderAddTrackButton();
+        
         const maxTime = this._getMaxTimelineTime();
         const totalWidth = (maxTime * this.studio.project.zoom) + getHeaderWidth() + 500;
         const wrapper = document.getElementById('timeline-content-wrapper');
@@ -450,13 +494,17 @@ export class TimelineManager {
             const lane = el.querySelector(".track-lane");
             const header = el.querySelector(".track-header");
             const nameInput = el.querySelector(".track-name-input");
+            
             nameInput.onchange = (e) => { track.name = e.target.value; };
             nameInput.onmousedown = (e) => e.stopPropagation();
+            
             this._bindTrackReorderEvents(header, index);
             this._bindLaneEvents(lane, track);
+            
             track.clips.forEach(clip => {
                 const clipEl = this._createClipElement(clip, track.id);
 
+                // Adiciona botão Pan/Crop para vídeos/imagens
                 if (track.type !== 'audio' && ['video', 'image'].includes(clip.type)) {
                     const btnPan = document.createElement('div');
                     btnPan.className = 'clip-tool-btn pan-crop-btn';
@@ -464,26 +512,16 @@ export class TimelineManager {
                     btnPan.title = "Pan/Crop";
                     
                     btnPan.style.cssText = `
-                        position: absolute;
-                        bottom: 2px;
-                        right: 2px;
-                        width: 20px;
-                        height: 20px;
-                        background: rgba(0,0,0,0.7);
-                        color: white;
-                        border-radius: 3px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        font-size: 10px;
-                        cursor: pointer;
-                        z-index: 100; /* Aumentei o z-index por segurança */
+                        position: absolute; bottom: 2px; right: 2px;
+                        width: 20px; height: 20px;
+                        background: rgba(0,0,0,0.7); color: white;
+                        border-radius: 3px; display: flex; align-items: center; justify-content: center;
+                        font-size: 10px; cursor: pointer; z-index: 100;
                     `;
 
                     btnPan.onmousedown = (e) => {
                         e.preventDefault();  
                         e.stopPropagation();
-                        
                         console.log("Entrou no Pan/Crop:", clip.name);
                         this.studio.uiManager.openPanCropModal(clip);
                     };
@@ -495,6 +533,7 @@ export class TimelineManager {
             });
             container.appendChild(el);
         });
+        
         this.renderRuler();
         this.studio.playbackManager.updatePlayhead();
     }
@@ -502,6 +541,7 @@ export class TimelineManager {
     _renderAddTrackButton() {
         const spacer = document.querySelector('.ruler-header-spacer');
         if (!spacer) return;
+        
         spacer.innerHTML = "";
         const container = document.createElement('div');
         container.className = "track-add-dropdown-container";
@@ -512,15 +552,19 @@ export class TimelineManager {
                 <a href="#" data-type="audio"><i class="fa-solid fa-volume-high"></i> Audio Track</a>
             </div>
         `;
+        
         const btn = container.querySelector('.btn-add-track-header');
         const content = container.querySelector('.dropdown-content-header');
+        
         btn.onclick = (e) => { e.stopPropagation(); content.classList.toggle('show'); };
+        
         if (!window.hasGlobalDropdownListener) {
             window.addEventListener('click', () => {
                 document.querySelectorAll('.dropdown-content-header.show').forEach(el => el.classList.remove('show'));
             });
             window.hasGlobalDropdownListener = true;
         }
+        
         container.querySelectorAll('a').forEach(link => {
             link.onclick = (e) => {
                 e.preventDefault();
@@ -529,76 +573,6 @@ export class TimelineManager {
             };
         });
         spacer.appendChild(container);
-    }
-    _bindTrackReorderEvents(header, index) {
-        header.ondragstart = (e) => {
-            e.dataTransfer.effectAllowed = "move";
-            e.dataTransfer.setData("text/plain", index.toString());
-            header.classList.add('dragging');
-            requestAnimationFrame(() => header.style.opacity = '0.5');
-        };
-        header.ondragend = () => { header.classList.remove('dragging'); header.style.opacity = '1'; };
-        header.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; header.style.background = "#444"; };
-        header.ondragleave = () => header.style.background = "";
-        header.ondrop = (e) => {
-            e.preventDefault(); e.stopPropagation(); header.style.background = "";
-            const fromIndex = parseInt(e.dataTransfer.getData("text/plain"));
-            this.studio.markUnsavedChanges();
-            this.studio.historyManager.recordState();
-            if (!isNaN(fromIndex) && fromIndex !== index) this.studio.reorderTracks(fromIndex, index);
-        };
-    }
-
-    _bindLaneEvents(lane, track) {
-        lane.ondragover = (e) => { e.preventDefault(); lane.style.background = "rgba(255,255,255,0.1)"; };
-        lane.ondragleave = () => { lane.style.background = ""; };
-        lane.ondrop = (e) => {
-            e.preventDefault(); lane.style.background = "";
-            if (this.studio.draggedAsset) {
-                const rect = lane.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                // Snap no Drop também
-                const time = this._snapToFrame(Math.max(0, x / this.studio.project.zoom));
-                this.studio.addAssetToTimeline(this.studio.draggedAsset, time);
-                this.studio.draggedAsset = null;
-            }
-        };
-
-        lane.onmousedown = (e) => {
-            if(e.target === lane) {
-                this.isScrubbing = true;
-                const rect = lane.getBoundingClientRect();
-                let didMove = false;
-
-                const handle = (ev) => {
-                    didMove = true; 
-                    const x = ev.clientX - rect.left;
-                    // Snap no arrasto
-                    const rawTime = Math.max(0, x / this.studio.project.zoom);
-                    this._seekToTime(this._snapToFrame(rawTime));
-                };
-                
-                const onMove = (ev) => { if(this.isScrubbing) handle(ev); };
-                const onUp = (ev) => {
-                    this.isScrubbing = false;
-                    window.removeEventListener('mousemove', onMove);
-                    window.removeEventListener('mouseup', onUp);
-                    
-                    this._clearSelection();
-                    this.studio.markUnsavedChanges();
-                    this.studio.historyManager.recordState();
-
-                    if(!didMove) {
-                        const x = ev.clientX - rect.left;
-                        // Snap no click
-                        const rawTime = Math.max(0, x / this.studio.project.zoom);
-                        this._seekToTime(this._snapToFrame(rawTime));
-                    }
-                };
-                window.addEventListener('mousemove', onMove);
-                window.addEventListener('mouseup', onUp);
-            }
-        };
     }
 
     _createClipElement(clip, trackId) {
@@ -627,6 +601,7 @@ export class TimelineManager {
             <div class="resize-handle right" data-action="resize"></div>
         `;
 
+        // Marcadores de Loop
         if (clip.duration > asset.baseDuration) {
             const loops = Math.floor(clip.duration / asset.baseDuration);
             for(let i=1; i<=loops; i++) {
@@ -637,6 +612,7 @@ export class TimelineManager {
             }
         }
 
+        // Eventos do Clip (Mover, Resize, Fader)
         el.onmousedown = (e) => {
             e.stopPropagation(); 
             
@@ -654,6 +630,7 @@ export class TimelineManager {
                 this._startMove(e, clip, el);
             }
 
+            // Snap no clique se não arrastou
             const onMouseUpCheck = (ev) => {
                 const dist = Math.sqrt(Math.pow(ev.clientX - startX, 2) + Math.pow(ev.clientY - startY, 2));
                 if (dist < 5) {
@@ -661,7 +638,6 @@ export class TimelineManager {
                     if (lane) {
                         const rect = lane.getBoundingClientRect();
                         const x = ev.clientX - rect.left;
-                        // Snap no click do clipe
                         const rawTime = Math.max(0, (x - 120) / this.studio.project.zoom);
                         this._seekToTime(this._snapToFrame(rawTime));
                     }
@@ -677,14 +653,84 @@ export class TimelineManager {
         return el;
     }
 
-    _seekToTime(time) {
-        this.studio.project.currentTime = time;
-        this.studio.playbackManager.updatePlayhead();
-        this.studio.playbackManager.syncPreview();
-        this.lastSeekTime = time; 
-        this.playedSinceLastSeek = false; 
+    // =========================================================================
+    // INTERAÇÃO DO USUÁRIO (Drag, Drop, Resize, Fader)
+    // =========================================================================
+
+    _bindTrackReorderEvents(header, index) {
+        header.ondragstart = (e) => {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", index.toString());
+            header.classList.add('dragging');
+            requestAnimationFrame(() => header.style.opacity = '0.5');
+        };
+        header.ondragend = () => { header.classList.remove('dragging'); header.style.opacity = '1'; };
+        header.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; header.style.background = "#444"; };
+        header.ondragleave = () => header.style.background = "";
+        header.ondrop = (e) => {
+            e.preventDefault(); e.stopPropagation(); header.style.background = "";
+            const fromIndex = parseInt(e.dataTransfer.getData("text/plain"));
+            
+            this.studio.markUnsavedChanges();
+            this.studio.historyManager.recordState();
+            
+            if (!isNaN(fromIndex) && fromIndex !== index) this.studio.reorderTracks(fromIndex, index);
+        };
     }
-    
+
+    _bindLaneEvents(lane, track) {
+        // Drag Over (Drop de Assets)
+        lane.ondragover = (e) => { e.preventDefault(); lane.style.background = "rgba(255,255,255,0.1)"; };
+        lane.ondragleave = () => { lane.style.background = ""; };
+        lane.ondrop = (e) => {
+            e.preventDefault(); lane.style.background = "";
+            if (this.studio.draggedAsset) {
+                const rect = lane.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                // Snap no Drop
+                const time = this._snapToFrame(Math.max(0, x / this.studio.project.zoom));
+                this.studio.addAssetToTimeline(this.studio.draggedAsset, time);
+                this.studio.draggedAsset = null;
+            }
+        };
+
+        // Seek clicando no vazio da track
+        lane.onmousedown = (e) => {
+            if (e.target === lane) {
+                this.isScrubbing = true;
+                const rect = lane.getBoundingClientRect();
+                let didMove = false;
+
+                const handle = (ev) => {
+                    didMove = true; 
+                    const x = ev.clientX - rect.left;
+                    // Snap no arrasto
+                    const rawTime = Math.max(0, x / this.studio.project.zoom);
+                    this._seekToTime(this._snapToFrame(rawTime));
+                };
+                
+                const onMove = (ev) => { if(this.isScrubbing) handle(ev); };
+                const onUp = (ev) => {
+                    this.isScrubbing = false;
+                    window.removeEventListener('mousemove', onMove);
+                    window.removeEventListener('mouseup', onUp);
+                    
+                    this._clearSelection();
+                    this.studio.markUnsavedChanges();
+                    this.studio.historyManager.recordState();
+
+                    if (!didMove) {
+                        const x = ev.clientX - rect.left;
+                        const rawTime = Math.max(0, x / this.studio.project.zoom);
+                        this._seekToTime(this._snapToFrame(rawTime));
+                    }
+                };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+            }
+        };
+    }
+
     _startFader(e, clip, el) {
         const startY = e.clientY;
         const startLevel = clip.level;
@@ -740,6 +786,7 @@ export class TimelineManager {
 
         if(el) el.style.pointerEvents = 'none';
 
+        // Prepara todos os itens selecionados para movimento em grupo
         const draggingItems = this.selectedClips.map(item => {
             const domEl = item.clip.id === clickedClip.id ? el : this._findDomElement(item.clip.id);
             return {
@@ -771,6 +818,7 @@ export class TimelineManager {
                 
                 if (item.el) item.el.style.left = (newStart * this.studio.project.zoom) + "px";
                 
+                // Lógica para mover entre tracks
                 if (targetTrackId && targetTrackId !== item.trackId) { 
                     const currentTrack = this.studio.project.tracks.find(t => t.id === item.trackId);
                     const targetTrack = this.studio.project.tracks.find(t => t.id === targetTrackId);
@@ -846,46 +894,74 @@ export class TimelineManager {
         window.addEventListener("mouseup", onUp);
     }
 
+    // =========================================================================
+    // COMANDOS DE EDIÇÃO (Add, Delete, Split)
+    // =========================================================================
+
     addClipToTrack(trackId, asset, startTime, providedGroupId = null) {
         const track = this.studio.project.tracks.find(t => t.id === trackId);
         if (!track) return;
         if (track.type === 'video' && asset.type === 'audio') return alert("Não pode por áudio em track de vídeo");
+        
         const clip = {
             id: "clip_" + Date.now() + Math.random().toString(36).substr(2, 5),
-            assetId: asset.id, start: startTime, offset: 0, duration: asset.baseDuration, 
-            type: asset.type, name: asset.name, level: 1.0, groupId: providedGroupId
+            assetId: asset.id, 
+            start: startTime, 
+            offset: 0, 
+            duration: asset.baseDuration, 
+            type: asset.type, 
+            name: asset.name, 
+            level: 1.0, 
+            groupId: providedGroupId
         };
+        
         this.studio.markUnsavedChanges();
         track.clips.push(clip);
         this.renderTracks();
         this.studio.historyManager.recordState();
     }
+
     deleteClips() {
         if (this.selectedClips.length === 0) return;
+        
         this.selectedClips.forEach(sel => {
             const track = this.studio.project.tracks.find(t => t.id === sel.trackId);
             if (track) track.clips = track.clips.filter(c => c.id !== sel.clip.id);
         });
+        
         this.selectedClips = [];
         this.studio.markUnsavedChanges();
         this.renderTracks();
         this.studio.historyManager.recordState();
     }
+
     splitClip() {
         const targetClip = this.selectedClips.length > 0 ? this.selectedClips[0].clip : null;
         const targetTrackId = this.selectedClips.length > 0 ? this.selectedClips[0].trackId : null;
+        
         if (!targetClip) return;
+        
         const time = this.studio.project.currentTime;
         if (time <= targetClip.start || time >= (targetClip.start + targetClip.duration)) return;
+        
         const relativeSplit = time - targetClip.start;
         const oldDuration = targetClip.duration;
+        
+        // Ajusta clip atual
         targetClip.duration = relativeSplit;
+        
+        // Cria novo clip com o restante
         const track = this.studio.project.tracks.find(t => t.id === targetTrackId);
         const newClip = {
-            ...targetClip, id: "clip_" + Date.now(),
-            start: time, duration: oldDuration - relativeSplit, offset: targetClip.offset + relativeSplit
+            ...targetClip, 
+            id: "clip_" + Date.now(),
+            start: time, 
+            duration: oldDuration - relativeSplit, 
+            offset: targetClip.offset + relativeSplit
         };
+        
         track.clips.push(newClip);
+        
         this._clearSelection(); 
         this.studio.markUnsavedChanges();
         this.renderTracks();

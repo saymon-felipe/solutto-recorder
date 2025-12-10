@@ -27,7 +27,7 @@
                 "video/webm"
             ],
             TIMESLICE_MS: 1000, // Salva chunks a cada 1s
-            VIDEO_BITS_PER_SECOND: 2500000 // 2.5 Mbps
+            VIDEO_BITS_PER_SECOND: 8000000 // 2.5 Mbps
         },
 
         // Protocolo de Mensagens
