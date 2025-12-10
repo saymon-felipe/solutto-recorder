@@ -515,8 +515,8 @@ export class TimelineManager {
             
             track.clips.forEach(clip => {
                 const clipEl = this._createClipElement(clip, track.id);
-
-                // Adiciona botão Pan/Crop para vídeos/imagens
+                
+                // Botão Pan/Crop
                 if (track.type !== 'audio' && ['video', 'image'].includes(clip.type)) {
                     const btnPan = document.createElement('div');
                     btnPan.className = 'clip-tool-btn pan-crop-btn';
@@ -534,7 +534,6 @@ export class TimelineManager {
                     btnPan.onmousedown = (e) => {
                         e.preventDefault();  
                         e.stopPropagation();
-                        console.log("Entrou no Pan/Crop:", clip.name);
                         this.studio.uiManager.openPanCropModal(clip);
                     };
 
@@ -548,6 +547,142 @@ export class TimelineManager {
         
         this.renderRuler();
         this.studio.playbackManager.updatePlayhead();
+        
+        // Garante que guias e player estejam sincronizados após renderizar
+        this._renderCrossfadeGuides();
+        if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+    }
+
+    /**
+     * Renderiza as guias verticais para TODOS os crossfades ativos na timeline.
+     * Chamado automaticamente pelo renderTracks().
+     */
+    _renderCrossfadeGuides() {
+        let container = document.getElementById('timeline-crossfade-container');
+        const tracksContainer = document.getElementById('studio-tracks');
+        
+        if (!tracksContainer) return;
+
+        // 1. Limpeza: Garante que nenhum clipe tenha opacidade residual de versões anteriores
+        const allClips = tracksContainer.querySelectorAll('.clip');
+        allClips.forEach(el => {
+            if (el.style.pointerEvents !== 'none') { // Não mexe no que está sendo arrastado
+                el.style.opacity = ''; 
+            }
+        });
+
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'timeline-crossfade-container';
+            container.style.cssText = `
+                position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+                pointer-events: none; z-index: 9998; overflow: visible;
+            `;
+            tracksContainer.appendChild(container);
+        } else {
+            container.innerHTML = ''; 
+        }
+
+        const containerRect = tracksContainer.getBoundingClientRect();
+        const headerOffset = 120; 
+
+        this.studio.project.tracks.forEach(track => {
+            if (track.clips.length < 2) return;
+
+            const sortedClips = [...track.clips].sort((a, b) => a.start - b.start);
+            
+            for (let i = 0; i < sortedClips.length - 1; i++) {
+                const c1 = sortedClips[i]; // Clip de Baixo/Esquerda (Sendo coberto)
+                const c2 = sortedClips[i+1]; // Clip de Cima/Direita (Cobrindo)
+
+                const c1End = c1.start + c1.duration;
+                
+                // Detecta Interseção
+                if (c2.start < c1End - 0.05) {
+                    const intersectionStart = c2.start;
+                    const intersectionEnd = c1End;
+
+                    // Busca elementos DOM
+                    const c1El = this._findDomElement(c1.id);
+                    const c2El = this._findDomElement(c2.id);
+                    const targetEl = c1El || c2El;
+
+                    if (!targetEl) continue;
+
+                    // --- GEOMETRIA ---
+                    const rect = targetEl.getBoundingClientRect();
+                    const guideTop = (rect.top - containerRect.top) + tracksContainer.scrollTop;
+                    const guideHeight = targetEl.offsetHeight; // Altura exata do clipe
+
+                    const xStart = (intersectionStart * this.studio.project.zoom) + headerOffset;
+                    const xEnd = (intersectionEnd * this.studio.project.zoom) + headerOffset;
+                    const width = xEnd - xStart;
+
+                    // --- PARTE 1: GUIAS VERTICAIS ---
+                    const lineStyle = `
+                        position: absolute; width: 1px; 
+                        top: ${guideTop}px; height: ${guideHeight}px;
+                        background: rgba(255, 255, 255, 0.8); 
+                        box-shadow: 0 0 4px rgba(0,0,0,0.5);
+                        border-left: 1px dashed rgba(255,255,255,0.5);
+                    `;
+                    const l1 = document.createElement('div');
+                    l1.style.cssText = lineStyle + `left: ${xStart}px;`;
+                    const l2 = document.createElement('div');
+                    l2.style.cssText = lineStyle + `left: ${xEnd}px;`;
+
+                    container.appendChild(l1);
+                    container.appendChild(l2);
+
+                    // --- PARTE 2: GHOST OVERLAY ---
+                    // Queremos mostrar a curva de Fade Out do C1 (que está escondida embaixo do C2).
+                    // Clonamos o SVG do C1 e o colocamos num container recortado.
+                    if (c1El) {
+                        const originalSvg = c1El.querySelector('.fade-curve-layer');
+                        if (originalSvg) {
+                            const ghostWrapper = document.createElement('div');
+                            ghostWrapper.style.cssText = `
+                                position: absolute;
+                                left: ${xStart}px;
+                                top: ${guideTop}px;
+                                width: ${width}px; 
+                                height: ${guideHeight}px;
+                                overflow: hidden; /* O SEGREDO: Recorta o que está fora da interseção */
+                                pointer-events: none;
+                            `;
+
+                            const clonedSvg = originalSvg.cloneNode(true);
+                            
+                            // Ajuste de Posição do SVG clonado:
+                            // O SVG original está posicionado relativo ao Clip C1.
+                            // O Wrapper está na interseção (xStart).
+                            // Precisamos deslocar o SVG para a esquerda para alinhar com o início original do C1.
+                            
+                            const c1ScreenLeft = (c1.start * this.studio.project.zoom) + headerOffset;
+                            const relativeOffset = c1ScreenLeft - xStart;
+                            
+                            clonedSvg.style.left = (relativeOffset - 2) + "px"; 
+                            clonedSvg.style.top = "-2px";
+                            
+                            // Ajusta estilos para garantir visibilidade máxima (stroke branco forte)
+                            const pathStroke = clonedSvg.querySelector('.fade-path-stroke');
+                            if (pathStroke) {
+                                pathStroke.setAttribute('stroke', '#ffffff');
+                                pathStroke.setAttribute('stroke-width', '2'); 
+                                pathStroke.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.8))'; // Sombra para contraste
+                            }
+                            
+                            // Remove preenchimento escuro para não escurecer o clipe de cima
+                            const pathFill = clonedSvg.querySelector('.fade-path-fill');
+                            if(pathFill) pathFill.style.fill = 'none';
+
+                            ghostWrapper.appendChild(clonedSvg);
+                            container.appendChild(ghostWrapper);
+                        }
+                    }
+                }
+            }
+        });
     }
     
     _renderAddTrackButton() {
@@ -781,32 +916,49 @@ export class TimelineManager {
         const w = clip.duration * zoom;
         const h = el.offsetHeight || 50; 
         
-        const fiW = (clip.fadeIn || 0) * zoom;
-        const foW = (clip.fadeOut || 0) * zoom;
+        // Larguras originais dos fades
+        let fiW = (clip.fadeIn || 0) * zoom;
+        let foW = (clip.fadeOut || 0) * zoom;
         
-        // Nível atual (Teto da curva)
         const level = (clip.level !== undefined) ? clip.level : 1;
-        const yTop = (1 - level) * h; // Calcula quantos pixels descer
+        const yTop = (1 - level) * h; 
 
-        // Aplica translação Y para os handles acompanharem o teto
+        // Posiciona Handles (Usando valores reais para controle preciso)
         const handleIn = el.querySelector('.fade-in');
         const handleOut = el.querySelector('.fade-out');
-        
-        // translate(X, Y) -> Move horizontalmente pelo Fade, verticalmente pelo Nível
         if(handleIn) handleIn.style.transform = `translate(${fiW}px, ${yTop}px)`;
         if(handleOut) handleOut.style.transform = `translate(-${foW}px, ${yTop}px)`;
 
-        // SVG Drawing 
+        // Se a soma dos fades for maior que o clipe, eles colidem.
+        // Reduzimos proporcionalmente VISUALMENTE para que se encontrem num vértice,
+        // eliminando o "platô" falso que escondia o Fade Out.
+        const totalFadeWidth = fiW + foW;
+        if (totalFadeWidth > w) {
+            const scale = w / totalFadeWidth;
+            fiW *= scale;
+            foW *= scale;
+        }
+
+        // SVG Drawing
         let d = `M 0,${h}`; 
         
+        // Curva de Entrada
         if (fiW > 0) {
             d += ` C ${fiW/2},${h} ${fiW/2},${yTop} ${fiW},${yTop}`;
         } else {
             d += ` L 0,${yTop}`;
         }
         
-        d += ` L ${w - foW},${yTop}`;
+        // Linha do Topo (Platô)
+        // Agora, se houver sobreposição, fiW será exatamente onde foW começa (w - foW),
+        // resultando em uma linha de comprimento zero (vértice perfeito).
+        const plateauEnd = w - foW; 
+        // Garante que não desenhe linha para trás
+        if (plateauEnd > fiW) {
+             d += ` L ${plateauEnd},${yTop}`;
+        }
         
+        // Curva de Saída
         if (foW > 0) {
             d += ` C ${w - foW/2},${yTop} ${w - foW/2},${h} ${w},${h}`;
         } else {
@@ -950,81 +1102,215 @@ export class TimelineManager {
 
     _startMove(e, clickedClip, el) {
         const startX = e.clientX;
+        const tracksContainer = document.getElementById('studio-tracks');
+        const containerRect = tracksContainer.getBoundingClientRect();
         
         const preMoveState = this.studio.historyManager._createSnapshot();
         let didActuallyChange = false;
 
-        if(el) el.style.pointerEvents = 'none';
+        if(el) {
+            el.style.pointerEvents = 'none';
+            el.style.zIndex = '100'; 
+            el.style.opacity = '0.5'; 
+        }
 
-        // Prepara todos os itens selecionados para movimento em grupo
+        // Armazena estado original de TODOS os itens arrastados
         const draggingItems = this.selectedClips.map(item => {
             const domEl = item.clip.id === clickedClip.id ? el : this._findDomElement(item.clip.id);
+            let top = 0;
+            if (domEl) {
+                const r = domEl.getBoundingClientRect();
+                top = (r.top - containerRect.top) + tracksContainer.scrollTop;
+            }
             return {
                 clip: item.clip, 
                 trackId: item.trackId, 
                 startStart: item.clip.start, 
-                el: domEl
+                // Snapshot vital: guarda o estado inicial para resetar a cada frame
+                originalFades: { 
+                    fadeIn: item.clip.fadeIn || 0, 
+                    fadeOut: item.clip.fadeOut || 0 
+                },
+                el: domEl,
+                top: top,
+                height: domEl ? domEl.offsetHeight : 80
             };
         });
 
+        const neighborsOriginalFades = new Map();
+
         const onMove = (ev) => {
             const deltaPx = ev.clientX - startX;
-            
             if (Math.abs(deltaPx) < 2 && !didActuallyChange) return;
-            
             didActuallyChange = true;
-            const deltaTime = deltaPx / this.studio.project.zoom;
             
+            const deltaTime = deltaPx / this.studio.project.zoom;
+
             const elementBelow = document.elementFromPoint(ev.clientX, ev.clientY);
             const trackEl = elementBelow ? elementBelow.closest('.track') : null;
             let targetTrackId = null;
-            if (trackEl && trackEl.dataset.trackId) targetTrackId = trackEl.dataset.trackId; 
-            
+            if (trackEl && trackEl.dataset.trackId) targetTrackId = trackEl.dataset.trackId;
+
             draggingItems.forEach(item => {
                 let rawNewStart = Math.max(0, item.startStart + deltaTime);
                 let newStart = this._snapToFrame(rawNewStart); 
+
+                // Lógica de Troca de Trilha
+                if (targetTrackId && targetTrackId !== item.trackId) {
+                     const currentTrack = this.studio.project.tracks.find(t => t.id === item.trackId);
+                     const targetTrack = this.studio.project.tracks.find(t => t.id === targetTrackId);
+                     if (currentTrack && targetTrack && currentTrack.type === targetTrack.type) {
+                         currentTrack.clips = currentTrack.clips.filter(c => c.id !== item.clip.id);
+                         targetTrack.clips.push(item.clip);
+                         const newLane = trackEl.querySelector('.track-lane');
+                         if (newLane && item.el) newLane.appendChild(item.el);
+                         item.trackId = targetTrackId;
+                         const rect = newLane.getBoundingClientRect();
+                         item.top = (rect.top - containerRect.top) + tracksContainer.scrollTop;
+                         const selRef = this.selectedClips.find(s => s.clip.id === item.clip.id);
+                         if (selRef) selRef.trackId = targetTrackId;
+                     }
+                }
                 
+                // Atualiza Posição Física
                 item.clip.start = newStart;
-                
                 if (item.el) item.el.style.left = (newStart * this.studio.project.zoom) + "px";
-                
-                // Lógica para mover entre tracks
-                if (targetTrackId && targetTrackId !== item.trackId) { 
-                    const currentTrack = this.studio.project.tracks.find(t => t.id === item.trackId);
-                    const targetTrack = this.studio.project.tracks.find(t => t.id === targetTrackId);
-                    
-                    if (currentTrack && targetTrack && currentTrack.type === targetTrack.type) {
-                        currentTrack.clips = currentTrack.clips.filter(c => c.id !== item.clip.id);
-                        targetTrack.clips.push(item.clip);
+
+                // =========================================================
+                // LÓGICA DE CROSSFADE DUPLO (Reset & Accumulate)
+                // =========================================================
+                const activeTrack = this.studio.project.tracks.find(t => t.id === item.trackId);
+                const otherClips = activeTrack ? activeTrack.clips.filter(c => c.id !== item.clip.id) : [];
+
+                // 1. Reseta o clipe atual para os valores originais (antes de calcular novas colisões)
+                item.clip.fadeIn = item.originalFades.fadeIn;
+                item.clip.fadeOut = item.originalFades.fadeOut;
+
+                // 2. Reseta vizinhos conhecidos para seus valores originais
+                neighborsOriginalFades.forEach((fades, id) => {
+                    const c = activeTrack ? activeTrack.clips.find(o => o.id === id) : null;
+                    if(c) { c.fadeIn = fades.fadeIn; c.fadeOut = fades.fadeOut; }
+                });
+
+                // 3. Verifica Vizinho Esquerdo (Afeta Fade In do item atual)
+                const leftNeighbor = otherClips.find(c => 
+                    c.start < item.clip.start && (c.start + c.duration) > item.clip.start
+                );
+
+                if (leftNeighbor) {
+                    const overlap = (leftNeighbor.start + leftNeighbor.duration) - item.clip.start;
+                    if (overlap > 0.05) {
+                        if (!neighborsOriginalFades.has(leftNeighbor.id)) {
+                            neighborsOriginalFades.set(leftNeighbor.id, { fadeIn: leftNeighbor.fadeIn||0, fadeOut: leftNeighbor.fadeOut||0 });
+                        }
+                        const safeOverlap = Math.min(overlap, leftNeighbor.duration, item.clip.duration);
+                        leftNeighbor.fadeOut = safeOverlap;
                         
-                        const newLane = trackEl.querySelector('.track-lane');
-                        if (newLane && item.el) newLane.appendChild(item.el);
-                        
-                        item.trackId = targetTrackId;
-                        const selRef = this.selectedClips.find(s => s.clip.id === item.clip.id);
-                        if (selRef) selRef.trackId = targetTrackId;
+                        // [IMPORTANTE] Define Fade In SEM tocar no Fade Out
+                        item.clip.fadeIn = safeOverlap; 
                     }
                 }
+
+                // 4. Verifica Vizinho Direito (Afeta Fade Out do item atual)
+                const rightNeighbor = otherClips.find(c => 
+                    c.start > item.clip.start && c.start < (item.clip.start + item.clip.duration)
+                );
+
+                if (rightNeighbor) {
+                     const overlap = (item.clip.start + item.clip.duration) - rightNeighbor.start;
+                     if (overlap > 0.05) {
+                        if (!neighborsOriginalFades.has(rightNeighbor.id)) {
+                            neighborsOriginalFades.set(rightNeighbor.id, { fadeIn: rightNeighbor.fadeIn||0, fadeOut: rightNeighbor.fadeOut||0 });
+                        }
+                        const safeOverlap = Math.min(overlap, rightNeighbor.duration, item.clip.duration);
+                        
+                        // [IMPORTANTE] Define Fade Out SEM tocar no Fade In (que pode ter sido setado acima)
+                        item.clip.fadeOut = safeOverlap; 
+                        rightNeighbor.fadeIn = safeOverlap;
+                     }
+                }
+
+                // 5. Atualiza Visuais
+                if (item.el) this._updateFadeVisuals(item.clip, item.el);
+                
+                neighborsOriginalFades.forEach((_, id) => {
+                    const nEl = this._findDomElement(id);
+                    const c = activeTrack ? activeTrack.clips.find(o => o.id === id) : null;
+                    if (nEl && c) this._updateFadeVisuals(c, nEl);
+                });
             });
+            
+            if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+            this._renderCrossfadeGuides();
         };
 
         const onUp = () => { 
-            if(el) el.style.pointerEvents = 'auto'; 
-            
+            if(el) {
+                el.style.pointerEvents = 'auto'; 
+                el.style.zIndex = ''; 
+                el.style.opacity = ''; 
+            }
+            this._renderCrossfadeGuides(); 
             window.removeEventListener("mousemove", onMove); 
             window.removeEventListener("mouseup", onUp); 
-            
-            if (didActuallyChange) {
-                this.studio.historyManager.pushManualState(preMoveState);
-                console.log("[Timeline] Movimento finalizado e estado salvo.");
-            }
-
+            if (didActuallyChange) this.studio.historyManager.pushManualState(preMoveState);
             this.renderTracks(); 
             this.studio.markUnsavedChanges();
         };
 
         window.addEventListener("mousemove", onMove); 
         window.addEventListener("mouseup", onUp);
+    }
+
+    /**
+     * Desenha linhas verticais nas extremidades da área de Crossfade (Interseção).
+     */
+    _updateCrossfadeGuides(start, end, visible, top = 0, height = 0) {
+        let container = document.getElementById('timeline-crossfade-guides');
+        const tracksContainer = document.getElementById('studio-tracks');
+        
+        if (!visible) {
+            if (container) container.style.display = 'none';
+            return;
+        }
+
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'timeline-crossfade-guides';
+            container.style.cssText = `
+                position: absolute; pointer-events: none; z-index: 9998; display: none;
+            `;
+            // Cria as duas linhas verticais internas
+            const lineStyle = `
+                position: absolute; top: 0; bottom: 0; width: 1px; 
+                background: rgba(255, 255, 255, 0.8); 
+                box-shadow: 0 0 4px rgba(0,0,0,0.5);
+                border-left: 1px dashed rgba(255,255,255,0.5);
+            `;
+            container.innerHTML = `<div class="guide-left" style="${lineStyle}"></div><div class="guide-right" style="${lineStyle}"></div>`;
+            if (tracksContainer) tracksContainer.appendChild(container);
+        }
+
+        if (tracksContainer && !tracksContainer.contains(container)) {
+            tracksContainer.appendChild(container);
+        }
+
+        const headerOffset = 120; // Largura do header
+        const x1 = (start * this.studio.project.zoom) + headerOffset;
+        const x2 = (end * this.studio.project.zoom) + headerOffset;
+        
+        container.style.left = '0px';
+        container.style.top = top + 'px';
+        container.style.height = height + 'px';
+        container.style.width = '100%'; // Ocupa largura para posicionar filhos absolutos
+
+        const l1 = container.querySelector('.guide-left');
+        const l2 = container.querySelector('.guide-right');
+        
+        if(l1) l1.style.left = x1 + "px";
+        if(l2) l2.style.left = x2 + "px";
+        
+        container.style.display = 'block';
     }
 
     /**
@@ -1177,6 +1463,12 @@ export class TimelineManager {
             
             // [ATUALIZAÇÃO VISUAL] Redesenha a curva de fade (S-Curve) em tempo real
             this._updateFadeVisuals(clip, el);
+
+            if(this.studio.playbackManager) {
+                this.studio.playbackManager.syncPreview();
+            }
+
+            this._renderCrossfadeGuides();
         };
 
         const onUp = () => { 

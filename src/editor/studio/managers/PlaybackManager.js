@@ -235,54 +235,72 @@ export class PlaybackManager {
         const currentTime = this.studio.project.currentTime;
 
         tracksReversed.forEach(track => {
-            if (track.muted) return;
-            const clip = track.clips.find(c => currentTime >= c.start && currentTime < (c.start + c.duration));
-            if (!clip) return;
+            if (track.muted || track.type !== 'video') return;
+            
+            const activeClips = track.clips.filter(c => currentTime >= c.start && currentTime < (c.start + c.duration))
+                                           .sort((a, b) => a.start - b.start);
+
+            if (activeClips.length === 0) return;
 
             const layer = this.trackLayers.get(track.id);
             if (!layer) return;
 
-            let domEl = null;
-            if (layer.videoEl && layer.videoEl.style.display !== 'none') {
-                domEl = layer.videoEl;
-            } else if (layer.imgEl && layer.imgEl.style.display !== 'none') {
-                domEl = layer.imgEl;
-            }
+            activeClips.forEach(clip => {
+                let domEl = null;
+                const slotId = clip._assignedSlotId;
 
-            if (!domEl) return;
-            if (domEl.tagName === 'VIDEO' && domEl.readyState < 2) return;
-            
-            ctx.save();
-            
-            let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
-            
-            // Aplica o fator de Fade
-            const fadeFactor = this._calculateFadeFactor(clip, currentTime);
-            alpha *= fadeFactor;
+                // Tenta recuperar pelo Slot ID da memória
+                if (slotId === 1) {
+                    domEl = (clip.type === 'image') ? layer.imgEl : layer.videoEl;
+                } else if (slotId === 2) {
+                    domEl = (clip.type === 'image') ? layer.imgEl2 : layer.videoEl2;
+                } else {
+                    // Fallback: Busca no DOM (somente se a layer tiver elementos de vídeo)
+                    if (layer.videoEl && (layer.videoEl.dataset.curId === clip.id || layer.imgEl.dataset.curId === clip.id)) {
+                        domEl = (clip.type === 'image') ? layer.imgEl : layer.videoEl;
+                    } else if (layer.videoEl2 && (layer.videoEl2.dataset.curId === clip.id || layer.imgEl2.dataset.curId === clip.id)) {
+                        domEl = (clip.type === 'image') ? layer.imgEl2 : layer.videoEl2;
+                    }
+                }
 
-            ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-
-            const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
-            
-            ctx.translate(cvWidth/2, cvHeight/2);
-            ctx.translate(t.x, t.y);
-            ctx.rotate(t.rotation * Math.PI / 180);
-            ctx.scale(t.width/100, t.height/100);
-
-            const nw = domEl.videoWidth || domEl.naturalWidth || cvWidth;
-            const nh = domEl.videoHeight || domEl.naturalHeight || cvHeight;
-            
-            if (nw > 0 && nh > 0) {
-                const ratioSrc = nw / nh;
-                const ratioTgt = cvWidth / cvHeight;
-                let dw, dh;
+                if (!domEl) return;
                 
-                if (ratioSrc > ratioTgt) { dw = cvWidth; dh = cvWidth / ratioSrc; }
-                else { dh = cvHeight; dw = cvHeight * ratioSrc; }
+                // Validações de carregamento
+                if (domEl.tagName === 'VIDEO' && domEl.readyState < 2) return;
+                if (domEl.tagName === 'IMG' && domEl.naturalWidth === 0) return;
+
+                ctx.save();
                 
-                try { ctx.drawImage(domEl, -dw/2, -dh/2, dw, dh); } catch(e){}
-            }
-            ctx.restore();
+                let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
+                const fadeFactor = this._calculateFadeFactor(clip, currentTime); 
+                alpha *= fadeFactor;
+
+                ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+
+                const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
+                
+                ctx.translate(cvWidth/2, cvHeight/2);
+                ctx.translate(t.x, t.y);
+                ctx.rotate(t.rotation * Math.PI / 180);
+                ctx.scale(t.width/100, t.height/100);
+
+                const nw = domEl.videoWidth || domEl.naturalWidth || cvWidth;
+                const nh = domEl.videoHeight || domEl.naturalHeight || cvHeight;
+                
+                if (nw > 0 && nh > 0) {
+                    const ratioSrc = nw / nh;
+                    const ratioTgt = cvWidth / cvHeight;
+                    let dw, dh;
+                    
+                    if (ratioSrc > ratioTgt) { dw = cvWidth; dh = cvWidth / ratioSrc; }
+                    else { dh = cvHeight; dw = cvHeight * ratioSrc; }
+                    
+                    try { 
+                        ctx.drawImage(domEl, -dw/2, -dh/2, dw, dh); 
+                    } catch(e) {}
+                }
+                ctx.restore();
+            });
         });
     }
 
@@ -295,119 +313,234 @@ export class PlaybackManager {
         if(this.studio.timelineManager) this.studio.timelineManager.updatePlayheadPosition();
         this.syncPreview();
         this.trackLayers.forEach(layer => {
-            const clip = this._getClipAtTime(layer.trackId, time);
-            this._syncAudioTrack(layer, clip, time);
+            const clips = this._getClipsAtTime(layer.trackId, time);
+            this._syncAudioTrack(layer, clips, time);
         });
     }
 
     syncPreview() {
+        // Garante que temos o container principal
+        if (!this.container) {
+            this.container = document.getElementById('studio-preview-canvas');
+        }
+        if (!this.container) return; // Se ainda não existe DOM, aborta (tenta no próximo ciclo)
+
         const time = this.studio.project.currentTime;
         const tracks = this.studio.project.tracks;
         
+        // 1. Limpeza de tracks removidas
         const validIds = new Set(tracks.map(t => t.id));
         for (const [id, layer] of this.trackLayers) {
             if (!validIds.has(id)) {
                 if(layer.container) layer.container.remove();
-                if(layer.audioEl) layer.audioEl.pause();
+                if(layer.audioEl) { layer.audioEl.pause(); layer.audioEl.src = ""; }
+                if(layer.audioEl2) { layer.audioEl2.pause(); layer.audioEl2.src = ""; }
                 this.trackLayers.delete(id);
             }
         }
 
+        // 2. Criação e Sincronização
         tracks.forEach((track, idx) => {
             let layer = this.trackLayers.get(track.id);
+            
+            // Se não existe na memória, cria
             if (!layer) {
                 layer = this._createTrackLayer(track);
                 this.trackLayers.set(track.id, layer);
             }
-            if(layer.container) layer.container.style.zIndex = tracks.length - idx;
 
-            const clip = this._getClipAtTime(track.id, time);
-            if(track.type === 'video') this._syncVideoTrack(layer, clip, time);
-            else this._syncAudioTrack(layer, clip, time);
+            if (layer.container && !this.container.contains(layer.container)) {
+                this.container.appendChild(layer.container);
+            }
+
+            // Atualiza Z-Index (Track 0 no topo visual ou fundo?)
+            // Geralmente Track 0 (Index 0) é o topo da pilha em editores.
+            // Z-Index maior = Mais à frente.
+            if(layer.container) {
+                layer.container.style.zIndex = tracks.length - idx;
+            }
+
+            // Sincroniza conteúdo
+            // filter retorna array (suporte a crossfade)
+            const clips = this._getClipsAtTime(track.id, time);
+            
+            if(track.type === 'video') this._syncVideoTrack(layer, clips, time);
+            else this._syncAudioTrack(layer, clips, time);
         });
+    }
+
+    _updateSingleMediaElement(domEl, clip, time, isImage) {
+        if (!clip) {
+            domEl.style.display = 'none';
+            domEl.dataset.curId = ""; 
+            if(!isImage) domEl.pause();
+            return;
+        }
+
+        const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
+        if(!asset) return;
+
+        // Se o elemento mudou de dono (clip ID), recarrega
+        if(domEl.dataset.curId !== clip.id) {
+            domEl.src = asset.url;
+            domEl.dataset.curId = clip.id;
+            if(!isImage) domEl.load();
+        }
+
+        let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
+        alpha *= this._calculateFadeFactor(clip, time);
+        alpha = Math.max(0, Math.min(1, alpha));
+
+        const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
+        const transform = `translate(-50%, -50%) translate(${t.x}px, ${t.y}px) rotate(${t.rotation}deg) scale(${t.width / 100}, ${t.height / 100})`;
+        
+        domEl.style.transform = transform;
+        domEl.style.position = 'absolute';
+        domEl.style.left = '50%';
+        domEl.style.top = '50%';
+        domEl.style.transformOrigin = 'center center';
+        
+        // Força visibilidade correta
+        if (isImage) {
+            domEl.style.display = 'block';
+            domEl.style.opacity = alpha;
+        } else {
+            domEl.style.display = 'block';
+            domEl.style.opacity = alpha;
+            domEl.muted = clip.muted === true;
+
+            let localTime = (time - clip.start) + clip.offset;
+            if (Math.abs(domEl.currentTime - localTime) > 0.3 || domEl.ended) {
+                domEl.currentTime = localTime;
+            }
+
+            const isRendering = this.studio.renderManager && this.studio.renderManager.isRendering;
+            if (this.isPlaying || isRendering) {
+                if(domEl.paused) domEl.play().catch(()=>{});
+            } else {
+                if(!domEl.paused) domEl.pause();
+            }
+        }
     }
 
     _createTrackLayer(track) {
         const layer = { trackId: track.id };
+        
         if (track.type === 'video') {
             const div = document.createElement('div');
+            // Z-index inicial e pointer-events
             div.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden;";
             
-            const vid = document.createElement('video');
-            vid.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
-            vid.crossOrigin = "anonymous";
+            // Slot 1
+            const vid1 = document.createElement('video');
+            vid1.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
+            vid1.crossOrigin = "anonymous";
+            const img1 = document.createElement('img');
+            img1.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
             
-            const img = document.createElement('img');
-            img.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
+            // Slot 2 (Crossfade)
+            const vid2 = document.createElement('video');
+            vid2.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
+            vid2.crossOrigin = "anonymous";
+            const img2 = document.createElement('img');
+            img2.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
+
+            div.append(vid1, img1, vid2, img2);
             
-            div.append(vid, img);
+            // Tenta anexar imediatamente se o container já existir
             if(this.container) this.container.appendChild(div);
             
             layer.container = div;
-            layer.videoEl = vid;
-            layer.imgEl = img;
+            layer.videoEl = vid1;
+            layer.imgEl = img1;
+            layer.videoEl2 = vid2;
+            layer.imgEl2 = img2;
         } else {
-            const aud = new Audio();
-            aud.crossOrigin = "anonymous";
-            layer.audioEl = aud;
+            // Áudio (sem container visual)
+            const aud1 = new Audio();
+            aud1.crossOrigin = "anonymous";
+            const aud2 = new Audio();
+            aud2.crossOrigin = "anonymous";
+            
+            layer.audioEl = aud1;
+            layer.audioEl2 = aud2;
         }
         return layer;
     }
 
-    _syncVideoTrack(layer, clip, time) {
-        const { videoEl, imgEl } = layer;
-        if (!clip) {
-            videoEl.style.display = 'none'; videoEl.pause();
-            imgEl.style.display = 'none'; return;
-        }
+    _syncVideoTrack(layer, clips, time) {
+        // Slots disponíveis (Máx 2 simultâneos para crossfade)
+        const slots = [
+            { id: 1, video: layer.videoEl, image: layer.imgEl },
+            { id: 2, video: layer.videoEl2, image: layer.imgEl2 }
+        ];
         
-        const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
-        if(!asset) return;
+        const usedSlotIds = new Set();
 
-        let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
-        
-        // Aplica o fator de Fade
-        const fadeFactor = this._calculateFadeFactor(clip, time);
-        alpha *= fadeFactor;
-        
-        alpha = Math.max(0, Math.min(1, alpha));
+        // 1. Limpeza de Referências de Outras Trilhas
+        // Se o clipe diz que tem um slot, mas o ID da trilha não bate com a atual, reseta.
+        clips.forEach(clip => {
+            if (clip._assignedSlotTrackId && clip._assignedSlotTrackId !== layer.trackId) {
+                clip._assignedSlotId = null;
+                clip._assignedSlotTrackId = null;
+            }
+        });
 
-        const applyDOMTransform = (el) => {
-            this._applyClipTransform(el, clip);
-        };
+        // 2. Persistência (Manter onde está)
+        clips.forEach(clip => {
+            // Tenta achar onde o clipe JÁ está carregado no DOM desta trilha
+            const domMatch = slots.find(s => 
+                (s.video.dataset.curId === clip.id) || (s.image.dataset.curId === clip.id)
+            );
 
-        if (asset.type === 'image') {
-            videoEl.style.display = 'none'; videoEl.pause();
-            if(imgEl.src !== asset.url) imgEl.src = asset.url;
-            imgEl.style.display = 'block'; 
-            imgEl.style.opacity = alpha; // Opacidade calculada
-            applyDOMTransform(imgEl);
-            return;
-        }
+            if (domMatch) {
+                clip._assignedSlotId = domMatch.id;
+                clip._assignedSlotTrackId = layer.trackId;
+                usedSlotIds.add(domMatch.id);
+            } 
+            else if (clip._assignedSlotId) {
+                // Se o clipe lembra do seu slot e ele está livre, mantém
+                if (!usedSlotIds.has(clip._assignedSlotId)) {
+                    usedSlotIds.add(clip._assignedSlotId);
+                    clip._assignedSlotTrackId = layer.trackId;
+                } else {
+                    clip._assignedSlotId = null; // Perdeu o lugar, vai para realocação
+                }
+            }
+        });
 
-        imgEl.style.display = 'none';
-        if (videoEl.dataset.curId !== clip.id) {
-            videoEl.src = asset.url;
-            videoEl.dataset.curId = clip.id;
-            videoEl.load();
-        }
-        videoEl.style.display = 'block';
-        videoEl.style.opacity = alpha; // Opacidade calculada
-        videoEl.muted = clip.muted === true;
-        applyDOMTransform(videoEl);
+        // 3. Alocação (Preencher vagas)
+        clips.forEach(clip => {
+            if (!clip._assignedSlotId) {
+                const freeSlot = slots.find(s => !usedSlotIds.has(s.id));
+                if (freeSlot) {
+                    clip._assignedSlotId = freeSlot.id;
+                    clip._assignedSlotTrackId = layer.trackId;
+                    usedSlotIds.add(freeSlot.id);
+                }
+            }
+        });
 
-        let localTime = (time - clip.start) + clip.offset;
-        
-        if (Math.abs(videoEl.currentTime - localTime) > 0.3 || videoEl.ended) {
-            videoEl.currentTime = localTime;
-        }
+        // 4. Renderização DOM (Aplica src, display, opacity)
+        slots.forEach(slot => {
+            const assignedClip = clips.find(c => c._assignedSlotId === slot.id);
 
-        const isRendering = this.studio.renderManager && this.studio.renderManager.isRendering;
-        if (this.isPlaying || isRendering) {
-            if(videoEl.paused) videoEl.play().catch(()=>{});
-        } else {
-            if(!videoEl.paused) videoEl.pause();
-        }
+            if (assignedClip) {
+                const isImage = assignedClip.type === 'image';
+                
+                if (isImage) {
+                    this._updateSingleMediaElement(slot.image, assignedClip, time, true);
+                    this._updateSingleMediaElement(slot.video, null, time, false); // Limpa vídeo
+                } else {
+                    this._updateSingleMediaElement(slot.video, assignedClip, time, false);
+                    this._updateSingleMediaElement(slot.image, null, time, true); // Limpa imagem
+                }
+            } else {
+                // Slot vazio: Limpa tudo para evitar "fantasmas"
+                this._updateSingleMediaElement(slot.image, null, time, true);
+                this._updateSingleMediaElement(slot.video, null, time, false);
+            }
+        });
     }
 
     /**
@@ -442,73 +575,81 @@ export class PlaybackManager {
 
         const timeInClip = globalTime - clip.start;
         const duration = clip.duration;
-        const fadeIn = clip.fadeIn || 0;
-        const fadeOut = clip.fadeOut || 0;
+        // Garante números válidos
+        const fadeIn = Number(clip.fadeIn) || 0;
+        const fadeOut = Number(clip.fadeOut) || 0;
 
-        let factor = 1.0;
+        let factorIn = 1.0;
+        let factorOut = 1.0;
 
-        // Lógica de Fade In
-        if (fadeIn > 0 && timeInClip < fadeIn) {
-            const progress = Math.max(0, timeInClip / fadeIn);
-            // Fórmula Ease-In-Out Sine: 0.5 * (1 - cos(p * pi))
-            factor = 0.5 * (1 - Math.cos(progress * Math.PI));
-        } 
-        // Lógica de Fade Out
-        else if (fadeOut > 0 && timeInClip > (duration - fadeOut)) {
-            const remaining = duration - timeInClip;
-            const progress = Math.max(0, remaining / fadeOut);
-            factor = 0.5 * (1 - Math.cos(progress * Math.PI));
+        // 1. Cálculo do Fade In (Curva Senoidal)
+        if (fadeIn > 0) {
+            if (timeInClip < 0) factorIn = 0; // Antes do inicio
+            else if (timeInClip < fadeIn) {
+                const progress = timeInClip / fadeIn;
+                factorIn = 0.5 * (1 - Math.cos(progress * Math.PI));
+            }
         }
 
-        return Math.max(0, Math.min(1, factor));
+        // 2. Cálculo do Fade Out (Curva Senoidal)
+        if (fadeOut > 0) {
+            const timeStartFadeOut = duration - fadeOut;
+            if (timeInClip > duration) factorOut = 0; // Depois do fim
+            else if (timeInClip > timeStartFadeOut) {
+                const remaining = duration - timeInClip;
+                const progress = remaining / fadeOut; // Vai de 1 a 0
+                factorOut = 0.5 * (1 - Math.cos(progress * Math.PI));
+            }
+        }
+
+        // A combinação é multiplicativa (Se estiver a entrar e sair ao mesmo tempo, aplica ambos)
+        return Math.max(0, Math.min(1, factorIn * factorOut));
     }
 
-    _syncAudioTrack(layer, clip, time) {
-        const { audioEl } = layer;
-        if(!audioEl) return;
+    _syncAudioTrack(layer, clips, time) {
+        const updateAudio = (audioEl, clip) => {
+            if(!audioEl) return;
+            if (!clip) { if(!audioEl.paused) audioEl.pause(); return; }
 
-        if (!clip) {
-            if(!audioEl.paused) audioEl.pause();
-            return;
-        }
-        
-        const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
-        if(!asset) return;
+            const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
+            if(!asset) return;
 
-        if(audioEl.dataset.curId !== clip.id) {
-            audioEl.src = asset.url;
-            audioEl.dataset.curId = clip.id;
-        }
+            if(audioEl.dataset.curId !== clip.id) {
+                audioEl.src = asset.url;
+                audioEl.dataset.curId = clip.id;
+            }
 
-        let vol = clip.level !== undefined ? clip.level : (clip.volume || 1);
-        if(vol > 1) vol = vol/100;
-        
-        // Aplica o fator de Fade ao volume
-        const fadeFactor = this._calculateFadeFactor(clip, time);
-        vol *= fadeFactor;
+            let vol = clip.level !== undefined ? clip.level : (clip.volume || 1);
+            if(vol > 1) vol = vol/100;
+            vol *= this._calculateFadeFactor(clip, time); // Aplica fade curve
 
-        audioEl.volume = Math.max(0, Math.min(1, vol));
-        audioEl.muted = layer.muted || false;
+            audioEl.volume = Math.max(0, Math.min(1, vol));
+            audioEl.muted = layer.muted || false;
 
-        let localTime = (time - clip.start) + clip.offset;
-        
-        if (Math.abs(audioEl.currentTime - localTime) > 0.3) {
-            audioEl.currentTime = localTime;
-        }
+            let localTime = (time - clip.start) + clip.offset;
+            if (Math.abs(audioEl.currentTime - localTime) > 0.3) {
+                audioEl.currentTime = localTime;
+            }
+            
+            const isRendering = this.studio.renderManager && this.studio.renderManager.isRendering;
+            const shouldPlay = this.isPlaying || (isRendering && this.isPlaying);
+            
+            if (shouldPlay) {
+                if(audioEl.paused) audioEl.play().catch(()=>{});
+            } else {
+                if(!audioEl.paused) audioEl.pause();
+            }
+        };
 
-        const isRendering = this.studio.renderManager && this.studio.renderManager.isRendering;
-        const shouldPlay = this.isPlaying || (isRendering && this.isPlaying); 
-        
-        if (shouldPlay) {
-            if(audioEl.paused) audioEl.play().catch(()=>{});
-        } else {
-            if(!audioEl.paused) audioEl.pause();
-        }
+        updateAudio(layer.audioEl, clips[0] || null);
+        updateAudio(layer.audioEl2, clips[1] || null);
     }
 
-    _getClipAtTime(trackId, time) {
+    _getClipsAtTime(trackId, time) {
         const track = this.studio.project.tracks.find(t => t.id === trackId);
-        if(!track || track.muted) return null;
-        return track.clips.find(c => time >= c.start && time < (c.start + c.duration));
+        if(!track || track.muted) return [];
+        // [CORREÇÃO] filter em vez de find
+        return track.clips.filter(c => time >= c.start && time < (c.start + c.duration))
+                          .sort((a, b) => a.start - b.start); // Ordena por início para estabilidade
     }
 }
