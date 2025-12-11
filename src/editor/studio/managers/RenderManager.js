@@ -7,7 +7,6 @@ export class RenderManager {
         this.chunks = [];
         this.renderOptions = {};
         
-        // Constantes de UX
         this.RECORDING_WEIGHT = 0.8; // 80% para gravação
         this.CONVERSION_WEIGHT = 0.2; // 20% para conversão
     }
@@ -58,7 +57,6 @@ export class RenderManager {
         const project = this.studio.project;
         const playback = this.studio.playbackManager;
 
-        // 1. Calcula Intervalo Real de Renderização (Smart Bounds)
         let minStart = Infinity;
         let maxEnd = 0;
         let hasClips = false;
@@ -99,7 +97,6 @@ export class RenderManager {
             playback.stop();
             await new Promise(r => setTimeout(r, 200)); 
             
-            // 2. Pula diretamente para o primeiro frame real (pula o espaço vazio)
             await playback.seekAndRender(minStart);
 
             const stream = playback.getCompositeStream(30);
@@ -126,18 +123,15 @@ export class RenderManager {
                 if (e.data && e.data.size > 0) this.chunks.push(e.data);
             };
 
-            // 5. Inicia
             this.recorder.start();
             playback.play(); 
 
-            // 6. Loop de Monitoramento
             const checkInterval = setInterval(() => {
                 const current = project.currentTime;
                 
                 // Progresso Visual
                 const maxVisualPct = (this.renderOptions.format === 'mp4') ? 0.8 : 1.0;
                 
-                // Ajuste matemático: O progresso agora é relativo ao intervalo [minStart, maxEnd]
                 // (current - minStart) nos dá quantos segundos já processamos dentro da área útil
                 const processedTime = Math.max(0, current - minStart);
                 const rawPct = Math.min(1, processedTime / renderDuration);
@@ -168,14 +162,11 @@ export class RenderManager {
     async _finishRender(intervalId, recordedMimeType, duration) {
         clearInterval(intervalId);
         
-        // 1. Pausa a reprodução (Não use stop() aqui para evitar que pule para o início e toque áudio)
         this.studio.playbackManager.pause();
         
         if (this.recorder && this.recorder.state !== 'inactive') {
             this.recorder.stop();
         }
-
-        // NÃO DESMUTE AQUI AINDA. Espere a conversão acabar.
 
         // Se for WebM (sem conversão), já pula para 100%
         if (this.renderOptions.format !== 'mp4') {
@@ -186,7 +177,6 @@ export class RenderManager {
             let finalBlob = new Blob(this.chunks, { type: recordedMimeType });
             let finalExt = 'webm';
 
-            // --- FASE 2: CONVERSÃO MP4 ---
             if (this.renderOptions.format === 'mp4') {
                 // Ticker para manter o relógio rodando durante a conversão
                 const conversionTicker = setInterval(() => {
@@ -259,8 +249,7 @@ export class RenderManager {
                 this.studio.editor.ui.video.pause(); 
             }
 
-            // AGORA SIM: Restaura o som e libera a UI
-            this.studio.playbackManager.stop(); // Agora pode resetar para o início
+            this.studio.playbackManager.stop();
             if (this.studio.playbackManager.toggleMonitorMute) {
                 this.studio.playbackManager.toggleMonitorMute(false);
             }
@@ -277,9 +266,6 @@ export class RenderManager {
 
         }, 500);
     }
-
-    // ... (cancelRendering, _showProgressOverlay, _fmt e updateProgress mantidos iguais) ...
-    // Vou colocar o updateProgress aqui para garantir que ele aceite os novos parâmetros se tiver mudado
     
     updateProgress(percentage, infoText, remainingSeconds, elapsedSeconds) {
         const overlay = document.getElementById('render-progress-overlay');
