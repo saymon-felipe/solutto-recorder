@@ -1556,72 +1556,75 @@ export class TimelineManager {
     _optimizedWaveDraw(ctx, cache, width, height, level, clipDuration, clipOffset, clip) {
         const sampleRate = cache.sampleRate;
         const zoom = this.studio.project.zoom; 
-        
         const samplesPerVisualPixel = sampleRate / zoom;
         const offsetSamples = clipOffset * sampleRate;
 
         ctx.clearRect(0, 0, width, height); 
         ctx.fillStyle = "#4fc3f7";
 
-        const mid = height / 2;
-
-        // --- Lógica LOD (Level of Detail) ---
-        let bins = cache.full;
-        let binSize = 1;
-
-        if (samplesPerVisualPixel >= 8) {
-            bins = cache.eighth;
-            binSize = 8;
-        } else if (samplesPerVisualPixel >= 4) {
-            bins = cache.quarter;
-            binSize = 4;
-        } else if (samplesPerVisualPixel >= 2) {
-            bins = cache.half;
-            binSize = 2;
-        }
-
-        if (!bins || bins.length === 0) return;
-
-        const wrapLength = bins.length;
-
-        for (let x = 0; x < width; x++) {
-
-            const sourceTime = (x * samplesPerVisualPixel / sampleRate) + clipOffset;
+        const drawChannel = (channelData, topY, drawHeight) => {
+            const mid = drawHeight / 2;
             
-            // 2. Calcula o sample e bin para o loop
-            const absoluteSampleStart = Math.floor(offsetSamples + x * samplesPerVisualPixel);
-            const sampleEnd = Math.floor(absoluteSampleStart + samplesPerVisualPixel);
-            const binStart = Math.floor(absoluteSampleStart / binSize);
-            const binEnd = Math.floor(sampleEnd / binSize);
+            let bins = channelData.full;
+            let binSize = 1;
+            if (samplesPerVisualPixel >= 8) { bins = channelData.eighth; binSize = 8; } 
+            else if (samplesPerVisualPixel >= 4) { bins = channelData.quarter; binSize = 4; } 
+            else if (samplesPerVisualPixel >= 2) { bins = channelData.half; binSize = 2; }
 
-            let min = 1.0, max = -1.0;
+            if (!bins || bins.length === 0) return;
+            const wrapLength = bins.length;
 
-            for (let b = binStart; b <= binEnd; b++) {
-                const idx = ((b % wrapLength) + wrapLength) % wrapLength;
-                const binData = bins[idx];
-                if (!binData) continue; 
+            for (let x = 0; x < width; x++) {
+                const sourceTime = (x * samplesPerVisualPixel / sampleRate) + clipOffset;
+                const absoluteSampleStart = Math.floor(offsetSamples + x * samplesPerVisualPixel);
+                const sampleEnd = Math.floor(absoluteSampleStart + samplesPerVisualPixel);
+                const binStart = Math.floor(absoluteSampleStart / binSize);
+                const binEnd = Math.floor(sampleEnd / binSize);
 
-                const { min: bMin, max: bMax } = binData;
-                if (bMin < min) min = bMin;
-                if (bMax > max) max = bMax;
+                let min = 1.0, max = -1.0;
+
+                for (let b = binStart; b <= binEnd; b++) {
+                    const idx = ((b % wrapLength) + wrapLength) % wrapLength;
+                    const binData = bins[idx];
+                    if (!binData) continue; 
+                    if (binData.min < min) min = binData.min;
+                    if (binData.max > max) max = binData.max;
+                }
+
+                // Cálculo do Fade
+                let fadeFactor = 1.0;
+                if (clip && (clip.fadeIn > 0 || clip.fadeOut > 0)) { 
+                     const timeRelative = sourceTime - (clip.offset || 0);
+                     fadeFactor = this._calculateLocalFadeFactor(clip, timeRelative);
+                }
+
+                min *= level * fadeFactor;
+                max *= level * fadeFactor;
+
+                // Desenha relativo ao topY (metade superior ou inferior)
+                const y = (topY + mid) + (min * mid);
+                const h = Math.max(1, (max - min) * mid);
+
+                ctx.fillRect(x, y, 1, h);
             }
+        };
+
+        if (cache.channels > 1 && cache.right) {
+            // STEREO: Divide a altura em 2
+            const halfHeight = height / 2;
             
-            // 4. Calcula o FATOR DE ATENUAÇÃO (Fade In/Out)
-            let fadeFactor = 1.0;
+            // Desenha Esquerda (Topo)
+            drawChannel(cache.left, 0, halfHeight);
             
-            if (clip && (clip.fadeIn > 0 || clip.fadeOut > 0)) { 
-                 const timeRelative = sourceTime - (clip.offset || 0);
-                 fadeFactor = this._calculateLocalFadeFactor(clip, timeRelative);
-            }
-
-            // 5. Aplica Volume Base e Fade
-            min *= level * fadeFactor;
-            max *= level * fadeFactor;
-
-            const y = mid + min * mid;
-            const h = Math.max(1, (max - min) * mid);
-
-            ctx.fillRect(x, y, 1, h);
+            // Desenha Direita (Baixo)
+            drawChannel(cache.right, halfHeight, halfHeight);
+            
+            ctx.fillStyle = "rgba(255,255,255,0.1)";
+            ctx.fillRect(0, halfHeight, width, 1);
+            ctx.fillStyle = "#4fc3f7"; 
+            
+        } else {
+            drawChannel(data, 0, height);
         }
     }
 

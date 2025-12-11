@@ -125,30 +125,46 @@ export class AssetManager {
      * Retorna um objeto { sampleRate, full, half, quarter, eighth }
      */
     generateOptimizedWaveformCache(audioBuffer) {
-        const data = audioBuffer.getChannelData(0);
-        const total = data.length;
+        const buildChannelCache = (channelIndex) => {
+            const data = audioBuffer.getChannelData(channelIndex);
+            const total = data.length;
+            
+            const build = (bin) => {
+                const arr = [];
+                for (let i = 0; i < total; i += bin) {
+                    let min = 1.0, max = -1.0;
 
-        const build = (bin) => {
-            const arr = [];
-            for (let i = 0; i < total; i += bin) {
-                let min = +1, max = -1;
-                for (let j = 0; j < bin && (i + j) < total; j++) {
-                    const v = data[i + j];
-                    if (v < min) min = v;
-                    if (v > max) max = v;
+                    for (let j = 0; j < bin && (i + j) < total; j++) {
+                        const v = data[i + j];
+                        if (v < min) min = v;
+                        if (v > max) max = v;
+                    }
+
+                    if (min > max) { min = 0; max = 0; }
+                    arr.push({ min, max });
                 }
-                arr.push({ min, max });
-            }
-            return arr;
+                return arr;
+            };
+
+            return {
+                full: build(1),
+                half: build(2),
+                quarter: build(4),
+                eighth: build(8)
+            };
         };
 
-        return {
+        const result = {
             sampleRate: audioBuffer.sampleRate,
-            full: build(1),
-            half: build(2),
-            quarter: build(4),
-            eighth: build(8)
+            channels: audioBuffer.numberOfChannels,
+            left: buildChannelCache(0) 
         };
+
+        if (audioBuffer.numberOfChannels > 1) {
+            result.right = buildChannelCache(1);
+        }
+
+        return result;
     }
 
     /**
