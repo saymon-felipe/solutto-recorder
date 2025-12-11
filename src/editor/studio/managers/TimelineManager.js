@@ -2352,6 +2352,8 @@ export class TimelineManager {
         const tracksContainer = document.getElementById('studio-tracks');
         const containerRect = tracksContainer.getBoundingClientRect();
         
+        const zoom = this.studio.project.zoom; 
+
         // Dados para o Snap
         const activeRect = el.getBoundingClientRect();
         const activeTop = (activeRect.top - containerRect.top) + tracksContainer.scrollTop;
@@ -2359,35 +2361,37 @@ export class TimelineManager {
 
         // 1. Identificação de Alvos (Targets)
         const targets = [];
+        
+        // Helper para adicionar targets e persistir a referência da TRACK (importante para saber se é track de áudio)
+        const addTarget = (c, element, t) => {
+            if (!targets.some(existing => existing.clip.id === c.id)) {
+                targets.push({ clip: c, el: element, track: t });
+            }
+        };
+
         if (clip.groupId) {
             this.studio.project.tracks.forEach(track => {
                 track.clips.forEach(c => {
                     if (c.groupId === clip.groupId) {
-                        // Aplica apenas a clipes alinhados verticalmente (mesmo start/duration)
+                        // Aplica apenas a clipes alinhados verticalmente
                         if (Math.abs(c.start - initialStart) < 0.01 && Math.abs(c.duration - initialDuration) < 0.01) {
                             const domEl = c.id === clip.id ? el : this._findDomElement(c.id);
-                            targets.push({ clip: c, el: domEl });
+                            addTarget(c, domEl, track);
                         }
                     }
                 });
             });
         }
-        if (targets.length === 0) targets.push({ clip, el });
-        if (!targets.some(t => t.clip.id === clip.id)) targets.push({ clip, el });
+        
+        // Garante que o clipe clicado está na lista
+        if (!targets.some(t => t.clip.id === clip.id)) {
+            const track = this.studio.project.tracks.find(t => t.clips.some(c => c.id === clip.id));
+            addTarget(clip, el, track);
+        }
 
         // 2. Mapeamento de Pontos Magnéticos
         const snapPoints = [];
         
-        // -- Adiciona Snap nos Loops (Lógica que já implementamos antes) --
-        const currentAsset = this.studio.project.assets.find(a => a.id === clip.assetId);
-        if (currentAsset && currentAsset.baseDuration > 0) {
-            const projectedLoops = 50; 
-            for(let i = 1; i <= projectedLoops; i++) {
-                // Se for Esquerda, o loop point relevante muda em relação ao start atual
-                // Para simplificar UX da esquerda, focamos snap em outros clipes e agulha.
-            }
-        }
-
         this.studio.project.tracks.forEach(track => {
             track.clips.forEach(c => {
                 if (targets.some(t => t.clip.id === c.id)) return; 
@@ -2417,23 +2421,21 @@ export class TimelineManager {
             if (Math.abs(deltaPx) < 2 && !didResize) return;
             didResize = true;
             
-            const deltaSec = deltaPx / this.studio.project.zoom;
+            const deltaSec = deltaPx / zoom;
             let finalStart = initialStart;
             let finalDuration = initialDuration;
             let finalOffset = initialOffset;
 
             if (isLeft) {
                 // --- LÓGICA ESQUERDA ---
-                
-                // 1. Calcula Projeção sem restrições
                 let rawNewStart = initialStart + deltaSec;
                 
-                // 2. Snap Magnético (no Start)
+                // Snap Magnético
                 let bestSnap = null;
                 let minDist = Infinity;
                 
                 for (const pt of snapPoints) {
-                    const distPx = Math.abs(pt.time - rawNewStart) * this.studio.project.zoom;
+                    const distPx = Math.abs(pt.time - rawNewStart) * zoom;
                     if (distPx < SNAP_THRESHOLD_PX && distPx < minDist) {
                         minDist = distPx;
                         bestSnap = pt;
@@ -2448,24 +2450,17 @@ export class TimelineManager {
                     this._updateSnapLine(0, false);
                 }
 
-                // 3. Calcula Delta efetivo após Snap
                 const effectiveDelta = rawNewStart - initialStart;
 
-                // 4. Restrição de Duração Mínima (não inverter o clipe)
+                // Restrição de Duração Mínima
                 if ((initialDuration - effectiveDelta) < (1/30)) {
                     rawNewStart = initialStart + initialDuration - (1/30);
                 }
 
-                // 5. Restrição de Início de Arquivo (Offset >= 0)
-                // Se eu estou puxando para esquerda (delta negativo), o offset diminui.
-                // Offset Novo = Offset Inicial + Delta
+                // Restrição de Início de Arquivo
                 let proposedOffset = initialOffset + (rawNewStart - initialStart);
-                
                 if (proposedOffset < 0) {
-                    // Bateu no início do arquivo
                     proposedOffset = 0;
-                    // Recalcula o start baseado no offset 0
-                    // Start = InitialStart - InitialOffset
                     rawNewStart = initialStart - initialOffset; 
                 }
 
@@ -2474,15 +2469,15 @@ export class TimelineManager {
                 finalDuration = initialDuration - (finalStart - initialStart);
 
             } else {
-                // --- LÓGICA DIREITA (Mantida e Ajustada) ---
-                let rawWidth = Math.max(10, (initialDuration * this.studio.project.zoom) + deltaPx);
-                let rawDur = rawWidth / this.studio.project.zoom;
+                // --- LÓGICA DIREITA ---
+                let rawWidth = Math.max(10, (initialDuration * zoom) + deltaPx);
+                let rawDur = rawWidth / zoom;
                 const projectedEnd = initialStart + rawDur;
                 
                 let bestSnap = null;
                 let minDist = Infinity;
                 for (const pt of snapPoints) {
-                    const distPx = Math.abs(pt.time - projectedEnd) * this.studio.project.zoom;
+                    const distPx = Math.abs(pt.time - projectedEnd) * zoom;
                     if (distPx < SNAP_THRESHOLD_PX && distPx < minDist) {
                         minDist = distPx;
                         bestSnap = pt;
@@ -2503,83 +2498,89 @@ export class TimelineManager {
             targets.forEach(target => {
                 const tClip = target.clip;
                 const tEl = target.el;
+                const tTrack = target.track; // Recupera a track correta
 
                 tClip.start = finalStart;
                 tClip.duration = finalDuration;
                 tClip.offset = finalOffset;
 
-                // Ajuste de Fades (segurança)
+                // Ajuste de Fades (segurança para não estourar a duração)
                 if ((tClip.fadeIn + tClip.fadeOut) > finalDuration) {
                      if (tClip.fadeIn > finalDuration) tClip.fadeIn = finalDuration;
                      tClip.fadeOut = Math.max(0, finalDuration - tClip.fadeIn);
                 }
 
                 if (tEl) {
-                    tEl.style.left = (finalStart * this.studio.project.zoom) + "px";
-                    tEl.style.width = (finalDuration * this.studio.project.zoom) + "px";
+                    tEl.style.left = (finalStart * zoom) + "px";
+                    tEl.style.width = (finalDuration * zoom) + "px";
                     this._updateFadeVisuals(tClip, tEl);
 
                     // ATUALIZAÇÃO VISUAL INTERNA (Waveforms e Loops)
-                    if (currentAsset) {
-                        // 1. Vincos de Loop
-                        const baseDur = currentAsset.baseDuration;
-                        const zoom = this.studio.project.zoom;
-                        
-                        // Limpa vincos antigos
-                        Array.from(tEl.querySelectorAll('.loop-marker')).forEach(m => m.remove());
-                        
-                        // Recria vincos apenas se duration > baseDuration (Direita)
-                        // Na esquerda não criamos loop, mas se o clipe já for longo, os vincos devem se mover
-                        // Calculamos onde os múltiplos de baseDuration caem RELATIVO ao novo Start
-                        
-                        const loops = Math.floor((tClip.duration + tClip.offset) / baseDur);
-                        // Apenas desenha se o loop estiver visível dentro da janela atual do clipe
-                        for(let i=1; i<=loops; i++) {
-                             const loopTimePoint = i * baseDur; // Tempo absoluto no source
-                             // Converte para pixels relativos ao inicio da div
-                             const relativePixel = (loopTimePoint - tClip.offset) * zoom;
-                             
-                             if (relativePixel > 0 && relativePixel < (tClip.duration * zoom)) {
-                                const m = document.createElement("div");
-                                m.className = "loop-marker loop-vinco";
-                                m.style.left = relativePixel + "px";
-                                m.style.cssText += `position: absolute; top: 0; bottom: 0; width: 1px; background-color: rgba(255, 255, 255, 0.5); border-left: 2px dashed rgba(0, 0, 0, 0.5); z-index: 10; pointer-events: none;`;
-                                tEl.appendChild(m);
-                             }
+                    const tAsset = this.studio.project.assets.find(a => a.id === tClip.assetId);
+                    
+                    if (tAsset) {
+                        // Determina se é visualização de áudio (Asset Áudio OU Track Áudio)
+                        const isAudioTrack = tTrack && tTrack.type === 'audio';
+
+                        // 1. Loop Markers
+                        if (tAsset.baseDuration > 0) {
+                            const baseDur = tAsset.baseDuration;
+                            
+                            // Remove marcadores antigos (limpeza)
+                            const oldMarkers = tEl.querySelectorAll('.loop-marker');
+                            for(let m of oldMarkers) m.remove();
+                            
+                            // Calcula novos loops baseados na nova duração
+                            const totalTime = tClip.duration + tClip.offset;
+                            const loops = Math.floor(totalTime / baseDur);
+                            
+                            for(let i=1; i<=loops; i++) {
+                                const timePoint = i * baseDur;
+                                const relativePixel = (timePoint - tClip.offset) * zoom; // Usa 'zoom' corrigido
+
+                                if (relativePixel > 0 && relativePixel < (tClip.duration * zoom)) {
+                                    const m = document.createElement("div");
+                                    m.className = "loop-marker loop-vinco";
+                                    m.style.left = relativePixel + "px";
+                                    m.style.cssText = `position: absolute; top: 0; bottom: 0; width: 1px; background-color: rgba(255, 255, 255, 0.5); border-left: 2px dashed rgba(0, 0, 0, 0.5); z-index: 10; pointer-events: none;`;
+                                    tEl.appendChild(m);
+                                }
+                            }
                         }
 
-                        // 2. Waveform Repeater (Deslocamento Visual)
-                        const repeater = tEl.querySelector('.waveform-repeater');
-                        if (repeater) {
-                             // Atualiza o Translate X para compensar o Offset
-                             const offsetX = tClip.offset * zoom;
-                             repeater.style.transform = `translateX(-${offsetX}px)`;
-                             
-                             // Garante tamanho suficiente do repeater
-                             const totalRequiredTime = tClip.offset + tClip.duration;
-                             const requiredLoops = Math.ceil(totalRequiredTime / baseDur);
-                             const currentLoops = repeater.children.length;
-                             const baseWaveWidth = baseDur * zoom;
-                             
-                             // Adiciona clones se necessário (para cobrir offset alto + duração)
-                             if (requiredLoops > currentLoops && currentAsset._waveformBaseCanvas) {
-                                 for(let k=currentLoops; k<requiredLoops; k++) {
-                                     const clone = document.createElement("canvas");
-                                     clone.width = currentAsset._waveformBaseCanvas.width;
-                                     clone.height = currentAsset._waveformBaseCanvas.height;
-                                     clone.getContext('2d').drawImage(currentAsset._waveformBaseCanvas, 0, 0);
-                                     clone.style.width = `${baseWaveWidth}px`;
-                                     clone.style.height = "100%";
-                                     repeater.appendChild(clone);
-                                 }
-                                 repeater.style.width = `${baseWaveWidth * requiredLoops}px`;
-                             }
-                        }
+                        // 2. Waveform vs Thumbnails
                         
-                        // 3. Thumbnails (Recalcula se for vídeo/imagem)
-                        if (currentAsset.type === 'video' || currentAsset.type === 'image') {
+                        if (tAsset.type === 'audio' || isAudioTrack) {
+                             const repeater = tEl.querySelector('.waveform-repeater');
+                             
+                             if (repeater) {
+                                 const offsetX = tClip.offset * zoom;
+                                 repeater.style.transform = `translateX(-${offsetX}px)`;
+                                 
+                                 const baseDur = tAsset.baseDuration;
+                                 const totalRequiredTime = tClip.offset + tClip.duration;
+                                 const requiredLoops = Math.ceil(totalRequiredTime / baseDur);
+                                 const currentLoops = repeater.children.length;
+                                 const baseWaveWidth = baseDur * zoom;
+                                 
+                                 // Adiciona clones se necessário (para cobrir a nova duração)
+                                 if (requiredLoops > currentLoops && tAsset._waveformBaseCanvas) {
+                                     for(let k=currentLoops; k<requiredLoops; k++) {
+                                         const clone = document.createElement("canvas");
+                                         clone.width = tAsset._waveformBaseCanvas.width;
+                                         clone.height = tAsset._waveformBaseCanvas.height;
+                                         clone.getContext('2d').drawImage(tAsset._waveformBaseCanvas, 0, 0);
+                                         clone.style.width = `${baseWaveWidth}px`;
+                                         clone.style.height = "100%";
+                                         repeater.appendChild(clone);
+                                     }
+                                     repeater.style.width = `${baseWaveWidth * requiredLoops}px`;
+                                 }
+                             }
+                        } 
+                        else if (tAsset.type === 'video' || tAsset.type === 'image') {
                              const visuals = tEl.querySelector('.clip-visuals');
-                             if(visuals) this._renderThumbnails(currentAsset, visuals, tClip.duration, zoom);
+                             if(visuals) this._renderThumbnails(tAsset, visuals, tClip.duration, zoom);
                         }
                     }
                 }
