@@ -1,4 +1,6 @@
-import { getHeaderWidth, fmtTime } from '../utils.js';
+import { getHeaderWidth } from '../utils.js';
+
+const FPS = 30;
 
 export class PlaybackManager {
     constructor(studio) {
@@ -122,6 +124,17 @@ export class PlaybackManager {
         this.syncPreview();
     }
 
+    _fmtSMPTE(time) {
+        const totalFrames = Math.round(time * FPS);
+        const frames = totalFrames % FPS;
+        const totalSeconds = Math.floor(totalFrames / FPS);
+        const s = totalSeconds % 60;
+        const m = Math.floor(totalSeconds / 60) % 60;
+        const h = Math.floor(totalSeconds / 3600);
+        const pad = (n) => n.toString().padStart(2, '0');
+        return `${pad(h)}:${pad(m)}:${pad(s)};${pad(frames)}`;
+    }
+
     updatePlayhead() {
         const x = getHeaderWidth() + (this.studio.project.currentTime * this.studio.project.zoom);
         const el = document.getElementById('timeline-playhead-overlay');
@@ -133,7 +146,7 @@ export class PlaybackManager {
         }
         
         const disp = document.getElementById('studio-time-display');
-        if(disp) disp.innerText = fmtTime(this.studio.project.currentTime);
+        if(disp) disp.innerText = this._fmtSMPTE(this.studio.project.currentTime);
     }
 
     // =========================================================

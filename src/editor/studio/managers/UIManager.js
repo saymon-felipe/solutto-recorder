@@ -324,7 +324,7 @@ export class UIManager {
                     <div class="preview-controls">
                         <button class="control-btn" id="btn-stop"><i class="fa-solid fa-stop"></i></button>
                         <button class="control-btn" id="btn-play-pause"><i class="fa-solid fa-play"></i></button>
-                        <span id="studio-time-display" class="time-display">00:00.0</span>
+                        <span id="studio-time-display" class="time-display">00:00:00;00</span>
                     </div>
                 </div>
             </div>

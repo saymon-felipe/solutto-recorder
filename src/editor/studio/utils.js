@@ -8,13 +8,6 @@ export function getHeaderWidth() {
     return HEADER_WIDTH;
 }
 
-export function fmtTime(s) {
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    const ms = Math.floor((s % 1) * 10);
-    return `${m}:${String(sec).padStart(2,'0')}.${ms}`;
-}
-
 export function getMediaDuration(blob) {
     return new Promise(resolve => {
         const v = document.createElement('video');
