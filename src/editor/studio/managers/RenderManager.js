@@ -64,25 +64,19 @@ export class RenderManager {
         project.tracks.forEach(track => {
             track.clips.forEach(clip => {
                 hasClips = true;
-                // Encontra o início mais cedo
                 if (clip.start < minStart) minStart = clip.start;
-                
-                // Encontra o fim mais tardio
                 const clipEnd = clip.start + clip.duration;
                 if (clipEnd > maxEnd) maxEnd = clipEnd;
             });
         });
 
-        // Se não tiver clipes, define padrão seguro
         if (!hasClips) {
             minStart = 0;
             maxEnd = 5;
         }
 
-        // Duração real do arquivo final (sem o espaço vazio inicial)
         const renderDuration = maxEnd - minStart;
         
-        // Proteção para duração muito pequena
         if (renderDuration <= 0) {
             alert("A duração do projeto é inválida.");
             this.cancelRendering();
@@ -99,6 +93,13 @@ export class RenderManager {
             
             await playback.seekAndRender(minStart);
 
+            const statusText = document.getElementById('render-speed-text');
+            if(statusText) statusText.innerText = "Preparando assets...";
+            
+            await playback.waitForReady(4100); 
+
+            await new Promise(r => setTimeout(r, 150));
+
             const stream = playback.getCompositeStream(30);
 
             if (playback.toggleMonitorMute) playback.toggleMonitorMute(true);
@@ -107,7 +108,6 @@ export class RenderManager {
                 console.warn("[Render] Atenção: Stream sem áudio.");
             }
 
-            // --- Configuração de Codec ---
             let mimeType = 'video/webm;codecs=vp9,opus';
             if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm;codecs=vp8,opus';
             if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
@@ -129,10 +129,7 @@ export class RenderManager {
             const checkInterval = setInterval(() => {
                 const current = project.currentTime;
                 
-                // Progresso Visual
                 const maxVisualPct = (this.renderOptions.format === 'mp4') ? 0.8 : 1.0;
-                
-                // (current - minStart) nos dá quantos segundos já processamos dentro da área útil
                 const processedTime = Math.max(0, current - minStart);
                 const rawPct = Math.min(1, processedTime / renderDuration);
                 const visualPct = rawPct * maxVisualPct;
@@ -142,11 +139,10 @@ export class RenderManager {
                 this.updateProgress(
                     visualPct, 
                     `Frames: ${currentFrame} / ${totalFrames}`, 
-                    Math.max(0, maxEnd - current), // Tempo restante baseado no fim absoluto
+                    Math.max(0, maxEnd - current),
                     (Date.now() - this.renderStartTime) / 1000
                 );
 
-                // Condição de Parada: Quando a agulha passar do ponto final máximo
                 if (current >= maxEnd || !this.isRendering) {
                     this._finishRender(checkInterval, mimeType, renderDuration);
                 }
@@ -177,10 +173,11 @@ export class RenderManager {
             let finalBlob = new Blob(this.chunks, { type: recordedMimeType });
             let finalExt = 'webm';
 
+            const TRIM_START = 0.1;
+            const finalDuration = Math.max(0, duration - TRIM_START);
+
             if (this.renderOptions.format === 'mp4') {
-                // Ticker para manter o relógio rodando durante a conversão
                 const conversionTicker = setInterval(() => {
-                    // Apenas atualiza o tempo decorrido, mantendo os textos atuais
                     const overlay = document.getElementById('render-progress-overlay');
                     if (overlay && !overlay.classList.contains('hidden')) {
                         const elapsed = (Date.now() - this.renderStartTime) / 1000;
@@ -191,7 +188,7 @@ export class RenderManager {
 
                 try {
                     const elLog = document.getElementById('render-speed-text');
-                    if(elLog) elLog.innerText = "Iniciando conversor...";
+                    if(elLog) elLog.innerText = "Refinando e Convertendo...";
                     
                     const onConvertProgress = (info) => {
                         const startPct = 0.8; 
@@ -205,14 +202,14 @@ export class RenderManager {
 
                         this.updateProgress(
                             totalPct,
-                            `Convertendo: ${info.speed.toFixed(2)}x`, 
+                            `Processando: ${info.speed.toFixed(2)}x`, 
                             Math.max(0, estimatedRem),
                             (Date.now() - this.renderStartTime) / 1000 
                         );
                     };
 
                     const mp4Url = await this.studio.editor.transcoder.processVideo(
-                        finalBlob, "render", 0, duration, 'mp4', {}, onConvertProgress
+                        finalBlob, "render", TRIM_START, finalDuration, 'mp4', {}, onConvertProgress
                     );
                     
                     const res = await fetch(mp4Url);
@@ -221,7 +218,7 @@ export class RenderManager {
                     
                 } catch (e) {
                     console.error("Erro MP4:", e);
-                    alert("Conversão falhou. Salvando como WebM.");
+                    alert("Conversão falhou. Salvando como WebM (Sem corte).");
                 } finally {
                     clearInterval(conversionTicker);
                 }
@@ -241,7 +238,7 @@ export class RenderManager {
             await this.studio.editor._loadVideo(url);
             
             if (finalExt === 'mp4') {
-                const sig = `0.00_${duration.toFixed(2)}_${finalBlob.size}`;
+                const sig = `0.00_${finalDuration.toFixed(2)}_${finalBlob.size}`;
                 this.studio.editor.cachedMp4 = { blob: finalBlob, signature: sig };
             }
 

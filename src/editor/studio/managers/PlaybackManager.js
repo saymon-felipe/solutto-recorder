@@ -240,9 +240,24 @@ export class PlaybackManager {
     }
 
     _startCanvasMirror(ctx, w, h) {
-        const loop = () => {
+        let lastTime = 0;
+        const interval = 1000 / 30; 
+
+        const loop = (timestamp) => {
             if (!this.isPlaying && !this.studio.renderManager.isRendering) return;
-            this._drawCompositeFrame(ctx, w, h);
+            
+            const elapsed = timestamp - lastTime;
+
+            if (elapsed > interval) {
+                lastTime = timestamp - (elapsed % interval);
+                
+                try {
+                    this._drawCompositeFrame(ctx, w, h);
+                } catch (e) {
+                    console.error("Erro no frame de renderização:", e);
+                }
+            }
+            
             requestAnimationFrame(loop);
         };
         requestAnimationFrame(loop);
@@ -258,11 +273,15 @@ export class PlaybackManager {
         const tracksReversed = [...this.studio.project.tracks].reverse();
         const currentTime = this.studio.project.currentTime;
 
+        // --- LOOP 1: VÍDEO E IMAGEM (Camada de Fundo) ---
         tracksReversed.forEach(track => {
             if (track.muted || track.type !== 'video') return;
             
-            const activeClips = track.clips.filter(c => currentTime >= c.start && currentTime < (c.start + c.duration))
-                                           .sort((a, b) => a.start - b.start);
+            const activeClips = track.clips.filter(c => 
+                c.type !== 'subtitle' &&
+                currentTime >= c.start && 
+                currentTime < (c.start + c.duration)
+            ).sort((a, b) => a.start - b.start);
 
             if (activeClips.length === 0) return;
 
@@ -279,7 +298,7 @@ export class PlaybackManager {
                 } else if (slotId === 2) {
                     domEl = (clip.type === 'image') ? layer.imgEl2 : layer.videoEl2;
                 } else {
-                    // Fallback: Busca no DOM (somente se a layer tiver elementos de vídeo)
+                    // Fallback de segurança
                     if (layer.videoEl && (layer.videoEl.dataset.curId === clip.id || layer.imgEl.dataset.curId === clip.id)) {
                         domEl = (clip.type === 'image') ? layer.imgEl : layer.videoEl;
                     } else if (layer.videoEl2 && (layer.videoEl2.dataset.curId === clip.id || layer.imgEl2.dataset.curId === clip.id)) {
@@ -287,59 +306,64 @@ export class PlaybackManager {
                     }
                 }
 
+                // Se o elemento não estiver pronto (ex: buffering), não desenha mas não trava
                 if (!domEl) return;
-                
-                // Validações de carregamento
                 if (domEl.tagName === 'VIDEO' && domEl.readyState < 2) return;
                 if (domEl.tagName === 'IMG' && domEl.naturalWidth === 0) return;
 
                 ctx.save();
-                
-                let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
-                const fadeFactor = this._calculateFadeFactor(clip, currentTime); 
-                alpha *= fadeFactor;
+                try {
+                    let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
+                    const fadeFactor = this._calculateFadeFactor(clip, currentTime); 
+                    alpha *= fadeFactor;
 
-                ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+                    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
 
-                const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
-                
-                ctx.translate(cvWidth/2, cvHeight/2);
-                ctx.translate(t.x, t.y);
-                ctx.rotate(t.rotation * Math.PI / 180);
-                ctx.scale(t.width/100, t.height/100);
-
-                const nw = domEl.videoWidth || domEl.naturalWidth || cvWidth;
-                const nh = domEl.videoHeight || domEl.naturalHeight || cvHeight;
-                
-                if (nw > 0 && nh > 0) {
-                    const ratioSrc = nw / nh;
-                    const ratioTgt = cvWidth / cvHeight;
-                    let dw, dh;
+                    const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
                     
-                    if (ratioSrc > ratioTgt) { dw = cvWidth; dh = cvWidth / ratioSrc; }
-                    else { dh = cvHeight; dw = cvHeight * ratioSrc; }
+                    ctx.translate(cvWidth/2, cvHeight/2);
+                    ctx.translate(t.x, t.y);
+                    ctx.rotate(t.rotation * Math.PI / 180);
+                    ctx.scale(t.width/100, t.height/100);
+
+                    const nw = domEl.videoWidth || domEl.naturalWidth || cvWidth;
+                    const nh = domEl.videoHeight || domEl.naturalHeight || cvHeight;
                     
-                    try { 
+                    if (nw > 0 && nh > 0) {
+                        const ratioSrc = nw / nh;
+                        const ratioTgt = cvWidth / cvHeight;
+                        let dw, dh;
+                        
+                        if (ratioSrc > ratioTgt) { dw = cvWidth; dh = cvWidth / ratioSrc; }
+                        else { dh = cvHeight; dw = cvHeight * ratioSrc; }
+                        
                         ctx.drawImage(domEl, -dw/2, -dh/2, dw, dh); 
-                    } catch(e) {}
+                    }
+                } catch(e) {
+                    // Ignora erro de desenho isolado para não piscar a tela inteira
                 }
                 ctx.restore();
             });
         });
 
-        this.studio.project.tracks.forEach(track => {
-            if (track.muted) return;
-            
-            const activeSubClips = track.clips.filter(c => 
-                c.type === 'subtitle' && 
-                currentTime >= c.start && 
-                currentTime < (c.start + c.duration)
-            );
+        // Isolado em try-catch para que erro na legenda não apague o vídeo
+        try {
+            this.studio.project.tracks.forEach(track => {
+                if (track.muted) return;
+                
+                const activeSubClips = track.clips.filter(c => 
+                    c.type === 'subtitle' && 
+                    currentTime >= c.start && 
+                    currentTime < (c.start + c.duration)
+                );
 
-            activeSubClips.forEach(clip => {
-                this._renderSubtitleOverlay(ctx, clip, currentTime, cvWidth, cvHeight);
+                activeSubClips.forEach(clip => {
+                    this._renderSubtitleOverlay(ctx, clip, currentTime, cvWidth, cvHeight);
+                });
             });
-        });
+        } catch (e) {
+            console.warn("Erro ao renderizar legenda:", e);
+        }
     }
 
     _startOverlayRenderLoop() {
@@ -375,6 +399,70 @@ export class PlaybackManager {
             requestAnimationFrame(loop);
         };
         requestAnimationFrame(loop);
+    }
+
+    /**
+     * Aguarda até que todos os elementos de mídia visíveis no momento atual
+     * estejam carregados e prontos para reprodução (buffer suficiente).
+     * Essencial para evitar frames pretos no início do render.
+     */
+    async waitForReady(timeoutMs = 5000) {
+        const promises = [];
+        
+        this.trackLayers.forEach(layer => {
+            const elements = [
+                layer.videoEl, layer.videoEl2, 
+                layer.imgEl, layer.imgEl2,
+                layer.audioEl, layer.audioEl2
+            ];
+
+            elements.forEach(el => {
+                if (!el || el.style.display === 'none') return;
+                if (el.tagName === 'AUDIO' && (!el.src || el.src === window.location.href)) return;
+
+                promises.push(new Promise(resolve => {
+                    if (el.tagName === 'IMG') {
+                        if (el.complete && el.naturalWidth > 0) return resolve();
+                        el.onload = () => resolve();
+                        el.onerror = () => resolve(); 
+                    } 
+                    else if (el.tagName === 'VIDEO' || el.tagName === 'AUDIO') {
+                        const isReady = () => {
+                            return el.readyState >= 3 && !el.seeking;
+                        };
+
+                        if (isReady()) return resolve();
+
+                        
+                        const onCheck = () => {
+                            if (isReady()) {
+                                cleanUp();
+                                resolve();
+                            }
+                        };
+
+                        const cleanUp = () => {
+                            el.removeEventListener('canplay', onCheck);
+                            el.removeEventListener('seeked', onCheck); 
+                            el.removeEventListener('playing', onCheck);
+                            el.removeEventListener('error', resolve); 
+                        };
+
+                        el.addEventListener('canplay', onCheck);
+                        el.addEventListener('seeked', onCheck);
+                        el.addEventListener('playing', onCheck);
+                        el.addEventListener('error', () => { cleanUp(); resolve(); });
+                    } else {
+                        resolve();
+                    }
+                }));
+            });
+        });
+
+        if (promises.length === 0) return Promise.resolve();
+
+        const timeout = new Promise(resolve => setTimeout(resolve, timeoutMs));
+        return Promise.race([Promise.all(promises), timeout]);
     }
 
     _renderSubtitleOverlay(ctx, clip, time, w, h) {
@@ -956,7 +1044,7 @@ export class PlaybackManager {
         const track = this.studio.project.tracks.find(t => t.id === trackId);
         if(!track || track.muted) return [];
 
-        return track.clips.filter(c => time >= c.start && time < (c.start + c.duration))
-                          .sort((a, b) => a.start - b.start); // Ordena por início para estabilidade
+        return track.clips.filter(c => c.type !== 'subtitle' && time >= c.start && time < (c.start + c.duration))
+                          .sort((a, b) => a.start - b.start); 
     }
 }
