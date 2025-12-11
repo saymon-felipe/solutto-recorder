@@ -1048,3 +1048,68 @@ body.resizing iframe {
     background: #3e3e3e;
     margin: 4px 0;
 }
+
+.generator-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #333;
+    padding: 15px;
+    margin: 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    text-align: center;
+    color: #eee;
+}
+
+.generator-item:hover {
+    background: #444;
+    border-color: #0078d7;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+}
+
+.generator-item i {
+    font-size: 24px;
+    margin-bottom: 8px;
+    color: #00b7eb;
+}
+
+.clip-tool-btn.settings-btn {
+    position: absolute;
+    top: 2px;
+    right: 2px; 
+    width: 20px;
+    height: 20px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    cursor: pointer;
+    z-index: 100;
+}
+.clip-tool-btn.settings-btn:hover {
+    background: #0078d7;
+}
+
+.subtitle-preview-box {
+    background: #000;
+    width: 100%;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 15px;
+    border: 1px solid #444;
+}
+
+.subtitle-preview-text {
+    padding: 5px 10px;
+    text-align: center;
+}

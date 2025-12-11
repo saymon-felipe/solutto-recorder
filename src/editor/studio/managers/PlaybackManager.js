@@ -22,6 +22,13 @@ export class PlaybackManager {
         
         this.container.style.position = 'relative';
         this.container.style.overflow = 'hidden';
+
+        this.overlayCanvas = document.createElement('canvas');
+        this.overlayCanvas.id = 'studio-subtitle-overlay';
+        this.overlayCanvas.style.cssText = "position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 4;";
+        this.container.appendChild(this.overlayCanvas);
+
+        this._startOverlayRenderLoop();
         
         const btnPlay = document.getElementById("btn-play-pause");
         const btnStop = document.getElementById("btn-stop");
@@ -319,6 +326,137 @@ export class PlaybackManager {
                 ctx.restore();
             });
         });
+
+        this.studio.project.tracks.forEach(track => {
+            if (track.muted) return;
+            
+            const activeSubClips = track.clips.filter(c => 
+                c.type === 'subtitle' && 
+                currentTime >= c.start && 
+                currentTime < (c.start + c.duration)
+            );
+
+            activeSubClips.forEach(clip => {
+                this._renderSubtitleOverlay(ctx, clip, currentTime, cvWidth, cvHeight);
+            });
+        });
+    }
+
+    _startOverlayRenderLoop() {
+        const ctx = this.overlayCanvas.getContext('2d');
+        
+        const loop = () => {
+            if (!this.overlayCanvas) return;
+
+            // Sincroniza tamanho
+            if (this.overlayCanvas.width !== this.overlayCanvas.offsetWidth || 
+                this.overlayCanvas.height !== this.overlayCanvas.offsetHeight) {
+                this.overlayCanvas.width = this.overlayCanvas.offsetWidth;
+                this.overlayCanvas.height = this.overlayCanvas.offsetHeight;
+            }
+
+            ctx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+
+            const currentTime = this.studio.project.currentTime;
+            this.studio.project.tracks.forEach(track => {
+                if (track.muted) return;
+                
+                const activeSubClips = track.clips.filter(c => 
+                    c.type === 'subtitle' && 
+                    currentTime >= c.start && 
+                    currentTime < (c.start + c.duration)
+                );
+
+                activeSubClips.forEach(clip => {
+                    this._renderSubtitleOverlay(ctx, clip, currentTime, this.overlayCanvas.width, this.overlayCanvas.height);
+                });
+            });
+
+            requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+    }
+
+    _renderSubtitleOverlay(ctx, clip, time, w, h) {
+        if (!clip.transcriptionData || !clip.subtitleConfig) return;
+        
+        const localTime = time - clip.start;
+        const currentSegment = clip.transcriptionData.find(s => 
+            localTime >= s.start && localTime <= s.end
+        );
+
+        if (currentSegment && currentSegment.text) {
+            const cfg = clip.subtitleConfig;
+            
+            // --- CÁLCULO DE OPACIDADE DINÂMICA ---
+            // 1. Pega o nível base (fader horizontal da timeline)
+            let baseLevel = clip.level !== undefined ? clip.level : 1;
+            
+            // 2. Calcula o fator do Fade In/Out (curva baseada no tempo)
+            // Reutiliza a lógica robusta que já usamos para vídeo/áudio
+            const fadeFactor = this._calculateFadeFactor(clip, time);
+            
+            // 3. Combina os dois
+            const finalAlpha = baseLevel * fadeFactor;
+
+            if (finalAlpha < 0.01) return;
+
+            ctx.save();
+            
+            ctx.globalAlpha = finalAlpha;
+
+            // Transformações (Pan/Crop)
+            ctx.translate(w / 2, h / 2);
+            if (clip.transform) {
+                const t = clip.transform;
+                ctx.translate(t.x, t.y);
+                ctx.rotate(t.rotation * Math.PI / 180);
+                ctx.scale(t.width / 100, t.height / 100);
+            }
+
+            // Configuração de Fonte
+            const fontSize = cfg.size || 30;
+            const fontStyle = cfg.italic ? 'italic' : 'normal';
+            const fontWeight = cfg.bold ? 'bold' : 'normal';
+            ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${cfg.font}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            const text = currentSegment.text;
+            
+            // Renderiza o Fundo
+            if (cfg.bgColor && cfg.bgColor !== 'transparent') {
+                const metrics = ctx.measureText(text);
+                const paddingX = 7; 
+                const paddingY = 7; 
+                const radius = 7;    
+
+                const bgWidth = metrics.width + (paddingX * 2); 
+                const bgHeight = (fontSize * 1.2) + paddingY; 
+                
+                ctx.fillStyle = cfg.bgColor;
+                
+                const currentGlobalAlpha = ctx.globalAlpha;
+                
+                ctx.globalAlpha = currentGlobalAlpha * 0.7; 
+                
+                if (ctx.roundRect) {
+                    ctx.beginPath();
+                    ctx.roundRect(-bgWidth / 2, -bgHeight / 2, bgWidth, bgHeight, radius);
+                    ctx.fill();
+                } else {
+                    ctx.fillRect(-bgWidth / 2, -bgHeight / 2, bgWidth, bgHeight);
+                }
+
+                ctx.globalAlpha = currentGlobalAlpha;
+            }
+            
+            // Renderiza o Texto
+            ctx.fillStyle = cfg.color;
+            ctx.fillText(text, 0, 2); 
+            
+            ctx.restore();
+        }
     }
 
     // =========================================================
@@ -378,6 +516,15 @@ export class PlaybackManager {
             if(track.type === 'video') this._syncVideoTrack(layer, clips, time);
             else this._syncAudioTrack(layer, clips, time);
         });
+
+        if (!this.overlayCanvas) {
+            this.overlayCanvas = document.createElement('canvas');
+            this.overlayCanvas.id = 'studio-subtitle-overlay';
+            this.overlayCanvas.style.cssText = "position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 4;";
+            this.container.appendChild(this.overlayCanvas);
+        } else {
+            this.container.appendChild(this.overlayCanvas);
+        }
         
         this._forceSeek = false;
     }

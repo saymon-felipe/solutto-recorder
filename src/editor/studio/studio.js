@@ -415,4 +415,255 @@ export class StudioManager {
         this.markUnsavedChanges();
         return true;
     }
+
+    async createSubtitleAsset(config) {
+        // Encontra ou cria track para legendas
+        let targetTrack = this.project.tracks.find(t => t.type === 'video' && t.clips.length === 0);
+        if (!targetTrack) {
+            this.addTrack('video');
+            targetTrack = this.project.tracks[this.project.tracks.length - 1];
+            targetTrack.name = "Legendas";
+        }
+
+        const duration = 5; // Duração fixa de 5 segundos
+        
+        const subClip = {
+            id: "sub_" + Date.now(),
+            type: 'subtitle',
+            name: "Legendas Auto",
+            start: this.project.currentTime, 
+            duration: duration,
+            offset: 0,
+            level: 1, 
+            subtitleConfig: config,
+            transcriptionData: [
+                { start: 0, end: duration, text: "Texto de Exemplo" }
+            ],
+            transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, maintainAspect: true }
+        };
+
+        targetTrack.clips.push(subClip);
+        this.timelineManager.renderTracks();
+        
+        // Abre o modal imediatamente para oferecer transcrição
+        this.uiManager.openSubtitleModal(subClip);
+    }
+
+    async runSubtitleTranscription(clip, onProgress) {
+        const workerUrl = chrome.runtime.getURL('src/workers/whisper.worker.js');
+        const worker = new Worker(workerUrl, { type: 'module' });
+
+        return new Promise(async (resolve, reject) => {
+            onProgress(5);
+
+            try {
+                console.log(`[StudioManager] Iniciando transcrição para clip de ${clip.duration}s`);
+                
+                // 1. Extração Acelerada de Áudio
+                const audioData = await this.extractAudioBuffer(clip.start, clip.duration);
+                
+                let maxAmplitude = 0;
+                for (let i = 0; i < audioData.length; i += 100) { // Amostragem
+                    const val = Math.abs(audioData[i]);
+                    if (val > maxAmplitude) maxAmplitude = val;
+                }
+                
+                console.log(`[StudioManager] Diagnóstico de Áudio: Max Amplitude = ${maxAmplitude.toFixed(4)}`);
+
+                if (maxAmplitude < 0.001) {
+                    console.warn("[StudioManager] CRÍTICO: O áudio extraído é SILÊNCIO. O Whisper vai alucinar.");
+                    this.uiManager.showToast("Erro: O trecho selecionado está mudo.");
+                    worker.terminate();
+                    return resolve();
+                }
+
+                onProgress(20);
+
+                // 2. Envia para o Worker
+                worker.postMessage({
+                    type: 'transcribe',
+                    audio: audioData,
+                    language: 'portuguese'
+                });
+
+                worker.onmessage = (e) => {
+                    const { status, data, output, error } = e.data;
+
+                    if (status === 'loading') {
+                        if (data.status === 'progress' && data.total) {
+                            const percent = (data.loaded / data.total) * 100;
+                            // Calcula progresso visual
+                            const uiProgress = 20 + (percent * 0.4);
+                            onProgress(uiProgress);
+                        }
+                    } 
+                    else if (status === 'complete') {
+                        console.log("[StudioManager] Transcrição recebida:", output);
+                        
+                        const segments = output.chunks.map(chunk => ({
+                            start: chunk.timestamp[0],
+                            end: chunk.timestamp[1] || (chunk.timestamp[0] + 2),
+                            text: chunk.text.trim()
+                        }));
+
+                        clip.transcriptionData = segments;
+                        onProgress(100);
+                        this.timelineManager.renderTracks();
+                        this.uiManager.showToast("Transcrição concluída!");
+                        this.playbackManager.seekAndRender(clip.start);
+                        worker.terminate();
+                        resolve();
+                    } 
+                    else if (status === 'error') {
+                        console.error("[StudioManager] Erro no Worker:", error);
+                        worker.terminate();
+                        reject(new Error(error));
+                    }
+                };
+
+            } catch (err) {
+                console.error("[StudioManager] Erro fatal:", err);
+                worker.terminate();
+                reject(err);
+            }
+        });
+    }
+
+    /**
+     * Renderiza o áudio da timeline em memória (OfflineAudioContext)
+     * para ser enviado ao Whisper. Muito mais rápido que realtime.
+     */
+    async extractAudioBuffer(startTime, duration) {
+        console.log(`[AudioExtract] Iniciando renderização: Start=${startTime.toFixed(2)}, Dur=${duration.toFixed(2)}s`);
+        
+        const sampleRate = 16000; 
+        const offlineCtx = new OfflineAudioContext(1, Math.ceil(sampleRate * duration), sampleRate);
+        
+        const decodeCtx = new AudioContext(); 
+
+        let clipsProcessed = 0;
+        let clipsFound = 0;
+
+        try {
+            // Itera sobre todas as tracks
+            for (const track of this.project.tracks) {
+                if (track.muted) {
+                    console.log(`[AudioExtract] Pulando track mutada: ${track.name}`);
+                    continue;
+                }
+                
+                // Filtra clipes que tocam durante o intervalo da legenda
+                const clips = track.clips.filter(c => 
+                    (c.start + c.duration) > startTime && c.start < (startTime + duration)
+                );
+
+                for (const clip of clips) {
+                    // Pula legendas e imagens (não têm áudio)
+                    if (clip.type === 'subtitle' || clip.type === 'image') continue;
+
+                    const asset = this.project.assets.find(a => a.id === clip.assetId);
+                    if (!asset) {
+                        console.warn(`[AudioExtract] Asset não encontrado para o clip: ${clip.name}`);
+                        continue;
+                    }
+
+                    clipsFound++;
+                    let sourceBuffer = asset.audioBufferCache;
+
+                    // Se não estiver em cache, tenta decodificar
+                    if (!sourceBuffer) {
+                        if (!asset.sourceBlob) {
+                            console.error(`[AudioExtract] ERRO CRÍTICO: 'sourceBlob' é nulo para o asset '${asset.name}'. O áudio não pode ser carregado.`);
+                            // Tentar fallback via URL se existir
+                            if (asset.url) {
+                                try {
+                                    console.log(`[AudioExtract] Tentando recuperar via fetch URL: ${asset.url}`);
+                                    const resp = await fetch(asset.url);
+                                    const arrayBuffer = await resp.arrayBuffer();
+                                    sourceBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
+                                    asset.audioBufferCache = sourceBuffer;
+                                } catch(err) {
+                                    console.error(`[AudioExtract] Falha no fallback de URL:`, err);
+                                    continue;
+                                }
+                            } else {
+                                continue;
+                            }
+                        } else {
+                            try {
+                                console.log(`[AudioExtract] Decodificando Blob do asset: ${asset.name}`);
+                                const arrayBuffer = await asset.sourceBlob.arrayBuffer();
+                                // Usa o decodeCtx compartilhado
+                                sourceBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
+                                asset.audioBufferCache = sourceBuffer; 
+                            } catch(e) {
+                                console.error(`[AudioExtract] Falha ao decodificar ${asset.name}:`, e);
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Validação final do buffer
+                    if (!sourceBuffer) {
+                        console.warn(`[AudioExtract] Buffer de áudio vazio para ${asset.name}`);
+                        continue;
+                    }
+
+                    // Cria o nó de áudio no contexto Offline
+                    const source = offlineCtx.createBufferSource();
+                    source.buffer = sourceBuffer;
+
+                    // --- CÁLCULO DE CORTE (TRIMMING) ---
+                    
+                    // 1. Quando o clip começa dentro do "buffer de saída"? 
+                    // (0 = inicio da legenda)
+                    const bufferStartOffset = Math.max(0, clip.start - startTime);
+
+                    // 2. De onde começar a ler o arquivo original?
+                    // (Offset do clip + pedaço que já passou antes da legenda começar)
+                    let assetReadStart = clip.offset;
+                    if (clip.start < startTime) {
+                        assetReadStart += (startTime - clip.start);
+                    }
+
+                    // 3. Quanto tempo tocar?
+                    let durationToPlay = clip.duration;
+                    // Se cortou o começo
+                    if (clip.start < startTime) {
+                        durationToPlay -= (startTime - clip.start);
+                    }
+                    // Se cortar o final (vai além da legenda)
+                    if ((bufferStartOffset + durationToPlay) > duration) {
+                        durationToPlay = duration - bufferStartOffset;
+                    }
+
+                    if (durationToPlay > 0) {
+                        source.connect(offlineCtx.destination);
+                        source.start(bufferStartOffset, assetReadStart, durationToPlay);
+                        clipsProcessed++;
+                        console.log(`[AudioExtract] Agendado: ${asset.name} | Start: ${bufferStartOffset.toFixed(2)}s | Offset: ${assetReadStart.toFixed(2)}s | Dur: ${durationToPlay.toFixed(2)}s`);
+                    }
+                }
+            }
+        } finally {
+            decodeCtx.close();
+        }
+
+        if (clipsProcessed === 0) {
+            console.warn("[AudioExtract] NENHUM clipe de áudio agendado. Resultado será silêncio.");
+        }
+
+        // Renderiza
+        const renderedBuffer = await offlineCtx.startRendering();
+        const channelData = renderedBuffer.getChannelData(0);
+
+        // Verificação final de sinal (Amplitude)
+        let maxAmp = 0;
+        for(let i=0; i<channelData.length; i+=500) {
+            if(Math.abs(channelData[i]) > maxAmp) maxAmp = Math.abs(channelData[i]);
+        }
+        console.log(`[AudioExtract] Renderização concluída. Amplitude Máxima Detectada: ${maxAmp.toFixed(5)}`);
+
+        return channelData;
+    }
 }

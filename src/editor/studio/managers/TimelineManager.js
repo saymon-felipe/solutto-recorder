@@ -749,7 +749,7 @@ export class TimelineManager {
             // Renderiza Clipes
             track.clips.forEach(clip => {
                 const clipEl = this._createClipElement(clip, track.id);
-                if (track.type !== 'audio' && ['video', 'image'].includes(clip.type)) {
+                if (track.type !== 'audio' && ['video', 'image', 'subtitle'].includes(clip.type)) {
                      const btnPan = document.createElement('div');
                      btnPan.className = 'clip-tool-btn pan-crop-btn';
                      btnPan.innerHTML = '<i class="fa-solid fa-crop-simple"></i>';
@@ -1027,7 +1027,12 @@ export class TimelineManager {
     }
 
     _createClipElement(clip, trackId) {
-        const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
+        let asset = this.studio.project.assets.find(a => a.id === clip.assetId);
+
+        if (!asset && clip.type === 'subtitle') {
+            asset = { type: 'subtitle', name: 'Legendas', baseDuration: clip.duration };
+        }
+
         if(!asset) return document.createElement('div');
 
         const track = this.studio.project.tracks.find(t => t.id === trackId);
@@ -1115,6 +1120,22 @@ export class TimelineManager {
         this._injectFadeStyles(el);
         requestAnimationFrame(() => this._updateFadeVisuals(clip, el));
 
+        if (clip.type === 'subtitle') {
+            const btnSettings = document.createElement('div');
+            btnSettings.className = 'clip-tool-btn settings-btn';
+            btnSettings.innerHTML = '<i class="fa-solid fa-ellipsis"></i>';
+            
+            btnSettings.onmousedown = (e) => {
+                e.preventDefault(); 
+                e.stopPropagation(); 
+                this.studio.uiManager.openSubtitleModal(clip);
+            };
+            el.appendChild(btnSettings);
+            
+            el.style.background = "#5e35b1";
+            el.style.borderColor = "#7e57c2";
+        }
+
         const visualsContainer = el.querySelector('.clip-visuals');
         
         // Se for arquivo de áudio OU se estiver numa track de áudio (mesmo sendo vídeo)
@@ -1128,15 +1149,12 @@ export class TimelineManager {
         }
 
         // Loop Markers
-        // NOTA: Agora consideramos o offset para posicionar corretamente os loops visuais
         if (clip.duration + clip.offset > asset.baseDuration) {
             const baseDur = asset.baseDuration;
             const totalTime = clip.duration + clip.offset;
             const loops = Math.floor(totalTime / baseDur);
             
             for(let i=1; i<=loops; i++) {
-                // Calcula a posição relativa ao INÍCIO DO CLIP VISUAL
-                // Posição Real = (Tempo Absoluto - Offset) * Zoom
                 const timePoint = i * baseDur;
                 const relativePixel = (timePoint - clip.offset) * this.studio.project.zoom;
 
@@ -1177,7 +1195,6 @@ export class TimelineManager {
 
             this._handleSelection(e, clip, trackId, el);
             
-            // LÓGICA DE RESIZE ATUALIZADA
             if (action === 'resize-left' || action === 'resize-right' || action === 'resize') {
                 // Passa o action específico ('resize-left' ou 'resize-right')
                 this._startResize(e, clip, el, asset.baseDuration, action);

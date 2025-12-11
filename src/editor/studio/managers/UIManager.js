@@ -308,12 +308,18 @@ export class UIManager {
                     <div class="bin-tabs">
                         <button class="bin-tab active" data-target="bin-media">Mídia</button>
                         <button class="bin-tab" data-target="bin-projects">Projetos</button>
+                        <button class="bin-tab" data-target="bin-generator">Gerador</button>
                     </div>
                     
                     <div class="bin-content" id="studio-bin-list"></div>
                     
                     <div class="bin-content hidden" id="studio-projects-list">
                         <div style="padding:10px; color:#888; font-size:11px; text-align:center">Nenhum projeto recente</div>
+                    </div>
+                    <div class="bin-content hidden" id="studio-generator-list"> <div class="generator-item" id="btn-gen-subtitles">
+                            <i class="fa-solid fa-closed-captioning"></i>
+                            <span>Legendas Automáticas</span>
+                        </div>
                     </div>
                 </div>
                 
@@ -535,6 +541,76 @@ export class UIManager {
                             <button id="pc-btn-reset" class="vegas-btn" style="width: 100%;">
                                 <i class="fa-solid fa-rotate-left"></i> Resetar Transformação
                             </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="modal-subtitle-settings" class="modal-overlay hidden">
+                <div class="vegas-modal">
+                    <div class="vegas-header">
+                        <span>Configurar Legendas</span>
+                        <button id="btn-sub-close" style="background:transparent;border:none;color:#aaa;cursor:pointer;"><i class="fa-solid fa-times"></i></button>
+                    </div>
+                    <div class="vegas-body">
+                        <div class="subtitle-preview-box">
+                            <span id="sub-preview-target" class="subtitle-preview-text">Exemplo de Texto</span>
+                        </div>
+                        
+                        <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr;">
+                            <div class="input-group" style="display:block; margin-bottom:0;">
+                                <label style="display:block;margin-bottom:5px;">Fonte</label>
+                                <select id="sub-font-family" style="width:100%; padding:5px; background:#222; border:1px solid #444; color:white;">
+                                    <option value="Arial">Arial</option>
+                                    <option value="'Segoe UI'">Segoe UI</option>
+                                    <option value="'Courier New'">Courier New</option>
+                                    <option value="Impact">Impact</option>
+                                </select>
+                            </div>
+                            <div class="input-group" style="display:block; margin-bottom:0;">
+                                <label style="display:block;margin-bottom:5px;">Tamanho (px)</label>
+                                <input type="number" id="sub-font-size" value="30" style="width:100%; padding:5px; background:#222; border:1px solid #444; color:white;">
+                            </div>
+                        </div>
+
+                        <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+                            <div class="input-group" style="display:block; margin-bottom:0;">
+                                <label style="display:block;margin-bottom:5px;">Cor do Texto</label>
+                                <input type="color" id="sub-color" value="#ffffff" style="width:100%; height:30px; border:none;">
+                            </div>
+                            <div class="input-group" style="display:block; margin-bottom:0;">
+                                <label style="display:block;margin-bottom:5px;">Cor do Fundo</label>
+                                <input type="color" id="sub-bg-color" value="#000000" style="width:100%; height:30px; border:none;">
+                            </div>
+                        </div>
+
+                        <div style="margin-top:10px; display:flex; gap:10px;">
+                            <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
+                                <input type="checkbox" id="sub-bold"> Negrito
+                            </label>
+                            <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
+                                <input type="checkbox" id="sub-italic"> Itálico
+                            </label>
+                        </div>
+
+                        <div style="background: #252526; padding: 10px; border-radius: 4px; margin-top: 15px; border: 1px solid #3e3e42;">
+                            <div style="font-size: 11px; color: #aaa; margin-bottom: 10px;">
+                                <i class="fa-solid fa-microphone-lines"></i>&nbsp; A transcrição processa todo o audio com IA, o processo pode demorar um pouco.
+                            </div>
+                            <button id="btn-sub-transcribe" class="studio-btn" style="width: 100%; justify-content: center; background: #2e7d32; border-color: #1b5e20;">
+                                <i class="fa-solid fa-play"></i>&nbsp; Iniciar Transcrição Automática
+                            </button>
+                            <div id="sub-transcribe-progress" style="display:none; margin-top:5px;">
+                                <div style="height:4px; background:#333; border-radius:2px; overflow:hidden;">
+                                    <div id="sub-transcribe-bar" style="width:0%; height:100%; background:#4caf50; transition: width 0.2s;"></div>
+                                </div>
+                                <div style="text-align:center; font-size:10px; color:#888; margin-top:3px;">Processando áudio...</div>
+                            </div>
+                        </div>
+
+                        <div class="modal-actions" style="margin-top:15px; padding-top:10px; border-top:1px solid #333;">
+                            <button class="studio-btn" id="btn-sub-cancel">Fechar</button>
+                            <button class="studio-btn primary" id="btn-sub-confirm">Salvar Estilo</button>
                         </div>
                     </div>
                 </div>
@@ -1275,6 +1351,102 @@ export class UIManager {
                 this._refreshActiveModalState();
             }
         });
+
+        const btnGenSub = document.getElementById('btn-gen-subtitles');
+
+        if (btnGenSub) {
+            btnGenSub.onclick = () => this.openSubtitleModal();
+        }
+    }
+
+    openSubtitleModal(existingClip = null) {
+        const modal = document.getElementById('modal-subtitle-settings');
+        const preview = document.getElementById('sub-preview-target');
+        
+        const iFont = document.getElementById('sub-font-family');
+        const iSize = document.getElementById('sub-font-size');
+        const iColor = document.getElementById('sub-color');
+        const iBg = document.getElementById('sub-bg-color');
+        const iBold = document.getElementById('sub-bold');
+        const iItalic = document.getElementById('sub-italic');
+
+        const config = existingClip ? existingClip.subtitleConfig : {
+            font: 'Arial', size: 30, color: '#ffffff', bgColor: '#000000', bold: false, italic: false
+        };
+
+        iFont.value = config.font;
+        iSize.value = config.size;
+        iColor.value = config.color;
+        iBg.value = config.bgColor;
+        iBold.checked = config.bold;
+        iItalic.checked = config.italic;
+
+        const updatePreview = () => {
+            preview.style.fontFamily = iFont.value;
+            preview.style.fontSize = iSize.value + "px";
+            preview.style.color = iColor.value;
+            preview.style.backgroundColor = iBg.value;
+            preview.style.fontWeight = iBold.checked ? 'bold' : 'normal';
+            preview.style.fontStyle = iItalic.checked ? 'italic' : 'normal';
+        };
+        
+        [iFont, iSize, iColor, iBg, iBold, iItalic].forEach(el => el.oninput = updatePreview);
+        updatePreview();
+
+        modal.classList.remove('hidden');
+
+        // LÓGICA DO BOTÃO DE TRANSCRIÇÃO
+        const btnTranscribe = document.getElementById('btn-sub-transcribe');
+        const progressBox = document.getElementById('sub-transcribe-progress');
+        const progressBar = document.getElementById('sub-transcribe-bar');
+
+        btnTranscribe.disabled = false;
+        btnTranscribe.innerHTML = '<i class="fa-solid fa-play"></i>&nbsp; Iniciar Transcrição Automática';
+        progressBox.style.display = 'none';
+
+        btnTranscribe.onclick = async () => {
+            if (!existingClip) {
+                alert("Erro: O clipe precisa ser criado antes de transcrever.");
+                return;
+            }
+
+            btnTranscribe.disabled = true;
+            btnTranscribe.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>&nbsp; Processando...';
+            progressBox.style.display = 'block';
+
+            try {
+                await this.studio.runSubtitleTranscription(existingClip, (progress) => {
+                    progressBar.style.width = `${progress}%`;
+                });
+                modal.classList.add('hidden'); 
+            } catch (error) {
+                console.error(error);
+                alert("Erro na transcrição: " + error.message);
+                btnTranscribe.disabled = false;
+                btnTranscribe.innerHTML = '<i class="fa-solid fa-play"></i>&nbsp; Tentar Novamente';
+            }
+        };
+
+        // Salvar estilo apenas
+        document.getElementById('btn-sub-confirm').onclick = () => {
+            const newConfig = {
+                font: iFont.value,
+                size: parseInt(iSize.value),
+                color: iColor.value,
+                bgColor: iBg.value,
+                bold: iBold.checked,
+                italic: iItalic.checked
+            };
+            
+            if (existingClip) {
+                existingClip.subtitleConfig = newConfig;
+                this.studio.timelineManager.renderTracks();
+            }
+            modal.classList.add('hidden');
+        };
+
+        document.getElementById('btn-sub-close').onclick = () => modal.classList.add('hidden');
+        document.getElementById('btn-sub-cancel').onclick = () => modal.classList.add('hidden');
     }
 
     _bindTabEvents() {
@@ -1282,13 +1454,23 @@ export class UIManager {
         tabs.forEach(tab => {
             tab.onclick = () => {
                 document.querySelectorAll('.bin-tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.bin-content').forEach(c => c.classList.add('hidden'));
-
                 tab.classList.add('active');
+                
+                document.querySelectorAll('.bin-content').forEach(c => c.classList.add('hidden'));
+                
                 const targetId = tab.dataset.target;
+                let contentElementId = null;
 
-                const targetContent = document.getElementById(targetId === 'bin-media' ? 'studio-bin-list' : 'studio-projects-list');
-                if (targetContent) targetContent.classList.remove('hidden');
+                switch (targetId) {
+                    case 'bin-media': contentElementId = 'studio-bin-list'; break;
+                    case 'bin-projects': contentElementId = 'studio-projects-list'; break;
+                    case 'bin-generator': contentElementId = 'studio-generator-list'; break;
+                }
+
+                if (contentElementId) {
+                    const targetContent = document.getElementById(contentElementId);
+                    if (targetContent) targetContent.classList.remove('hidden');
+                }
             };
         });
     }
