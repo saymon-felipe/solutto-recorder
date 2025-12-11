@@ -388,56 +388,52 @@ export class PlaybackManager {
         if (currentSegment && currentSegment.text) {
             const cfg = clip.subtitleConfig;
             
-            // --- CÁLCULO DE OPACIDADE DINÂMICA ---
-            // 1. Pega o nível base (fader horizontal da timeline)
             let baseLevel = clip.level !== undefined ? clip.level : 1;
-            
-            // 2. Calcula o fator do Fade In/Out (curva baseada no tempo)
-            // Reutiliza a lógica robusta que já usamos para vídeo/áudio
             const fadeFactor = this._calculateFadeFactor(clip, time);
-            
-            // 3. Combina os dois
             const finalAlpha = baseLevel * fadeFactor;
 
             if (finalAlpha < 0.01) return;
 
             ctx.save();
-            
             ctx.globalAlpha = finalAlpha;
 
-            // Transformações (Pan/Crop)
+            const projectW = (this.studio.project.settings && this.studio.project.settings.width) || 1920;
+            
+            const s = w / projectW; 
+
             ctx.translate(w / 2, h / 2);
+            
             if (clip.transform) {
                 const t = clip.transform;
-                ctx.translate(t.x, t.y);
+                ctx.translate(t.x * s, t.y * s);
                 ctx.rotate(t.rotation * Math.PI / 180);
                 ctx.scale(t.width / 100, t.height / 100);
             }
 
-            // Configuração de Fonte
-            const fontSize = cfg.size || 30;
+            const baseSize = cfg.size || 30;
+            const scaledFontSize = Math.max(10, baseSize * s);
+
             const fontStyle = cfg.italic ? 'italic' : 'normal';
             const fontWeight = cfg.bold ? 'bold' : 'normal';
-            ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${cfg.font}`;
+            ctx.font = `${fontStyle} ${fontWeight} ${scaledFontSize}px ${cfg.font}`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             
             const text = currentSegment.text;
             
-            // Renderiza o Fundo
             if (cfg.bgColor && cfg.bgColor !== 'transparent') {
                 const metrics = ctx.measureText(text);
-                const paddingX = 7; 
-                const paddingY = 7; 
-                const radius = 7;    
+                
+                const paddingX = 20 * s; 
+                const paddingY = 10 * s; 
+                const radius = 8 * s;    
 
                 const bgWidth = metrics.width + (paddingX * 2); 
-                const bgHeight = (fontSize * 1.2) + paddingY; 
+                const bgHeight = (scaledFontSize * 1.2) + paddingY; 
                 
                 ctx.fillStyle = cfg.bgColor;
                 
                 const currentGlobalAlpha = ctx.globalAlpha;
-                
                 ctx.globalAlpha = currentGlobalAlpha * 0.7; 
                 
                 if (ctx.roundRect) {
@@ -451,9 +447,9 @@ export class PlaybackManager {
                 ctx.globalAlpha = currentGlobalAlpha;
             }
             
-            // Renderiza o Texto
+            // Renderiza Texto
             ctx.fillStyle = cfg.color;
-            ctx.fillText(text, 0, 2); 
+            ctx.fillText(text, 0, 2 * s);
             
             ctx.restore();
         }

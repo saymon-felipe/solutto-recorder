@@ -45,8 +45,36 @@ export class UIManager {
                     font-weight: 600;
                     border-bottom: 1px solid #1e1e1e;
                     display: flex; justify-content: space-between; align-items: center;
+                    user-select: none;
                 }
-                .vegas-body { padding: 20px; }
+                .vegas-body { padding: 20px; overflow-y: auto; flex: 1; }
+                
+                /* --- ESTILOS COMPARTILHADOS DE JANELAS FLUTUANTES --- */
+                .studio-floating-window {
+                    position: fixed;
+                    background-color: #1e1e1e;
+                    border: 1px solid #333;
+                    box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+                    display: flex;
+                    flex-direction: column;
+                    resize: both;
+                    overflow: hidden;
+                    z-index: 2000;
+                }
+
+                /* PAN/CROP MODAL ESPECÍFICO */
+                #modal-pan-crop {
+                    min-width: 600px;
+                    min-height: 400px;
+                }
+
+                /* SUBTITLE MODAL ESPECÍFICO */
+                #modal-subtitle-settings {
+                    min-width: 400px;
+                    min-height: 500px;
+                    width: 450px;
+                    height: 600px;
+                }
                 
                 /* --- STATS GRID (RENDER) --- */
                 .vegas-stats-grid {
@@ -508,7 +536,12 @@ export class UIManager {
                     <div class="pc-sidebar">
                         
                         <div class="pc-input-group">
-                            <label class="pc-label"><i class="fa-solid fa-arrows-up-down-left-right"></i> Posição (Offset Px)</label>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <label class="pc-label" style="margin:0;"><i class="fa-solid fa-arrows-up-down-left-right"></i> Posição</label>
+                                <button id="pc-btn-axis-lock" class="vegas-btn" style="padding: 2px 8px; font-size: 10px; width: auto; background: #444;" title="Travar Eixo de Movimento">
+                                    <i class="fa-solid fa-lock-open"></i> Livre
+                                </button>
+                            </div>
                             <div class="pc-row">
                                 <input type="number" id="pc-pos-x" class="pc-input" placeholder="X">
                                 <input type="number" id="pc-pos-y" class="pc-input" placeholder="Y">
@@ -546,72 +579,70 @@ export class UIManager {
                 </div>
             </div>
 
-            <div id="modal-subtitle-settings" class="modal-overlay hidden">
-                <div class="vegas-modal">
-                    <div class="vegas-header">
-                        <span>Configurar Legendas</span>
-                        <button id="btn-sub-close" style="background:transparent;border:none;color:#aaa;cursor:pointer;"><i class="fa-solid fa-times"></i></button>
+            <div id="modal-subtitle-settings" class="studio-floating-window hidden" style="top: 50%; left: 50%;">
+                <div class="vegas-header" id="sub-header" style="cursor: move; padding: 10px 15px; background: #333; border-bottom: 1px solid #111; flex-shrink: 0;">
+                    <span style="font-weight:600; color:#eee;"><i class="fa-solid fa-closed-captioning"></i> &nbsp;Configurar Legendas</span>
+                    <button id="btn-sub-close" style="background:transparent;border:none;color:#aaa;cursor:pointer;font-size:14px;"><i class="fa-solid fa-times"></i></button>
+                </div>
+                <div class="vegas-body">
+                    <div class="subtitle-preview-box">
+                        <span id="sub-preview-target" class="subtitle-preview-text">Exemplo de Texto</span>
                     </div>
-                    <div class="vegas-body">
-                        <div class="subtitle-preview-box">
-                            <span id="sub-preview-target" class="subtitle-preview-text">Exemplo de Texto</span>
+                    
+                    <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr;">
+                        <div class="input-group" style="display:block; margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;">Fonte</label>
+                            <select id="sub-font-family" style="width:100%; padding:5px; background:#222; border:1px solid #444; color:white;">
+                                <option value="Arial">Arial</option>
+                                <option value="'Segoe UI'">Segoe UI</option>
+                                <option value="'Courier New'">Courier New</option>
+                                <option value="Impact">Impact</option>
+                            </select>
                         </div>
-                        
-                        <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr;">
-                            <div class="input-group" style="display:block; margin-bottom:0;">
-                                <label style="display:block;margin-bottom:5px;">Fonte</label>
-                                <select id="sub-font-family" style="width:100%; padding:5px; background:#222; border:1px solid #444; color:white;">
-                                    <option value="Arial">Arial</option>
-                                    <option value="'Segoe UI'">Segoe UI</option>
-                                    <option value="'Courier New'">Courier New</option>
-                                    <option value="Impact">Impact</option>
-                                </select>
-                            </div>
-                            <div class="input-group" style="display:block; margin-bottom:0;">
-                                <label style="display:block;margin-bottom:5px;">Tamanho (px)</label>
-                                <input type="number" id="sub-font-size" value="30" style="width:100%; padding:5px; background:#222; border:1px solid #444; color:white;">
-                            </div>
+                        <div class="input-group" style="display:block; margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;">Tamanho (px)</label>
+                            <input type="number" id="sub-font-size" value="30" style="width:100%; padding:5px; background:#222; border:1px solid #444; color:white;">
                         </div>
+                    </div>
 
-                        <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
-                            <div class="input-group" style="display:block; margin-bottom:0;">
-                                <label style="display:block;margin-bottom:5px;">Cor do Texto</label>
-                                <input type="color" id="sub-color" value="#ffffff" style="width:100%; height:30px; border:none;">
-                            </div>
-                            <div class="input-group" style="display:block; margin-bottom:0;">
-                                <label style="display:block;margin-bottom:5px;">Cor do Fundo</label>
-                                <input type="color" id="sub-bg-color" value="#000000" style="width:100%; height:30px; border:none;">
-                            </div>
+                    <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+                        <div class="input-group" style="display:block; margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;">Cor do Texto</label>
+                            <input type="color" id="sub-color" value="#ffffff" style="width:100%; height:30px; border:none;">
                         </div>
+                        <div class="input-group" style="display:block; margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;">Cor do Fundo</label>
+                            <input type="color" id="sub-bg-color" value="#000000" style="width:100%; height:30px; border:none;">
+                        </div>
+                    </div>
 
-                        <div style="margin-top:10px; display:flex; gap:10px;">
-                            <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
-                                <input type="checkbox" id="sub-bold"> Negrito
-                            </label>
-                            <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
-                                <input type="checkbox" id="sub-italic"> Itálico
-                            </label>
-                        </div>
+                    <div style="margin-top:10px; display:flex; gap:10px;">
+                        <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
+                            <input type="checkbox" id="sub-bold"> Negrito
+                        </label>
+                        <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
+                            <input type="checkbox" id="sub-italic"> Itálico
+                        </label>
+                    </div>
 
-                        <div style="background: #252526; padding: 10px; border-radius: 4px; margin-top: 15px; border: 1px solid #3e3e42;">
-                            <div style="font-size: 11px; color: #aaa; margin-bottom: 10px;">
-                                <i class="fa-solid fa-microphone-lines"></i>&nbsp; A transcrição processa todo o audio com IA, o processo pode demorar um pouco.
-                            </div>
-                            <button id="btn-sub-transcribe" class="studio-btn" style="width: 100%; justify-content: center; background: #2e7d32; border-color: #1b5e20;">
-                                <i class="fa-solid fa-play"></i>&nbsp; Iniciar Transcrição Automática
-                            </button>
-                            <div id="sub-transcribe-progress" style="display:none; margin-top:5px;">
-                                <div style="height:4px; background:#333; border-radius:2px; overflow:hidden;">
-                                    <div id="sub-transcribe-bar" style="width:0%; height:100%; background:#4caf50; transition: width 0.2s;"></div>
-                                </div>
-                                <div style="text-align:center; font-size:10px; color:#888; margin-top:3px;">Processando áudio...</div>
-                            </div>
+                    <div style="background: #252526; padding: 10px; border-radius: 4px; margin-top: 15px; border: 1px solid #3e3e42;">
+                        <div style="font-size: 11px; color: #aaa; margin-bottom: 10px;">
+                            <i class="fa-solid fa-microphone-lines"></i>&nbsp; A transcrição utiliza a reprodução do vídeo.
                         </div>
+                        <button id="btn-sub-transcribe" class="studio-btn" style="width: 100%; justify-content: center; background: #2e7d32; border-color: #1b5e20;">
+                            <i class="fa-solid fa-play"></i>&nbsp; Iniciar Transcrição Automática
+                        </button>
+                        <div id="sub-transcribe-progress" style="display:none; margin-top:5px;">
+                            <div style="height:4px; background:#333; border-radius:2px; overflow:hidden;">
+                                <div id="sub-transcribe-bar" style="width:0%; height:100%; background:#4caf50; transition: width 0.2s;"></div>
+                            </div>
+                            <div style="text-align:center; font-size:10px; color:#888; margin-top:3px;">Processando áudio...</div>
+                        </div>
+                    </div>
 
-                        <div class="modal-actions" style="margin-top:15px; padding-top:10px; border-top:1px solid #333;">
-                            <button class="studio-btn" id="btn-sub-cancel">Fechar</button>
-                            <button class="studio-btn primary" id="btn-sub-confirm">Salvar Estilo</button>
-                        </div>
+                    <div class="modal-actions" style="margin-top:15px; padding-top:10px; border-top:1px solid #333;">
+                        <button class="studio-btn" id="btn-sub-cancel">Fechar</button>
+                        <button class="studio-btn primary" id="btn-sub-confirm">Salvar Estilo</button>
                     </div>
                 </div>
             </div>
@@ -930,10 +961,10 @@ export class UIManager {
 
         if (btnClose) btnClose.onclick = () => this.closePanCropModal();
         
-        this._bindPanCropControls();     // Binda os inputs numéricos
-        this._makeDraggable(modal);      // Torna a janela arrastável
-        this._initCanvasInteractions();  // Inicializa a canvas interativa
-        this._renderPanCropCanvas();     // Desenha o estado inicial
+        this._bindPanCropControls();     
+        this._makeDraggable(modal, "pc-header"); 
+        this._initCanvasInteractions();  
+        this._renderPanCropCanvas();     
     }
 
     closePanCropModal() {
@@ -971,8 +1002,8 @@ export class UIManager {
         }
     }
 
-    _makeDraggable(elmnt) {
-        const header = document.getElementById("pc-header");
+    _makeDraggable(elmnt, handleId) {
+        const header = document.getElementById(handleId);
         let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
         
         if (!header) return;
@@ -1004,11 +1035,32 @@ export class UIManager {
     _bindPanCropControls() {
         if (!this.activeClip) return;
         
-        const ids = ['pc-pos-x', 'pc-pos-y', 'pc-width', 'pc-height', 'pc-rotation', 'pc-rot-slider', 'pc-lock-aspect', 'pc-btn-reset'];
+        const ids = ['pc-pos-x', 'pc-pos-y', 'pc-width', 'pc-height', 'pc-rotation', 'pc-rot-slider', 'pc-lock-aspect', 'pc-btn-reset', 'pc-btn-axis-lock'];
         const els = {};
         ids.forEach(id => els[id] = document.getElementById(id));
 
         if (!els['pc-pos-x']) return;
+
+        this.axisLockState = 'free';
+
+        const updateLockBtn = () => {
+            const btn = els['pc-btn-axis-lock'];
+            if (!btn) return;
+            
+            if (this.axisLockState === 'free') {
+                btn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Livre';
+                btn.style.color = '#fff';
+            } else if (this.axisLockState === 'x') {
+                btn.innerHTML = '<i class="fa-solid fa-arrows-left-right"></i> Só X';
+                btn.style.color = '#4fc3f7'; 
+            } else if (this.axisLockState === 'y') {
+                btn.innerHTML = '<i class="fa-solid fa-arrows-up-down"></i> Só Y';
+                btn.style.color = '#ffb74d'; 
+            }
+        };
+        
+        // Garante estado inicial visual
+        updateLockBtn();
 
         // Função para atualizar UI baseada nos dados do clip
         const updateUIFromData = () => {
@@ -1075,6 +1127,14 @@ export class UIManager {
             updateUIFromData();
             commitChange(true);
         };
+
+        els['pc-btn-axis-lock'].onclick = () => {
+            if (this.axisLockState === 'free') this.axisLockState = 'x';
+            else if (this.axisLockState === 'x') this.axisLockState = 'y';
+            else this.axisLockState = 'free';
+            
+            updateLockBtn();
+        };
         
         this._updatePanCropInputs = updateUIFromData;
     }
@@ -1122,17 +1182,97 @@ export class UIManager {
             };
         };
 
-        // --- Mouse Down (Hit Test) ---
+        // --- Mouse Down (Hit Test & Drag Start) ---
         newCanvas.onmousedown = (e) => {
             if (!this.activeClip) return;
+            // Apenas inicia se o modo foi detectado no mousemove anterior (otimização)
+            if (!dragMode) return;
+
             const mouse = getMousePos(e);
             const t = this.activeClip.transform;
             const projectW = (this.studio.project.settings || {width:1920}).width;
             const projectH = (this.studio.project.settings || {height:1080}).height;
-
             const scaleFit = Math.min(newCanvas.width / projectW, newCanvas.height / projectH) * 0.7 * this.pancropZoom;
 
-            // Transforma coordenadas do mouse para o espaço local do objeto
+            isDragging = true;
+            startX = mouse.x;
+            startY = mouse.y;
+            initialTransform = { ...t };
+            newCanvas.dataset.scaleFit = scaleFit;
+        };
+
+        // --- Mouse Move (Cursor Update & Dragging) ---
+        window.addEventListener('mousemove', (e) => {
+            // Se o modal estiver fechado ou sem clip, ignora
+            if (!this.activeClip || document.getElementById('modal-pan-crop').classList.contains('hidden')) return;
+
+            // 1. Lógica de Dragging (Mover o objeto)
+            if (isDragging) {
+                e.preventDefault();
+                const rect = newCanvas.getBoundingClientRect();
+                const currentX = e.clientX - rect.left - newCanvas.width / 2;
+                const currentY = e.clientY - rect.top - newCanvas.height / 2;
+                
+                const deltaX = currentX - startX;
+                const deltaY = currentY - startY;
+                const scaleFit = parseFloat(newCanvas.dataset.scaleFit || 1);
+                
+                const projectW = (this.studio.project.settings || {width:1920}).width;
+                const projectH = (this.studio.project.settings || {height:1080}).height;
+
+                const t = this.activeClip.transform;
+                const initT = initialTransform;
+
+                if (dragMode === 'move') {
+                    // --- APLICA TRAVAMENTO DE EIXO ---
+                    if (this.axisLockState === 'free' || this.axisLockState === 'x') {
+                        t.x = initT.x + (deltaX / scaleFit);
+                    }
+                    if (this.axisLockState === 'free' || this.axisLockState === 'y') {
+                        t.y = initT.y + (deltaY / scaleFit);
+                    }
+                } 
+                else {
+                    // Lógica de Redimensionamento (Handles)
+                    const d = rotatePoint(deltaX, deltaY, initT.rotation);
+                    const dPercentW = ((d.x / scaleFit) / projectW) * 100;
+                    const dPercentH = ((d.y / scaleFit) / projectH) * 100;
+
+                    let newW = initT.width;
+                    let newH = initT.height;
+
+                    if (dragMode === 'br') { newW += dPercentW; newH += dPercentH; }
+                    else if (dragMode === 'bl') { newW -= dPercentW; newH += dPercentH; }
+                    else if (dragMode === 'tr') { newW += dPercentW; newH -= dPercentH; }
+                    else if (dragMode === 'tl') { newW -= dPercentW; newH -= dPercentH; }
+
+                    if (initT.maintainAspect) {
+                        const ratio = initT.width / initT.height;
+                        if (Math.abs(newW - initT.width) > Math.abs(newH - initT.height)) {
+                            newH = newW / ratio;
+                        } else {
+                            newW = newH * ratio;
+                        }
+                    }
+                    t.width = Math.max(1, newW);
+                    t.height = Math.max(1, newH);
+                }
+
+                this.studio.markUnsavedChanges();
+                this._renderPanCropCanvas();
+                if(this._updatePanCropInputs) this._updatePanCropInputs();
+                if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+                return; // Se está arrastando, não precisa recalcular hit test nem cursor
+            }
+
+            // 2. Lógica de Hover (Hit Test & Cursor) - Quando NÃO está arrastando
+            const mouse = getMousePos(e);
+            const t = this.activeClip.transform;
+            const projectW = (this.studio.project.settings || {width:1920}).width;
+            const projectH = (this.studio.project.settings || {height:1080}).height;
+            const scaleFit = Math.min(newCanvas.width / projectW, newCanvas.height / projectH) * 0.7 * this.pancropZoom;
+
+            // Transforma coordenadas para espaço local
             const visualOffsetX = t.x * scaleFit; 
             const visualOffsetY = t.y * scaleFit;
             const relX = mouse.x - visualOffsetX;
@@ -1145,80 +1285,39 @@ export class UIManager {
             const halfH = objH / 2;
             const handleSize = 8; 
 
-            // Detecta onde clicou (Handles ou Corpo)
-            if (Math.abs(unrotated.x - (-halfW)) < handleSize && Math.abs(unrotated.y - (-halfH)) < handleSize) dragMode = 'tl';
-            else if (Math.abs(unrotated.x - (halfW)) < handleSize && Math.abs(unrotated.y - (-halfH)) < handleSize) dragMode = 'tr';
-            else if (Math.abs(unrotated.x - (-halfW)) < handleSize && Math.abs(unrotated.y - (halfH)) < handleSize) dragMode = 'bl';
-            else if (Math.abs(unrotated.x - (halfW)) < handleSize && Math.abs(unrotated.y - (halfH)) < handleSize) dragMode = 'br';
-            else if (unrotated.x >= -halfW && unrotated.x <= halfW && unrotated.y >= -halfH && unrotated.y <= halfH) dragMode = 'move';
-            else return; 
+            // Detecta modo
+            let newCursor = 'default';
+            dragMode = null;
 
-            isDragging = true;
-            startX = mouse.x;
-            startY = mouse.y;
-            initialTransform = { ...t };
-            newCanvas.dataset.scaleFit = scaleFit;
-        };
-
-        // --- Mouse Move (Drag) ---
-        window.addEventListener('mousemove', (e) => {
-            if (!isDragging || !this.activeClip) return;
-            e.preventDefault();
-
-            const rect = newCanvas.getBoundingClientRect();
-            const currentX = e.clientX - rect.left - newCanvas.width / 2;
-            const currentY = e.clientY - rect.top - newCanvas.height / 2;
-            
-            const deltaX = currentX - startX;
-            const deltaY = currentY - startY;
-            const scaleFit = parseFloat(newCanvas.dataset.scaleFit || 1);
-            
-            const projectW = (this.studio.project.settings || {width:1920}).width;
-            const projectH = (this.studio.project.settings || {height:1080}).height;
-
-            const t = this.activeClip.transform;
-            const initT = initialTransform;
-
-            if (dragMode === 'move') {
-                t.x = initT.x + (deltaX / scaleFit);
-                t.y = initT.y + (deltaY / scaleFit);
-            } 
-            else {
-                // Resize com rotação compensada
-                const d = rotatePoint(deltaX, deltaY, initT.rotation);
-                const dPercentW = ((d.x / scaleFit) / projectW) * 100;
-                const dPercentH = ((d.y / scaleFit) / projectH) * 100;
-
-                let newW = initT.width;
-                let newH = initT.height;
-
-                if (dragMode === 'br') { newW += dPercentW; newH += dPercentH; }
-                else if (dragMode === 'bl') { newW -= dPercentW; newH += dPercentH; }
-                else if (dragMode === 'tr') { newW += dPercentW; newH -= dPercentH; }
-                else if (dragMode === 'tl') { newW -= dPercentW; newH -= dPercentH; }
-
-                if (initT.maintainAspect) {
-                    const ratio = initT.width / initT.height;
-                    if (Math.abs(newW - initT.width) > Math.abs(newH - initT.height)) {
-                        newH = newW / ratio;
-                    } else {
-                        newW = newH * ratio;
-                    }
-                }
-                t.width = Math.max(1, newW);
-                t.height = Math.max(1, newH);
+            if (Math.abs(unrotated.x - (-halfW)) < handleSize && Math.abs(unrotated.y - (-halfH)) < handleSize) {
+                dragMode = 'tl'; newCursor = 'nwse-resize';
+            }
+            else if (Math.abs(unrotated.x - (halfW)) < handleSize && Math.abs(unrotated.y - (-halfH)) < handleSize) {
+                dragMode = 'tr'; newCursor = 'nesw-resize';
+            }
+            else if (Math.abs(unrotated.x - (-halfW)) < handleSize && Math.abs(unrotated.y - (halfH)) < handleSize) {
+                dragMode = 'bl'; newCursor = 'nesw-resize';
+            }
+            else if (Math.abs(unrotated.x - (halfW)) < handleSize && Math.abs(unrotated.y - (halfH)) < handleSize) {
+                dragMode = 'br'; newCursor = 'nwse-resize';
+            }
+            else if (unrotated.x >= -halfW && unrotated.x <= halfW && unrotated.y >= -halfH && unrotated.y <= halfH) {
+                dragMode = 'move';
+                
+                // --- ATUALIZAÇÃO DO CURSOR BASEADO NO LOCK ---
+                if (this.axisLockState === 'x') newCursor = 'ew-resize';      // Seta horizontal
+                else if (this.axisLockState === 'y') newCursor = 'ns-resize'; // Seta vertical
+                else newCursor = 'move';                                      // Cruz de movimento
             }
 
-            this.studio.markUnsavedChanges();
-            this._renderPanCropCanvas();
-            if(this._updatePanCropInputs) this._updatePanCropInputs();
-            if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+            // Aplica cursor
+            newCanvas.style.cursor = newCursor;
         });
 
         window.addEventListener('mouseup', () => {
             if (isDragging) {
                 isDragging = false;
-                dragMode = null;
+                // dragMode não é zerado aqui para permitir clicks rápidos sem mover o mouse
                 this.studio.historyManager.recordState();
             }
         });
@@ -1363,6 +1462,18 @@ export class UIManager {
         const modal = document.getElementById('modal-subtitle-settings');
         const preview = document.getElementById('sub-preview-target');
         
+        // Centraliza se for a primeira abertura (ou se estiver resetado)
+        if (modal && (!modal.style.top || modal.style.top === "50%")) {
+            const rect = modal.getBoundingClientRect();
+            // Centraliza matematicamente baseado no tamanho inicial (450x600)
+            modal.style.top = `${(window.innerHeight - 600)/2}px`;
+            modal.style.left = `${(window.innerWidth - 450)/2}px`;
+            modal.style.transform = "none";
+        }
+
+        // Ativa Dragging pelo novo ID do header
+        this._makeDraggable(modal, "sub-header");
+
         const iFont = document.getElementById('sub-font-family');
         const iSize = document.getElementById('sub-font-size');
         const iColor = document.getElementById('sub-color');
@@ -1411,7 +1522,7 @@ export class UIManager {
             }
 
             btnTranscribe.disabled = true;
-            btnTranscribe.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>&nbsp; Processando...';
+            btnTranscribe.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>&nbsp; Ouvindo...';
             progressBox.style.display = 'block';
 
             try {
@@ -1427,7 +1538,7 @@ export class UIManager {
             }
         };
 
-        // Salvar estilo apenas
+        // Botão Salvar Estilo
         document.getElementById('btn-sub-confirm').onclick = () => {
             const newConfig = {
                 font: iFont.value,
