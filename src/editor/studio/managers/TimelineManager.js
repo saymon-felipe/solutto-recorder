@@ -48,89 +48,134 @@ export class TimelineManager {
             });
             
             scrollArea.addEventListener('wheel', (e) => {
-                if (e.ctrlKey) { /* Zoom logic */ }
                 e.preventDefault();
                 const project = this.studio.project;
-                const oldZoom = project.zoom;
-                const delta = e.deltaY > 0 ? 0.9 : 1.1;
-                let newZoom = Math.max(10, Math.min(oldZoom * delta, 600));
-                if (newZoom === oldZoom) return;
+                
+                let newZoom = Math.max(10, Math.min(project.zoom * (e.deltaY > 0 ? 0.9 : 1.1), 600));
+                if (newZoom === project.zoom) return;
 
                 const currentTime = project.currentTime;
-                const oldPlayheadPixelPos = currentTime * oldZoom;
-                const offsetFromLeftEdge = oldPlayheadPixelPos - scrollArea.scrollLeft;
-
+                
                 this.setZoom(newZoom);
 
-                const newPlayheadPixelPos = currentTime * newZoom;
-                scrollArea.scrollLeft = newPlayheadPixelPos - offsetFromLeftEdge;
+                scrollArea.scrollLeft = (currentTime * newZoom) - (scrollArea.clientWidth / 2);
+            });
+
+            scrollArea.addEventListener('mousedown', (e) => {
+                if (e.target.closest('.clip') || e.target.closest('.track-header')) return;
+                
+                this._startScrubbingInteraction(e);
+            });
+        }
+
+        const playheadOverlay = document.getElementById('timeline-playhead-overlay');
+        if (playheadOverlay) {
+            playheadOverlay.addEventListener('mousedown', (e) => {
+                e.preventDefault(); 
+                e.stopPropagation();
+                this._startScrubbingInteraction(e);
             });
         }
 
         const ruler = document.getElementById('timeline-ruler-container');
         if (ruler) {
             ruler.onmousedown = (e) => {
-                // CORREÇÃO: Bloqueia Seek na régua se estiver renderizando
-                if (this.studio.renderManager && this.studio.renderManager.isRendering) return;
-
-                const ticks = document.querySelector('.ruler-ticks');
-                const rect = ticks.getBoundingClientRect();
-                this.isScrubbing = true;
-                let didMove = false;
-                
-                const onMove = (mv) => {
-                    didMove = true; 
-                    const mx = mv.clientX - rect.left;
-                    const rawTime = Math.max(0, mx / this.studio.project.zoom);
-                    this._seekToTime(this._snapToFrame(rawTime));
-                };
-                
-                const onUp = (upEvent) => {
-                    this.isScrubbing = false;
-                    document.removeEventListener('mousemove', onMove);
-                    document.removeEventListener('mouseup', onUp);
-                    
-                    if (!didMove) {
-                        const x = upEvent.clientX - rect.left;
-                        if (x >= 0) {
-                            const rawTime = Math.max(0, x / this.studio.project.zoom);
-                            this._seekToTime(this._snapToFrame(rawTime));
-                        }
-                    }
-                };
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
+                this._startScrubbingInteraction(e);
             };
         }
 
         // Atalhos de Teclado
         document.addEventListener('keydown', (e) => {
             if (!this.studio.isActive) return;
-            
-            // --- CORREÇÃO: TRAVA DE RENDERIZAÇÃO ---
-            // Se estiver renderizando, ignora qualquer comando de teclado (Espaço, Delete, S, etc)
             if (this.studio.renderManager && this.studio.renderManager.isRendering) {
-                console.log("Comando bloqueado durante renderização.");
-                e.preventDefault();
-                e.stopPropagation();
-                return;
+                e.preventDefault(); e.stopPropagation(); return;
             }
-
-            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+            if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
             
+            // Playback (Espaço)
             if (e.code === 'Space') { 
                 e.preventDefault(); 
                 this.studio.playbackManager.togglePlayback(); 
             }
 
+            // Navegação Frame a Frame (Setas)
             if (e.code === 'ArrowLeft') { e.preventDefault(); this._stepPlayhead(-1); }
             if (e.code === 'ArrowRight') { e.preventDefault(); this._stepPlayhead(1); }
 
+            // Comandos de Edição
             if (!e.ctrlKey && e.code === 'KeyS') this.splitClip();
             if (e.code === 'Delete') this.deleteClips();
             if (e.code === 'KeyG') this.groupClips();
             if (e.code === 'KeyU') this.ungroupClips();
         });
+    }
+
+    _startAutoScroll() {
+        if (this._autoScrollTimer) return;
+        
+        const loop = () => {
+            if (!this.isScrubbing) return;
+            
+            const scrollArea = document.getElementById('studio-scroll-area');
+            if (scrollArea) {
+                const rect = scrollArea.getBoundingClientRect();
+                
+                const edgeSize = 1; 
+                
+                const maxSpeed = 30;      // Velocidade máxima desejada
+                const rampDistance = 100; // Quantos pixels o mouse precisa andar para atingir a velocidade máxima
+                
+                let scrollSpeed = 0;
+
+                // Mouse na DIREITA
+                if (this._lastMouseX > rect.right - edgeSize) {
+                    const distance = this._lastMouseX - (rect.right - edgeSize);
+                    
+                    const intensity = Math.min(1, Math.max(0, distance / rampDistance));
+                    
+                    scrollSpeed = intensity * maxSpeed;
+                    
+                    if (scrollSpeed > 0 && scrollSpeed < 1) scrollSpeed = 1;
+                } 
+                // Mouse na ESQUERDA
+                else if (this._lastMouseX < rect.left + edgeSize) {
+                    const distance = (rect.left + edgeSize) - this._lastMouseX;
+                    const intensity = Math.min(1, Math.max(0, distance / rampDistance));
+                    
+                    scrollSpeed = -(intensity * maxSpeed);
+                    
+                    if (scrollSpeed < 0 && scrollSpeed > -1) scrollSpeed = -1;
+                }
+
+                if (scrollSpeed !== 0) {
+                    scrollArea.scrollLeft += scrollSpeed;
+                    this._updateSeekFromMouse(this._lastMouseX); 
+                }
+            }
+            
+            this._autoScrollTimer = requestAnimationFrame(loop);
+        };
+        
+        this._autoScrollTimer = requestAnimationFrame(loop);
+    }
+
+    _stopAutoScroll() {
+        if (this._autoScrollTimer) {
+            cancelAnimationFrame(this._autoScrollTimer);
+            this._autoScrollTimer = null;
+        }
+    }
+
+    _updateSeekFromMouse(clientX) {
+        const ticks = document.querySelector('.ruler-ticks');
+        if (!ticks) return;
+        
+        const rect = ticks.getBoundingClientRect();
+        
+        const mx = clientX - rect.left;
+        
+        const rawTime = Math.max(0, mx / this.studio.project.zoom);
+        this._seekToTime(this._snapToFrame(rawTime));
     }
 
     // =========================================================================
@@ -206,10 +251,8 @@ export class TimelineManager {
     updatePlayheadPosition() {
         const currentTime = this.studio.project.currentTime;
         const zoom = this.studio.project.zoom || 10;
-        const pixelsPerSecond = 10 * (zoom / 10);
-        const headerWidth = 120; // Ajuste conforme utils.js
         
-        const position = headerWidth + (currentTime * pixelsPerSecond);
+        const position = (currentTime * zoom);
         
         const playhead = document.getElementById('studio-playhead');
         const line = document.getElementById('studio-playhead-line');
@@ -217,11 +260,23 @@ export class TimelineManager {
         if (playhead) playhead.style.left = `${position}px`;
         if (line) line.style.left = `${position}px`;
         
-        this._autoScrollTimeline(position);
+        if (this.studio.playbackManager && this.studio.playbackManager.isPlaying) {
+             this._autoScrollPlayback(position);
+        }
+    }
+
+    _autoScrollPlayback(pos) {
+        const area = document.getElementById('studio-scroll-area');
+        if (area) {
+            // Se a agulha sair da tela pela direita
+            if (pos > area.scrollLeft + area.clientWidth) {
+                // Avança uma página
+                area.scrollLeft = pos - 100; 
+            }
+        }
     }
 
     _stepPlayhead(direction) {
-        // Avança ou retrocede exatamente 1 frame
         const currentFrame = Math.round(this.studio.project.currentTime * FPS);
         const newFrame = currentFrame + direction;
         const newTime = Math.max(0, newFrame / FPS);
@@ -247,18 +302,62 @@ export class TimelineManager {
         this.playedSinceLastSeek = false;
     }
 
+    /**
+     * Inicia a lógica de Scrubbing (Arrastar Agulha) com Auto-Scroll.
+     * Pode ser chamado pela Régua ou pelas Lanes.
+     */
+    _startScrubbingInteraction(initialEvent) {
+        if (this.studio.renderManager && this.studio.renderManager.isRendering) return;
+
+        // Impede que o clique no knob propague e cause comportamentos estranhos
+        if(initialEvent.stopPropagation) initialEvent.stopPropagation();
+
+        this.isScrubbing = true;
+        this._lastMouseX = initialEvent.clientX; 
+        
+        this._startAutoScroll();
+        this._updateSeekFromMouse(initialEvent.clientX);
+
+        const onMove = (mv) => {
+            // Previne seleção de texto enquanto arrasta
+            mv.preventDefault(); 
+            this._lastMouseX = mv.clientX;
+            this._updateSeekFromMouse(mv.clientX);
+        };
+        
+        const onUp = (upEvent) => {
+            this.isScrubbing = false;
+            this._stopAutoScroll();
+            
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            
+            this._updateSeekFromMouse(upEvent.clientX);
+            this.studio.historyManager.recordState();
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }
+
     _ensurePlayheadVisible() {
         const scrollArea = document.getElementById('studio-scroll-area');
         if (!scrollArea) return;
 
-        const playheadPos = this.studio.project.currentTime * this.studio.project.zoom;
+        // Posição da agulha em pixels (relativa ao início da timeline)
+        const playheadPos = (this.studio.project.currentTime * this.studio.project.zoom);
+        
         const startVisible = scrollArea.scrollLeft;
         const endVisible = startVisible + scrollArea.clientWidth;
+        const buffer = 150; 
 
+        // Se a agulha está à ESQUERDA da visão
         if (playheadPos < startVisible) {
-            scrollArea.scrollLeft = playheadPos - 50;
-        } else if (playheadPos > endVisible) {
-            scrollArea.scrollLeft = playheadPos - scrollArea.clientWidth + 50;
+            scrollArea.scrollLeft = Math.max(0, playheadPos - buffer);
+        } 
+        // Se a agulha está à DIREITA da visão
+        else if (playheadPos > endVisible) {
+            scrollArea.scrollLeft = playheadPos - scrollArea.clientWidth + buffer;
         }
     }
 
@@ -1825,8 +1924,9 @@ export class TimelineManager {
             if (this.studio.draggedAsset) {
                 const rect = lane.getBoundingClientRect();
                 const x = e.clientX - rect.left;
-                // Snap no Drop
-                const time = this._snapToFrame(Math.max(0, x / this.studio.project.zoom));
+                const absoluteX = x + document.getElementById('studio-scroll-area').scrollLeft;
+                const time = this._snapToFrame(Math.max(0, x / this.studio.project.zoom)); 
+                
                 this.studio.addAssetToTimeline(this.studio.draggedAsset, time);
                 this.studio.draggedAsset = null;
             }
@@ -1835,36 +1935,8 @@ export class TimelineManager {
         // Seek clicando no vazio da track
         lane.onmousedown = (e) => {
             if (e.target === lane) {
-                this.isScrubbing = true;
-                const rect = lane.getBoundingClientRect();
-                let didMove = false;
-
-                const handle = (ev) => {
-                    didMove = true; 
-                    const x = ev.clientX - rect.left;
-                    // Snap no arrasto
-                    const rawTime = Math.max(0, x / this.studio.project.zoom);
-                    this._seekToTime(this._snapToFrame(rawTime));
-                };
-                
-                const onMove = (ev) => { if(this.isScrubbing) handle(ev); };
-                const onUp = (ev) => {
-                    this.isScrubbing = false;
-                    window.removeEventListener('mousemove', onMove);
-                    window.removeEventListener('mouseup', onUp);
-                    
-                    this._clearSelection();
-                    this.studio.markUnsavedChanges();
-                    this.studio.historyManager.recordState();
-
-                    if (!didMove) {
-                        const x = ev.clientX - rect.left;
-                        const rawTime = Math.max(0, x / this.studio.project.zoom);
-                        this._seekToTime(this._snapToFrame(rawTime));
-                    }
-                };
-                window.addEventListener('mousemove', onMove);
-                window.addEventListener('mouseup', onUp);
+                this._clearSelection();
+                this._startScrubbingInteraction(e); 
             }
         };
     }
