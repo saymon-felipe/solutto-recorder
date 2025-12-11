@@ -711,7 +711,7 @@ export class TimelineManager {
             headerEl.innerHTML = `
                 <div class="track-header" draggable="true" style="width:100%; display:flex; align-items:center; gap:10px;">
                     <div class="drag-handle" style="cursor:grab; color:#999;"><i class="fa-solid fa-bars"></i></div>
-                    <input type="text" class="track-name-input" value="${track.name}" style="flex:1; border:1px solid transparent; background:transparent;" />
+                    <input type="text" class="track-name-input" title="${track.name}" value="${track.name}" style="flex:1; border:1px solid transparent; background:transparent;" />
                     <div class="track-type-icon"><i class="fa-solid ${track.type==='video'?'fa-video':'fa-volume-high'}"></i></div>
                 </div>
             `;
