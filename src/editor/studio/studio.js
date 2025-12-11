@@ -335,6 +335,22 @@ export class StudioManager {
         }
     }
 
+    deleteTrack(trackId) {
+        const trackIndex = this.project.tracks.findIndex(t => t.id === trackId);
+        if (trackIndex === -1) return;
+
+        this.historyManager.recordState();
+
+        this.project.tracks.splice(trackIndex, 1);
+
+        this.timelineManager.renderTracks();
+        this.markUnsavedChanges();
+        
+        if (this.playbackManager) {
+            this.playbackManager.syncPreview(); 
+        }
+    }
+
     addAssetToTimeline(asset, startTime = 0) {
         const groupId = "group_" + Date.now();
         

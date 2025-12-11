@@ -516,10 +516,13 @@ export class TimelineManager {
                 </div>
                 <div class="track-lane"></div>
             `;
+            
             const lane = el.querySelector(".track-lane");
             const header = el.querySelector(".track-header");
             const nameInput = el.querySelector(".track-name-input");
             
+            header.oncontextmenu = (e) => this._handleTrackContextMenu(e, track);
+
             nameInput.onchange = (e) => { track.name = e.target.value; };
             nameInput.onmousedown = (e) => e.stopPropagation();
             
@@ -559,11 +562,67 @@ export class TimelineManager {
         });
         
         this.renderRuler();
-        this.studio.playbackManager.updatePlayhead();
         
-        // Garante que guias e player estejam sincronizados após renderizar
+        if (this.studio.playbackManager) {
+            this.studio.playbackManager.updatePlayhead();
+            this.studio.playbackManager.syncPreview();
+        }
+        
         this._renderCrossfadeGuides();
-        if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+    }
+
+    // =========================================================================
+    // CONTEXT MENU (Botão Direito)
+    // =========================================================================
+
+    _handleTrackContextMenu(e, track) {
+        e.preventDefault(); 
+
+        this._closeContextMenu();
+
+        const menu = document.createElement('div');
+        menu.className = 'studio-context-menu';
+        
+        menu.style.left = `${e.clientX}px`;
+        menu.style.top = `${e.clientY}px`;
+
+        menu.innerHTML = `
+            <div class="ctx-menu-item disabled" style="opacity:0.6; cursor:default;">
+                <i class="fa-solid fa-layer-group"></i> ${track.name}
+            </div>
+            <div class="ctx-menu-divider"></div>
+            <div class="ctx-menu-item delete" id="ctx-btn-delete">
+                <i class="fa-solid fa-trash"></i> Excluir Track
+            </div>
+        `;
+
+        document.body.appendChild(menu);
+
+        const btnDelete = menu.querySelector('#ctx-btn-delete');
+        if (btnDelete) {
+            btnDelete.onclick = () => {
+                this.studio.deleteTrack(track.id);
+                this._closeContextMenu();
+            };
+        }
+
+        setTimeout(() => {
+            document.addEventListener('click', this._closeContextMenuBind);
+            document.addEventListener('contextmenu', this._closeContextMenuBind); 
+        }, 0);
+    }
+
+    _closeContextMenu = () => {
+        const existing = document.querySelector('.studio-context-menu');
+        if (existing) existing.remove();
+        
+        document.removeEventListener('click', this._closeContextMenuBind);
+        document.removeEventListener('contextmenu', this._closeContextMenuBind);
+    }
+
+    _closeContextMenuBind = (e) => {
+        if (e.target.closest('.studio-context-menu')) return;
+        this._closeContextMenu();
     }
 
     /**
