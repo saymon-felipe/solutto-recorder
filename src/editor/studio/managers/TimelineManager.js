@@ -1580,16 +1580,13 @@ export class TimelineManager {
             binSize = 2;
         }
 
-        // --- SEGURANÇA: Verifica se bins existe e tem conteúdo ---
         if (!bins || bins.length === 0) return;
 
-        // Usamos o tamanho real do array para garantir que o loop nunca acesse fora dos limites
         const wrapLength = bins.length;
 
         for (let x = 0; x < width; x++) {
 
-            // 1. Calcula o tempo absoluto dentro do CLIPE para este pixel
-            const timeInClip = (x * samplesPerVisualPixel / sampleRate) + clipOffset;
+            const sourceTime = (x * samplesPerVisualPixel / sampleRate) + clipOffset;
             
             // 2. Calcula o sample e bin para o loop
             const absoluteSampleStart = Math.floor(offsetSamples + x * samplesPerVisualPixel);
@@ -1600,18 +1597,11 @@ export class TimelineManager {
             let min = 1.0, max = -1.0;
 
             for (let b = binStart; b <= binEnd; b++) {
-                // --- CORREÇÃO DE ÍNDICE ---
-                // Usa o tamanho real (wrapLength) para o módulo, garantindo índice inteiro válido.
-                // O (Math.floor(b) ... ) garante que b seja tratado como inteiro.
                 const idx = ((b % wrapLength) + wrapLength) % wrapLength;
-
                 const binData = bins[idx];
-                
-                // Se por algum motivo for undefined, pula sem quebrar o app
                 if (!binData) continue; 
 
                 const { min: bMin, max: bMax } = binData;
-
                 if (bMin < min) min = bMin;
                 if (bMax > max) max = bMax;
             }
@@ -1620,7 +1610,8 @@ export class TimelineManager {
             let fadeFactor = 1.0;
             
             if (clip && (clip.fadeIn > 0 || clip.fadeOut > 0)) { 
-                 fadeFactor = this._calculateLocalFadeFactor(clip, timeInClip);
+                 const timeRelative = sourceTime - (clip.offset || 0);
+                 fadeFactor = this._calculateLocalFadeFactor(clip, timeRelative);
             }
 
             // 5. Aplica Volume Base e Fade
@@ -1669,8 +1660,8 @@ export class TimelineManager {
             cssW, 
             cssH, 
             visualLevel,
-            clip.duration,
-            clip.offset,
+            asset.baseDuration, 
+            0,                  
             clip 
         );
 
@@ -1678,21 +1669,24 @@ export class TimelineManager {
         const allClipsWithAsset = document.querySelectorAll(`.clip[data-asset-id="${asset.id}"]`);
         
         const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true });
-        const imageData = baseCtx.getImageData(0, 0, baseCanvas.width, baseCanvas.height);
+        // Proteção para evitar erro se width/height for 0
+        if (baseCanvas.width > 0 && baseCanvas.height > 0) {
+            const imageData = baseCtx.getImageData(0, 0, baseCanvas.width, baseCanvas.height);
 
-        allClipsWithAsset.forEach(el => {
-            const repeater = el.querySelector('.waveform-repeater');
-            if (!repeater) return;
+            allClipsWithAsset.forEach(el => {
+                const repeater = el.querySelector('.waveform-repeater');
+                if (!repeater) return;
 
-            Array.from(repeater.children).forEach(childCanvas => {
-                if (childCanvas.tagName === 'CANVAS') {
-                    const cloneCtx = childCanvas.getContext('2d');
-                    childCanvas.width = baseCanvas.width;
-                    childCanvas.height = baseCanvas.height;
-                    cloneCtx.putImageData(imageData, 0, 0); 
-                }
+                Array.from(repeater.children).forEach(childCanvas => {
+                    if (childCanvas.tagName === 'CANVAS') {
+                        const cloneCtx = childCanvas.getContext('2d');
+                        childCanvas.width = baseCanvas.width;
+                        childCanvas.height = baseCanvas.height;
+                        cloneCtx.putImageData(imageData, 0, 0); 
+                    }
+                });
             });
-        });
+        }
     }
 
     /**
