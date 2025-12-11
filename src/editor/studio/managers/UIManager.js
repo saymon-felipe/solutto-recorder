@@ -1452,9 +1452,8 @@ export class UIManager {
         });
 
         const btnGenSub = document.getElementById('btn-gen-subtitles');
-
         if (btnGenSub) {
-            btnGenSub.onclick = () => this.openSubtitleModal();
+            btnGenSub.onclick = () => this.studio.createSubtitleAsset();
         }
     }
 
@@ -1462,16 +1461,14 @@ export class UIManager {
         const modal = document.getElementById('modal-subtitle-settings');
         const preview = document.getElementById('sub-preview-target');
         
-        // Centraliza se for a primeira abertura (ou se estiver resetado)
+        // Centraliza
         if (modal && (!modal.style.top || modal.style.top === "50%")) {
             const rect = modal.getBoundingClientRect();
-            // Centraliza matematicamente baseado no tamanho inicial (450x600)
             modal.style.top = `${(window.innerHeight - 600)/2}px`;
             modal.style.left = `${(window.innerWidth - 450)/2}px`;
             modal.style.transform = "none";
         }
 
-        // Ativa Dragging pelo novo ID do header
         this._makeDraggable(modal, "sub-header");
 
         const iFont = document.getElementById('sub-font-family');
@@ -1481,9 +1478,14 @@ export class UIManager {
         const iBold = document.getElementById('sub-bold');
         const iItalic = document.getElementById('sub-italic');
 
-        const config = existingClip ? existingClip.subtitleConfig : {
+        // Defaults
+        const defaults = {
             font: 'Arial', size: 30, color: '#ffffff', bgColor: '#000000', bold: false, italic: false
         };
+
+        const config = (existingClip && existingClip.subtitleConfig) 
+            ? { ...defaults, ...existingClip.subtitleConfig } 
+            : defaults;
 
         iFont.value = config.font;
         iSize.value = config.size;
@@ -1506,7 +1508,7 @@ export class UIManager {
 
         modal.classList.remove('hidden');
 
-        // LÓGICA DO BOTÃO DE TRANSCRIÇÃO
+        // Botão Transcrever
         const btnTranscribe = document.getElementById('btn-sub-transcribe');
         const progressBox = document.getElementById('sub-transcribe-progress');
         const progressBar = document.getElementById('sub-transcribe-bar');
@@ -1517,12 +1519,13 @@ export class UIManager {
 
         btnTranscribe.onclick = async () => {
             if (!existingClip) {
+                // Agora isso não deve acontecer, pois criamos antes
                 alert("Erro: O clipe precisa ser criado antes de transcrever.");
                 return;
             }
 
             btnTranscribe.disabled = true;
-            btnTranscribe.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>&nbsp; Ouvindo...';
+            btnTranscribe.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>&nbsp; Transcrevendo...';
             progressBox.style.display = 'block';
 
             try {

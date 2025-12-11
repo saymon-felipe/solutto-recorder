@@ -2332,8 +2332,7 @@ export class TimelineManager {
             tracksContainer.appendChild(line);
         }
 
-        const headerOffset = 120; 
-        const pos = (time * this.studio.project.zoom) + headerOffset;
+        const pos = time * this.studio.project.zoom;
         
         line.style.left = `${pos}px`;
         line.style.top = `${top}px`;
