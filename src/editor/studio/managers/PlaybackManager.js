@@ -54,7 +54,10 @@ export class PlaybackManager {
     }
 
     play() {
-        // Salva o ponto onde o play começou para retornar depois (Comportamento estilo Vegas)
+        // Garante que o contexto de áudio e os GainNodes existam para o Preview
+        this.prepareForRendering();
+
+        // Salva o ponto onde o play começou
         this.lastPlayStartTime = this.studio.project.currentTime;
         this.playedSinceLastSeek = true;
 
@@ -154,7 +157,7 @@ export class PlaybackManager {
         // 1. Cria Nó de Monitoramento (se não existir)
         if (!this.monitorGain) {
             this.monitorGain = this.audioCtx.createGain();
-            this.monitorGain.gain.value = 1; // Começa com volume 1
+            this.monitorGain.gain.value = 1; 
             this.monitorGain.connect(this.audioCtx.destination);
         }
 
@@ -163,34 +166,37 @@ export class PlaybackManager {
             this.renderDestination = this.audioCtx.createMediaStreamDestination();
         }
 
-        // 3. Conecta cada track aos DOIS destinos
+        // 3. Conecta cada track usando GainNodes individuais
         this.trackLayers.forEach((layer, trackId) => {
-            const mediaEl = layer.audioEl || layer.videoEl;
-            const track = this.studio.project.tracks.find(t => t.id === trackId);
+            // Processa tanto áudio quanto vídeo
+            const mediaElements = [layer.audioEl, layer.audioEl2, layer.videoEl, layer.videoEl2];
             
-            if (mediaEl && track) {
-                if (!mediaEl.crossOrigin) mediaEl.crossOrigin = "anonymous";
-                mediaEl.volume = track.muted ? 0 : 1;
+            mediaElements.forEach(mediaEl => {
+                if (!mediaEl) return;
 
+                if (!mediaEl.crossOrigin) mediaEl.crossOrigin = "anonymous";
+                
+                // Inicializa SourceNode se necessário
                 if (!mediaEl._sourceNode) {
                     try { mediaEl._sourceNode = this.audioCtx.createMediaElementSource(mediaEl); } catch(e){}
                 }
-                
-                if (mediaEl._sourceNode) {
+
+                // Inicializa GainNode (NOVO: Controle de Volume Individual)
+                if (!mediaEl._gainNode && mediaEl._sourceNode) {
+                    mediaEl._gainNode = this.audioCtx.createGain();
+                    
                     try { mediaEl._sourceNode.disconnect(); } catch(e){}
                     
-                    // Rota A: Para o Arquivo (Sempre ativo)
-                    mediaEl._sourceNode.connect(this.renderDestination);
-                    
-                    // Rota B: Para o Usuário (Monitorável/Mutável)
-                    mediaEl._sourceNode.connect(this.monitorGain);
+                    // Rota: Elemento -> Gain -> Destinos
+                    mediaEl._sourceNode.connect(mediaEl._gainNode);
+                    mediaEl._gainNode.connect(this.renderDestination); // Para o arquivo
+                    mediaEl._gainNode.connect(this.monitorGain);       // Para o ouvido
                 }
-            }
+            });
         });
 
         return this.renderDestination.stream;
     }
-
     // =========================================================
     // RENDERIZAÇÃO DE VÍDEO (CANVAS)
     // =========================================================
@@ -323,7 +329,7 @@ export class PlaybackManager {
         if (!this.container) {
             this.container = document.getElementById('studio-preview-canvas');
         }
-        if (!this.container) return; // Se ainda não existe DOM, aborta (tenta no próximo ciclo)
+        if (!this.container) return;
 
         const time = this.studio.project.currentTime;
         const tracks = this.studio.project.tracks;
@@ -343,7 +349,6 @@ export class PlaybackManager {
         tracks.forEach((track, idx) => {
             let layer = this.trackLayers.get(track.id);
             
-            // Se não existe na memória, cria
             if (!layer) {
                 layer = this._createTrackLayer(track);
                 this.trackLayers.set(track.id, layer);
@@ -353,23 +358,22 @@ export class PlaybackManager {
                 this.container.appendChild(layer.container);
             }
 
-            // Atualiza Z-Index (Track 0 no topo visual ou fundo?)
-            // Geralmente Track 0 (Index 0) é o topo da pilha em editores.
-            // Z-Index maior = Mais à frente.
             if(layer.container) {
                 layer.container.style.zIndex = tracks.length - idx;
             }
 
-            // Sincroniza conteúdo
-            // filter retorna array (suporte a crossfade)
             const clips = this._getClipsAtTime(track.id, time);
             
             if(track.type === 'video') this._syncVideoTrack(layer, clips, time);
             else this._syncAudioTrack(layer, clips, time);
         });
+        
+        this._forceSeek = false;
     }
 
     _updateSingleMediaElement(domEl, clip, time, isImage) {
+        const EPSILON = 0.005; 
+        
         if (!clip) {
             domEl.style.display = 'none';
             domEl.dataset.curId = ""; 
@@ -378,19 +382,26 @@ export class PlaybackManager {
         }
 
         const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
-        if(!asset) return;
+        if(!asset || asset.status === 'unloaded') { 
+            domEl.style.display = 'none';
+            return;
+        }
 
-        // Se o elemento mudou de dono (clip ID), recarrega
         if(domEl.dataset.curId !== clip.id) {
             domEl.src = asset.url;
             domEl.dataset.curId = clip.id;
-            if(!isImage) domEl.load();
+            if(!isImage) domEl.load(); 
         }
 
+        // 1. Cálculo do Alvo de Volume (Target)
         let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
         alpha *= this._calculateFadeFactor(clip, time);
         alpha = Math.max(0, Math.min(1, alpha));
+        
+        // Corte de ruído digital (Clean Silence)
+        if (alpha < 0.001) alpha = 0;
 
+        // 2. Visuais
         const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
         const transform = `translate(-50%, -50%) translate(${t.x}px, ${t.y}px) rotate(${t.rotation}deg) scale(${t.width / 100}, ${t.height / 100})`;
         
@@ -399,24 +410,61 @@ export class PlaybackManager {
         domEl.style.left = '50%';
         domEl.style.top = '50%';
         domEl.style.transformOrigin = 'center center';
-        
-        // Força visibilidade correta
-        if (isImage) {
-            domEl.style.display = 'block';
-            domEl.style.opacity = alpha;
-        } else {
-            domEl.style.display = 'block';
-            domEl.style.opacity = alpha;
+        domEl.style.display = 'block';
+        domEl.style.opacity = alpha;
+
+        if (!isImage) {
             domEl.muted = clip.muted === true;
 
-            let localTime = (time - clip.start) + clip.offset;
-            if (Math.abs(domEl.currentTime - localTime) > 0.3 || domEl.ended) {
-                domEl.currentTime = localTime;
+            if (domEl._gainNode && this.audioCtx) {
+                const now = this.audioCtx.currentTime;
+                
+                try {
+                    // Valor atual real do nó
+                    const currentGain = domEl._gainNode.gain.value;
+                    
+                    // Só agenda se houver mudança perceptível (evita sobrecarga)
+                    if (Math.abs(currentGain - alpha) > 0.0001) {
+                        domEl._gainNode.gain.cancelScheduledValues(now);
+                        domEl._gainNode.gain.setValueAtTime(currentGain, now);
+                        
+                        // Rampa suave de 30ms para o novo valor. 
+                        // Suaviza qualquer "degrau" entre frames (De-zippering).
+                        domEl._gainNode.gain.linearRampToValueAtTime(alpha, now + 0.03);
+                    }
+                } catch(e) {
+                    domEl._gainNode.gain.value = alpha; 
+                }
+            } else {
+                domEl.volume = alpha; 
+            }
+
+            let rawTime = (time - clip.start) + clip.offset;
+            let localTime = rawTime;
+            let DURATION = 0; 
+
+            if (domEl.duration && Number.isFinite(domEl.duration) && domEl.duration > 0) {
+                DURATION = domEl.duration;
+                localTime = rawTime % DURATION;
+            }
+            
+            if (DURATION > 0) {
+                if (localTime > (DURATION - EPSILON) && localTime < DURATION) {
+                    localTime = DURATION - EPSILON;
+                }
+            }
+            
+            const needsSeek = this._forceSeek || 
+                            Math.abs(domEl.currentTime - localTime) > 0.3 || 
+                            domEl.ended;
+
+            if (needsSeek && Number.isFinite(localTime)) {
+                try { domEl.currentTime = localTime; } catch(e) {}
             }
 
             const isRendering = this.studio.renderManager && this.studio.renderManager.isRendering;
             if (this.isPlaying || isRendering) {
-                if(domEl.paused) domEl.play().catch(()=>{});
+                if(domEl.paused) domEl.play().catch(()=>{}); 
             } else {
                 if(!domEl.paused) domEl.pause();
             }
@@ -607,48 +655,153 @@ export class PlaybackManager {
     }
 
     _syncAudioTrack(layer, clips, time) {
-        const updateAudio = (audioEl, clip) => {
+        const trackId = layer.trackId;
+        
+        // PRÉ-ANÁLISE: Detecta se há clips adjacentes formando crossfade na timeline
+        const track = this.studio.project.tracks.find(t => t.id === trackId);
+        let allClipsOnTrack = track ? track.clips : [];
+        
+        const updateAudio = (audioEl, clip, clipIndex) => {
+            const EPSILON = 0.005;
+            
             if(!audioEl) return;
-            if (!clip) { if(!audioEl.paused) audioEl.pause(); return; }
+            if (!clip) { 
+                // Fade out suave antes de pausar
+                if (audioEl._gainNode && this.audioCtx && !audioEl.paused) {
+                    const now = this.audioCtx.currentTime;
+                    try {
+                        audioEl._gainNode.gain.cancelScheduledValues(now);
+                        audioEl._gainNode.gain.setValueAtTime(audioEl._gainNode.gain.value, now);
+                        audioEl._gainNode.gain.linearRampToValueAtTime(0, now + 0.08);
+                        
+                        setTimeout(() => {
+                            if (!clip && !audioEl.paused) audioEl.pause();
+                        }, 100);
+                    } catch(e) {
+                        audioEl.pause();
+                    }
+                } else if(!audioEl.paused) {
+                    audioEl.pause();
+                }
+                return; 
+            }
 
             const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
-            if(!asset) return;
+            if(!asset || asset.status === 'unloaded') { return; }
 
             if(audioEl.dataset.curId !== clip.id) {
                 audioEl.src = asset.url;
                 audioEl.dataset.curId = clip.id;
+                audioEl.load(); 
             }
 
+            // Cálculo do Volume Base
             let vol = clip.level !== undefined ? clip.level : (clip.volume || 1);
             if(vol > 1) vol = vol/100;
-            vol *= this._calculateFadeFactor(clip, time); // Aplica fade curve
+            
+            let fadeFactor = this._calculateFadeFactor(clip, time);
+            
+            // Verifica se há um clip anterior que está fazendo fade out sobre este
+            const clipStart = clip.start;
+            const clipEnd = clip.start + clip.duration;
+            
+            let hasLeftOverlap = false;
+            let leftOverlapFade = 0;
+            
+            // Procura clip anterior que esteja sobreposto
+            for (const otherClip of allClipsOnTrack) {
+                if (otherClip.id === clip.id) continue;
+                
+                const otherEnd = otherClip.start + otherClip.duration;
+                
+                // Verifica se o outro clip termina dentro deste
+                if (otherClip.start < clipStart && otherEnd > clipStart && otherEnd < clipEnd) {
+                    // Há overlap à esquerda
+                    hasLeftOverlap = true;
+                    
+                    // Se o tempo atual está na zona de overlap
+                    if (time >= clipStart && time < otherEnd) {
+                        const otherFade = this._calculateFadeFactor(otherClip, time);
+                        leftOverlapFade = otherFade;
+                    }
+                    break;
+                }
+            }
+            
+            let normalizedFadeFactor = fadeFactor;
+            
+            if (hasLeftOverlap && leftOverlapFade > 0.01) {
+                // Durante overlap: normaliza
+                const totalFade = fadeFactor + leftOverlapFade;
+                if (totalFade > 0.01) {
+                    normalizedFadeFactor = fadeFactor / totalFade;
+                }
+            }
+            
+            vol *= normalizedFadeFactor;
+            
+            let finalVol = Math.max(0, Math.min(1, vol));
+            if (finalVol < 0.0001) finalVol = 0;
 
-            audioEl.volume = Math.max(0, Math.min(1, vol));
             audioEl.muted = layer.muted || false;
 
-            let localTime = (time - clip.start) + clip.offset;
-            if (Math.abs(audioEl.currentTime - localTime) > 0.3) {
-                audioEl.currentTime = localTime;
+            // Aplicação do Volume - Rampa MUITO suave
+            if (audioEl._gainNode && this.audioCtx) {
+                const now = this.audioCtx.currentTime;
+                try {
+                    const currentGain = audioEl._gainNode.gain.value;
+                    
+                    if (Math.abs(currentGain - finalVol) > 0.00001) {
+                        audioEl._gainNode.gain.cancelScheduledValues(now);
+                        audioEl._gainNode.gain.setValueAtTime(currentGain, now);
+                        // Rampa de 100ms para máxima suavidade
+                        audioEl._gainNode.gain.linearRampToValueAtTime(finalVol, now + 0.1);
+                    }
+                } catch(e) {
+                    audioEl._gainNode.gain.value = finalVol;
+                }
+            } else {
+                audioEl.volume = finalVol;
+            }
+
+            let rawTime = (time - clip.start) + clip.offset;
+            let localTime = rawTime;
+            let DURATION = 0; 
+
+            if (audioEl.duration && Number.isFinite(audioEl.duration) && audioEl.duration > 0) {
+                DURATION = audioEl.duration;
+                localTime = rawTime % DURATION;
+            }
+            
+            if (DURATION > 0) {
+                if (localTime > (DURATION - EPSILON) && localTime < DURATION) {
+                    localTime = DURATION - EPSILON;
+                }
+            }
+
+            const needsSeek = this._forceSeek || 
+                            Math.abs(audioEl.currentTime - localTime) > 0.3;
+            
+            if (needsSeek && Number.isFinite(localTime)) {
+                try { audioEl.currentTime = localTime; } catch(e) {}
             }
             
             const isRendering = this.studio.renderManager && this.studio.renderManager.isRendering;
-            const shouldPlay = this.isPlaying || (isRendering && this.isPlaying);
-            
-            if (shouldPlay) {
+            if (this.isPlaying || isRendering) {
                 if(audioEl.paused) audioEl.play().catch(()=>{});
             } else {
                 if(!audioEl.paused) audioEl.pause();
             }
         };
 
-        updateAudio(layer.audioEl, clips[0] || null);
-        updateAudio(layer.audioEl2, clips[1] || null);
+        updateAudio(layer.audioEl, clips[0] || null, 0);
+        updateAudio(layer.audioEl2, clips[1] || null, 1);
     }
 
     _getClipsAtTime(trackId, time) {
         const track = this.studio.project.tracks.find(t => t.id === trackId);
         if(!track || track.muted) return [];
-        // [CORREÇÃO] filter em vez de find
+
         return track.clips.filter(c => time >= c.start && time < (c.start + c.duration))
                           .sort((a, b) => a.start - b.start); // Ordena por início para estabilidade
     }

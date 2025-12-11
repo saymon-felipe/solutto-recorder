@@ -106,6 +106,14 @@ export class VideoStorage {
     }
 
     /**
+     * Salva o Blob completo como um único chunk no IndexedDB.
+     * Usado pelo AssetManager.
+     */
+    async saveVideo(videoId, blob) {
+        return this.saveChunk(videoId, blob, 0, 0);
+    }
+
+    /**
      * Recupera o vídeo completo como um único Blob.
      * Junta todos os chunks de todos os segmentos em ordem correta.
      */

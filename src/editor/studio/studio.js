@@ -57,7 +57,7 @@ export class StudioManager {
         
         if (projectIdFromUrl) {
             // Se veio um ID, carrega o projeto salvo e ignora a modal de novo projeto
-            await this.loadProject(projectIdFromUrl); // Assumindo que este método já existe ou será criado
+            await this.loadProject(projectIdFromUrl); 
             this.isFreshInit = false;
         }
 
@@ -83,6 +83,13 @@ export class StudioManager {
         if (this.uiManager) {
             this.uiManager.updateProjectHeader(this.project, true);
         }
+    }
+    
+    markSaved() {
+        this.hasUnsavedChanges = false;
+        this.project.lastSaved = Date.now();
+        this.uiManager.updateProjectHeader(this.project, this.hasUnsavedChanges);
+        this.uiManager.updateRecentProjectsList();
     }
 
     /**
@@ -175,46 +182,9 @@ export class StudioManager {
             });
     }
 
-    // --- PERSISTÊNCIA ---
-    async saveCurrentProject() {
-        if (this.tasks.length > 0) return alert("Aguarde o processamento de assets antes de salvar.");
-
-        const defaultName = this.project.name !== "Novo Projeto" ? this.project.name : `Projeto ${new Date().toLocaleString()}`;
-        const name = prompt("Nome do Projeto:", defaultName);
-        if (!name) return;
-
-        this.project.name = name;
-        if (!this.project.id) this.project.id = Date.now();
-        this.project.lastSaved = Date.now();
-
-        const assetsToSave = this.project.assets.map(a => ({
-            id: a.id,
-            name: a.name,
-            type: a.type,
-            baseDuration: a.baseDuration,
-            status: 'ready',
-            blob: a.blob
-        }));
-
-        const projectData = {
-            id: this.project.id,
-            name: this.project.name,
-            lastSaved: this.project.lastSaved,
-            tracks: this.project.tracks,
-            assets: assetsToSave,
-            zoom: this.project.zoom,
-            duration: this.project.duration
-        };
-
-        try {
-            await this.projectStorage.saveProject(projectData);
-            alert("Projeto salvo com sucesso!");
-            this.uiManager.updateRecentProjectsList();
-        } catch (e) {
-            console.error(e);
-            alert("Erro ao salvar projeto: " + e.message);
-        }
-    }
+    // =========================================================================
+    // PERSISTÊNCIA E SALVAMENTO (Corrigido para Cache e Blobs)
+    // =========================================================================
 
     /**
      * Salva o projeto atual.
@@ -228,14 +198,6 @@ export class StudioManager {
         }
 
         await this._performSave(this.project.id, this.project.name);
-
-        this.project.lastSaved = Date.now();
-    
-        this.hasUnsavedChanges = false;
-        
-        this.uiManager.updateProjectHeader(this.project, false);
-        
-        this.uiManager.showToast("Projeto salvo com sucesso!");
     }
 
     /**
@@ -249,7 +211,8 @@ export class StudioManager {
         if (!name) return;
 
         // Gera um NOVO ID para criar uma nova entrada no banco
-        const newId = Date.now();
+        const newId = `proj_${Date.now()}`;
+        
         await this._performSave(newId, name);
     }
 
@@ -261,35 +224,25 @@ export class StudioManager {
         this.project.name = name;
         this.project.lastSaved = Date.now();
 
-        const assetsToSave = this.project.assets.map(a => ({
-            id: a.id,
-            name: a.name,
-            type: a.type,
-            baseDuration: a.baseDuration,
-            status: 'ready',
-            blob: a.blob,
-            sourceBlob: a.sourceBlob
-        }));
-
+        const serializableAssets = await this.assetManager.getSerializableAssets();
+        
         const projectData = {
             id: this.project.id,
             name: this.project.name,
             lastSaved: this.project.lastSaved,
             settings: this.project.settings, 
             tracks: this.project.tracks,
-            assets: assetsToSave,
+            assets: serializableAssets, 
             zoom: this.project.zoom,
-            duration: this.project.duration
+            duration: this.project.duration,
+            currentTime: this.project.currentTime,
         };
 
         try {
             await this.projectStorage.saveProject(projectData);
             
-            // Atualiza UI
+            this.markSaved();
             this.uiManager.updateRecentProjectsList();
-            
-            // Feedback simples (pode ser melhorado com um Toast)
-            this.uiManager.showToast("Projeto salvo com sucesso!");
             
         } catch (e) {
             console.error("Erro ao salvar:", e);
@@ -311,26 +264,49 @@ export class StudioManager {
             const data = await this.projectStorage.getProject(projectId);
             if (!data) throw new Error("Projeto não encontrado.");
 
-            const restoredAssets = data.assets.map(a => ({
-                ...a,
-                url: URL.createObjectURL(a.blob),
-                status: 'ready'
+            const videoStorage = new VideoStorage();
+            
+            const restoredAssets = await Promise.all(data.assets.map(async a => {
+                let mediaBlob = null;
+                let url = '';
+                let assetStatus = 'processing';
+
+                if (a.id) {
+                    mediaBlob = await videoStorage.getVideo(a.id); 
+                }
+                
+                if (mediaBlob) {
+                    url = URL.createObjectURL(mediaBlob); 
+                    assetStatus = 'ready';
+                } else {
+                    assetStatus = 'unloaded'; 
+                    console.warn(`Asset ${a.name} (ID: ${a.id}) media content not found. Asset marked as 'unloaded'.`);
+                }
+                
+                return {
+                    ...a,
+                    blob: mediaBlob, 
+                    sourceBlob: mediaBlob, 
+                    url: url,
+                    status: assetStatus
+                };
             }));
 
             this.project = {
                 id: data.id,
                 name: data.name,
                 tracks: data.tracks,
-                assets: restoredAssets,
+                assets: restoredAssets, 
                 settings: data.settings || { width: 1280, height: 720 }, 
                 zoom: data.zoom || 100,
                 duration: data.duration || 300,
-                currentTime: 0
+                currentTime: data.currentTime || 0 
             };
 
             this.assetManager.renderBin();
             this.timelineManager.renderRuler();
             this.timelineManager.renderTracks();
+            this.assetManager.indexAllExistingAssets(); 
             this.playbackManager.updatePlayhead();
             this.playbackManager.syncPreview();
             

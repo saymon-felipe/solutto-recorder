@@ -20,9 +20,13 @@ export class TimelineManager {
         this.lastFocusedClipId = null;
         this.isScrubbing = false;
 
+        this._forceSeek = false;
+
         // Cache para virtualização da régua (Performance)
         this.rulerTicksData = []; 
         this.lastRenderedRange = { start: -1, end: -1 };
+
+        this.pendingVisualTasks = 0;
     }
 
     init() {
@@ -228,10 +232,19 @@ export class TimelineManager {
 
     _seekToTime(time) {
         this.studio.project.currentTime = time;
+        
+        if (this.studio.playbackManager.isPlaying) {
+            this.studio.playbackManager.lastPlayStartTime = time;
+        }
+        
+        if (this.studio.playbackManager) {
+            this.studio.playbackManager._forceSeek = true;
+        }
+        
         this.studio.playbackManager.updatePlayhead();
         this.studio.playbackManager.syncPreview();
         this.lastSeekTime = time; 
-        this.playedSinceLastSeek = false; 
+        this.playedSinceLastSeek = false;
     }
 
     _ensurePlayheadVisible() {
@@ -726,36 +739,69 @@ export class TimelineManager {
         const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
         if(!asset) return document.createElement('div');
 
+        const track = this.studio.project.tracks.find(t => t.id === trackId);
+        const isAudioTrack = track && track.type === 'audio';
+
         if (typeof clip.fadeIn === 'undefined') clip.fadeIn = 0;
         if (typeof clip.fadeOut === 'undefined') clip.fadeOut = 0;
 
         const el = document.createElement("div");
         el.className = `clip type-${clip.type}`;
         el.dataset.clipId = clip.id;
+        el.dataset.assetId = clip.assetId;
         
-        // 1. border-box: garante que a borda não aumente o tamanho total.
-        // 2. border-width fixo: reserva o espaço da borda para não haver pulo no clique.
         el.style.boxSizing = "border-box";
         el.style.borderWidth = "2px";
         el.style.borderStyle = "solid";
         
+        // Seleção
         const isSelected = this.selectedClips.some(s => s.clip.id === clip.id);
         if (isSelected) {
             el.classList.add('selected');
-            el.style.borderColor = '#2196F3'; // Azul de seleção
+            el.style.borderColor = '#2196F3';
         } else {
-            el.style.borderColor = 'transparent'; // Borda invisível (mas ocupa espaço)
+            el.style.borderColor = 'transparent';
         }
         
         el.style.left = (clip.start * this.studio.project.zoom) + "px";
         el.style.width = (clip.duration * this.studio.project.zoom) + "px";
         
         const faderTop = (1 - clip.level) * 100;
-        const isVideo = clip.type === 'video';
+        
+        const isVideoVisual = (clip.type === 'video' || clip.type === 'image') && !isAudioTrack;
 
-        // O SVG agora é posicionado em -2px (top/left) e cresce +4px (width/height)
-        // para cobrir exatamente a área da borda, garantindo que o fade vá até o limite visual.
+        // Container de visuais
+        const bgVisuals = `<div class="clip-visuals" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:0; pointer-events:none; overflow:hidden; display:flex;"></div>`;
+
+        const fadeOverlay = `<div class="clip-fade-overlay" style="
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none;
+        "></div>`;
+
+        // Estilos do Texto
+        const nameStyle = `
+            z-index: 6; 
+            position: absolute; 
+            top: 2px; 
+            left: 2px;
+            background: rgba(0, 0, 0, 0.75);
+            color: rgba(255, 255, 255, 0.95);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-family: 'Segoe UI', sans-serif;
+            font-weight: 500;
+            line-height: 1.2;
+            pointer-events: none;
+            max-width: calc(100% - 10px);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        `;
+
         el.innerHTML = `
+            ${bgVisuals}
+            ${fadeOverlay}
             <svg class="fade-curve-layer" preserveAspectRatio="none" style="position:absolute; top:-2px; left:-2px; width:calc(100% + 4px); height:calc(100% + 4px); pointer-events:none; z-index:1; opacity:0.6;">
                 <path class="fade-path-fill" fill="rgba(0,0,0,0.2)" d=""></path>
                 <path class="fade-path-stroke" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="1.5" vector-effect="non-scaling-stroke" d=""></path>
@@ -766,24 +812,51 @@ export class TimelineManager {
 
             <div class="fader-handle" data-action="fader" style="top: ${faderTop}%; z-index: 25;" title="Nível: ${Math.round(clip.level*100)}%"></div>
             <div class="fader-line" style="top: ${faderTop}%"></div>
-            ${isVideo ? `<div class="clip-opacity-overlay" style="opacity: ${1 - clip.level}"></div>` : ''}
             
-            <div class="clip-name" style="z-index:6; position:relative;">${clip.name}</div>
+            ${isVideoVisual ? `<div class="clip-opacity-overlay" style="opacity: ${1 - clip.level}"></div>` : ''}
+            
+            <div class="clip-name" style="${nameStyle}">${clip.name}</div>
             <div class="resize-handle right" data-action="resize" style="z-index: 25;"></div>
         `;
         
         this._injectFadeStyles(el);
-        
-        // Renderiza visual inicial. Usa requestAnimationFrame para garantir 
-        // que o elemento já tenha altura calculada pelo browser.
         requestAnimationFrame(() => this._updateFadeVisuals(clip, el));
 
+        const visualsContainer = el.querySelector('.clip-visuals');
+        
+        // Se for arquivo de áudio OU se estiver numa track de áudio (mesmo sendo vídeo)
+        if (asset.type === 'audio' || isAudioTrack) {
+            // Renderiza Waveform (extraindo áudio do vídeo se necessário)
+            this._renderWaveform(asset, visualsContainer, clip.level);
+        } 
+        else if (asset.type === 'video' || asset.type === 'image') {
+            // Renderiza Thumbnails (com a lógica de não espremer)
+            this._renderThumbnails(asset, visualsContainer, clip.duration, this.studio.project.zoom);
+        }
+
+        // Loop Markers
         if (clip.duration > asset.baseDuration) {
             const loops = Math.floor(clip.duration / asset.baseDuration);
             for(let i=1; i<=loops; i++) {
                 const m = document.createElement("div");
                 m.className = "loop-marker";
+                
+                m.classList.add('loop-vinco');
+                
+                // Posição: Multiplica o índice do loop pela duração base em pixels
                 m.style.left = (i * asset.baseDuration * this.studio.project.zoom) + "px";
+                
+                // Estilo do Vinco (Linha fina vertical que simula uma dobra/vinco)
+                m.style.cssText += `
+                    position: absolute; 
+                    top: 0; 
+                    bottom: 0; 
+                    width: 1px; 
+                    background-color: rgba(255, 255, 255, 0.5); /* Cor suave */
+                    border-left: 2px dashed rgba(0, 0, 0, 0.5); /* Para dar efeito 3D de vinco */
+                    z-index: 10;
+                `;
+                
                 el.appendChild(m);
             }
         }
@@ -804,7 +877,7 @@ export class TimelineManager {
             if (action === 'resize') {
                 this._startResize(e, clip, el, asset.baseDuration);
             } else if (action === 'fader') {
-                this._startFader(e, clip, el);
+                this._startFader(e, clip, el, track);
             } else {
                 this._startMove(e, clip, el);
             }
@@ -815,7 +888,7 @@ export class TimelineManager {
                     const lane = el.closest('.track-lane');
                     if (lane) {
                         const rect = lane.getBoundingClientRect();
-                        const x = ev.clientX - rect.left;
+                        const x = ev.clientX - rect.left + 120;
                         const rawTime = Math.max(0, (x - 120) / this.studio.project.zoom);
                         this._seekToTime(this._snapToFrame(rawTime));
                     }
@@ -825,10 +898,479 @@ export class TimelineManager {
             window.addEventListener('mouseup', onMouseUpCheck);
         };
 
-        this.studio.markUnsavedChanges();
-        this.studio.historyManager.recordState();
-
         return el;
+    }
+
+    _updateVisualStatus(increment) {
+        this.pendingVisualTasks += increment;
+        if (this.pendingVisualTasks < 0) this.pendingVisualTasks = 0;
+
+        const statusBar = document.getElementById('studio-status-bar');
+        const statusText = document.getElementById('studio-status-text');
+        
+        if (this.pendingVisualTasks > 0) {
+            if (statusBar && statusBar.classList.contains('hidden')) {
+                statusBar.classList.remove('hidden');
+            }
+            if (statusText) {
+                statusText.innerText = `Processando visualizações (${this.pendingVisualTasks} pendentes)...`;
+            }
+        } else {
+            // Pequeno delay para evitar flicker na barra se for muito rápido
+            setTimeout(() => {
+                if (this.pendingVisualTasks === 0 && statusBar) {
+                    statusBar.classList.add('hidden');
+                }
+            }, 500);
+        }
+    }
+
+    /**
+     * Gera e armazena frames indexados e audio buffer (cache) no Asset.
+     * Isso é a "Indexação" que permite o redimensionamento sem piscar.
+     */
+    async indexAssetVisuals(asset) {
+        if (asset.type === 'audio' || (asset.type === 'video' && !asset.audioBufferCache)) {
+            // Decodificar áudio (e cachear)
+            if (!this.studio.timelineManager.audioContext) {
+                 this.studio.timelineManager.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            try {
+                const arrayBuffer = await asset.sourceBlob.arrayBuffer(); 
+                asset.audioBufferCache = await this.studio.timelineManager.audioContext.decodeAudioData(arrayBuffer);
+                console.log(`[AssetManager] Audio Buffer Indexado para ${asset.name}`);
+            } catch (e) {
+                console.error(`Erro ao indexar buffer de áudio para ${asset.name}:`, e);
+            }
+        }
+
+        if (asset.type === 'video' || asset.type === 'image') {
+            // Indexar Frames (Key frames)
+            if (asset.type === 'image') {
+                // Imagem: Usa a URL como índice único
+                asset._frameCache = { '0': asset.url };
+            } else if (asset.type === 'video') {
+                console.log(`[AssetManager] Iniciando Indexação de Frames para ${asset.name}...`);
+
+                // Indexamos 10 frames por segundo para ter alta densidade (10/FPS)
+                const framesPerSecond = 10;
+                const duration = asset.baseDuration; 
+                
+                const video = document.createElement('video');
+                video.src = asset.url;
+                video.crossOrigin = 'anonymous';
+                video.muted = true;
+                
+                const frameCache = {};
+                
+                const capture = (time) => new Promise((resolve) => {
+                    video.currentTime = time;
+                    video.onseeked = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 160; 
+                        canvas.height = 90;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        resolve(canvas.toDataURL());
+                    };
+                    setTimeout(() => resolve(null), 1000); 
+                });
+
+                // Espera metadados
+                await new Promise(r => video.onloadedmetadata = r);
+                
+                // Indexação: 1 frame a cada 0.1s
+                for (let t = 0; t <= duration; t += 1 / framesPerSecond) {
+                    const timeKey = (Math.floor(t * 10) / 10).toFixed(1); // Ex: 10.1
+                    const dataUrl = await capture(t);
+                    if (dataUrl) {
+                        frameCache[timeKey] = dataUrl;
+                    }
+                }
+                asset._frameCache = frameCache;
+                console.log(`[AssetManager] Indexação de ${asset.name} completa (${Object.keys(frameCache).length} frames).`);
+            }
+        }
+    }
+
+    async _renderThumbnails(asset, container, clipDuration, zoom) {
+        // [CHECA INDEXAÇÃO] Se o cache não existe, mostra feedback.
+        if (!asset._frameCache) {
+             container.innerHTML = '<div style="color:#aaa;font-size:10px;padding:5px;">Indexando...</div>';
+             return;
+        }
+        
+        const clipId = container.closest('.clip')?.dataset.clipId;
+        let clip = null;
+        if (this.studio.project) {
+            this.studio.project.tracks.forEach(t => {
+                const c = t.clips.find(x => x.id === clipId);
+                if(c) clip = c;
+            });
+        }
+        if(!clip) return;
+
+        // CÁLCULO DE LAYOUT
+        const clipPixelWidth = clip.duration * zoom;
+        const trackHeight = 80; 
+        const idealThumbWidth = trackHeight * (16 / 9); 
+        const capacity = Math.floor(clipPixelWidth / idealThumbWidth);
+        
+        let thumbCount = 3;
+        if (capacity < 2) thumbCount = 1;
+        else if (capacity < 3) thumbCount = 2;
+
+        let percentages = [];
+        if (thumbCount === 1) percentages = [0]; 
+        else if (thumbCount === 2) percentages = [0, 0.99]; 
+        else percentages = [0, 0.5, 0.99];
+        
+        const fragment = document.createDocumentFragment();
+        const assetDuration = asset.baseDuration; 
+
+        const createImg = (src) => {
+            const img = document.createElement('img');
+            img.src = src;
+            img.style.height = '100%';
+            img.style.width = 'auto';
+            img.style.maxWidth = 'none';
+            img.style.flexShrink = '0';
+            img.style.objectFit = 'cover';
+            img.style.opacity = '0.7';
+            if (thumbCount > 1) img.style.borderRight = '1px solid rgba(0,0,0,0.5)';
+            return img;
+        };
+
+        // Itera e usa o cache
+        for (let i = 0; i < percentages.length; i++) {
+            const p = percentages[i];
+            
+            const linearTime = clip.offset + (clip.duration * p);
+            const loopTime = linearTime % assetDuration;
+            
+            // Chave de Cache: Arredondada para 1 casa decimal
+            const cacheKey = (Math.floor(loopTime * 10) / 10).toFixed(1); 
+            
+            let dataUrl = asset._frameCache[cacheKey];
+            
+            // Fallback para o frame anterior se o exato não existir
+            if (!dataUrl) {
+                 const prevKey = (Math.floor((loopTime - 0.1) * 10) / 10).toFixed(1);
+                 dataUrl = asset._frameCache[prevKey] || asset._frameCache['0.0']; 
+            }
+            
+            if (dataUrl) {
+                const img = createImg(dataUrl);
+                if (i === percentages.length - 1) img.style.borderRight = 'none';
+                fragment.appendChild(img);
+            }
+        }
+
+        this._applyVisualStyles(container);
+        container.innerHTML = ''; 
+        container.appendChild(fragment);
+    }
+
+    _applyVisualStyles(container) {
+        container.style.position = 'relative';
+        container.style.overflow = 'hidden'; 
+        container.style.display = 'flex'; 
+        container.style.justifyContent = 'space-between'; 
+        container.style.alignItems = 'center'; 
+        container.style.background = '#000'; 
+    }
+
+    /**
+     * Gera Waveform de áudio baseada no nível de volume.
+     * Desenha a waveform base (1 ciclo) e usa clones de DOM para simular o loop.
+     */
+    async _renderWaveform(asset, container, level) {
+        if (!container) return;
+
+        // 1. Identificar clip
+        const clipEl = container.closest(".clip");
+        const clipId = clipEl?.dataset.clipId;
+        let clip = null;
+        if (this.studio.project) {
+            for (const track of this.studio.project.tracks) {
+                const c = track.clips.find(x => x.id === clipId);
+                if (c) { clip = c; break; }
+            }
+        }
+        if (!clip) return;
+
+        // 2. Indexação
+        if (!asset.audioWaveCache) {
+             container.innerHTML = `<div style="color:#aaa;font-size:10px;padding:5px;">Waveform...</div>`;
+             if (this.studio.assetManager && !asset._isIndexing) { 
+                asset._isIndexing = true;
+                this.studio.assetManager.indexAssetVisuals(asset).then(() => {
+                    asset._isIndexing = false;
+                    this.renderTracks(); 
+                });
+             }
+            return; 
+        }
+        
+        const zoom = this.studio.project.zoom;
+        const baseAssetDuration = asset.baseDuration;
+        const baseWaveformWidth = baseAssetDuration * zoom; 
+
+        // Detecção de Canvas Gigante
+        const MAX_CANVAS_WIDTH = 30000;
+        const isHugeCanvas = baseWaveformWidth > MAX_CANVAS_WIDTH;
+
+        this._applyVisualStyles(container);
+        container.innerHTML = "";
+        
+        if (isHugeCanvas) {
+            // Renderiza apenas o pedaço visível do clipe.
+            // Permite offsets e fades específicos pois o canvas é único deste clipe.
+            
+            const clipPixelWidth = clip.duration * zoom;
+            const dpr = window.devicePixelRatio || 1;
+            const canvas = document.createElement("canvas");
+            
+            canvas.style.width = "100%"; 
+            canvas.style.height = "100%";
+            
+            canvas.width = Math.max(1, Math.floor(clipPixelWidth * dpr));
+            canvas.height = Math.max(1, Math.floor((clipEl.offsetHeight || 80) * dpr));
+
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+            ctx.scale(dpr, dpr);
+
+            this._optimizedWaveDraw(
+                ctx,
+                asset.audioWaveCache,
+                clipPixelWidth,
+                (clipEl.offsetHeight || 80),
+                level * (clip.volume ?? 1), 
+                clip.duration, 
+                clip.offset, // Passa o offset real
+                clip         // Passa o clipe (aplica fades)
+            );
+            
+            // Garante reset de transformações herdadas
+            container.style.transform = 'none';
+            container.appendChild(canvas);
+
+        } else {
+            // --- MODO PADRÃO (Cache Compartilhado) ---
+            // Renderiza o ASSET INTEIRO (sem offset) e reutiliza via clones.
+            // IMPORTANTE: Não passamos 'clip' nem 'offset' para não contaminar o cache.
+            
+            const numLoops = Math.ceil(clip.duration / baseAssetDuration);
+            let baseCanvas;
+            
+            if (asset._waveformBaseCanvas) {
+                baseCanvas = asset._waveformBaseCanvas;
+            } else {
+                baseCanvas = document.createElement("canvas");
+                asset._waveformBaseCanvas = baseCanvas; 
+                baseCanvas.style.height = "100%";
+            }
+            baseCanvas.style.width = `${baseWaveformWidth}px`; 
+
+            // Redesenha o cache APENAS se o zoom mudou ou ainda não existe
+            const targetHeight = clipEl.offsetHeight || 80; 
+            const forceRedraw = !asset._isWaveformRendered || asset._lastRenderZoom !== zoom;
+            
+            if (forceRedraw) {
+                const dpr = window.devicePixelRatio || 1;
+                baseCanvas.width = Math.max(1, Math.floor(baseWaveformWidth * dpr));
+                baseCanvas.height = Math.max(1, Math.floor(targetHeight * dpr));
+
+                const ctx = baseCanvas.getContext("2d", { willReadFrequently: true });
+                ctx.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+                ctx.scale(dpr, dpr); 
+                
+                this._optimizedWaveDraw(
+                    ctx,
+                    asset.audioWaveCache,
+                    baseWaveformWidth, 
+                    targetHeight, 
+                    1, // Volume 1 (neutro) para o cache base
+                    baseAssetDuration, 
+                    0,    // Offset 0 (sempre começa do início do arquivo)
+                    null  // Sem clipe (sem fades baked-in)
+                );
+                
+                asset._isWaveformRendered = true;
+                asset._lastRenderZoom = zoom;
+            }
+
+            // Cria Repeater para deslocar o canvas base corretamente
+            const repeater = document.createElement('div');
+            repeater.className = 'waveform-repeater';
+            repeater.style.display = 'flex';
+            repeater.style.height = '100%';
+            repeater.style.position = 'absolute';
+            container.appendChild(repeater);
+            
+            for (let i = 0; i < numLoops; i++) {
+                const displayCanvas = document.createElement("canvas");
+                displayCanvas.width = baseCanvas.width;
+                displayCanvas.height = baseCanvas.height;
+                
+                const ctx = displayCanvas.getContext('2d');
+                ctx.drawImage(baseCanvas, 0, 0);
+
+                displayCanvas.style.width = `${baseWaveformWidth}px`;
+                displayCanvas.style.height = "100%";
+                repeater.appendChild(displayCanvas);
+            }
+            
+            // O deslocamento visual acontece aqui
+            const offsetX = (clip.offset || 0) * zoom;
+            repeater.style.transform = `translateX(-${offsetX}px)`;
+            repeater.style.width = `${baseWaveformWidth * numLoops}px`;
+        }
+    }
+
+    /**
+     * Desenhador de waveform.
+     */
+    _optimizedWaveDraw(ctx, cache, width, height, level, clipDuration, clipOffset, clip) {
+        const sampleRate = cache.sampleRate;
+        const zoom = this.studio.project.zoom; 
+        
+        const samplesPerVisualPixel = sampleRate / zoom;
+        const offsetSamples = clipOffset * sampleRate;
+
+        ctx.clearRect(0, 0, width, height); 
+        ctx.fillStyle = "#4fc3f7";
+
+        const mid = height / 2;
+
+        // --- Lógica LOD (Level of Detail) ---
+        let bins = cache.full;
+        let binSize = 1;
+
+        if (samplesPerVisualPixel >= 8) {
+            bins = cache.eighth;
+            binSize = 8;
+        } else if (samplesPerVisualPixel >= 4) {
+            bins = cache.quarter;
+            binSize = 4;
+        } else if (samplesPerVisualPixel >= 2) {
+            bins = cache.half;
+            binSize = 2;
+        }
+
+        // --- SEGURANÇA: Verifica se bins existe e tem conteúdo ---
+        if (!bins || bins.length === 0) return;
+
+        // Usamos o tamanho real do array para garantir que o loop nunca acesse fora dos limites
+        const wrapLength = bins.length;
+
+        for (let x = 0; x < width; x++) {
+
+            // 1. Calcula o tempo absoluto dentro do CLIPE para este pixel
+            const timeInClip = (x * samplesPerVisualPixel / sampleRate) + clipOffset;
+            
+            // 2. Calcula o sample e bin para o loop
+            const absoluteSampleStart = Math.floor(offsetSamples + x * samplesPerVisualPixel);
+            const sampleEnd = Math.floor(absoluteSampleStart + samplesPerVisualPixel);
+            const binStart = Math.floor(absoluteSampleStart / binSize);
+            const binEnd = Math.floor(sampleEnd / binSize);
+
+            let min = 1.0, max = -1.0;
+
+            for (let b = binStart; b <= binEnd; b++) {
+                // --- CORREÇÃO DE ÍNDICE ---
+                // Usa o tamanho real (wrapLength) para o módulo, garantindo índice inteiro válido.
+                // O (Math.floor(b) ... ) garante que b seja tratado como inteiro.
+                const idx = ((b % wrapLength) + wrapLength) % wrapLength;
+
+                const binData = bins[idx];
+                
+                // Se por algum motivo for undefined, pula sem quebrar o app
+                if (!binData) continue; 
+
+                const { min: bMin, max: bMax } = binData;
+
+                if (bMin < min) min = bMin;
+                if (bMax > max) max = bMax;
+            }
+            
+            // 4. Calcula o FATOR DE ATENUAÇÃO (Fade In/Out)
+            let fadeFactor = 1.0;
+            
+            if (clip && (clip.fadeIn > 0 || clip.fadeOut > 0)) { 
+                 fadeFactor = this._calculateLocalFadeFactor(clip, timeInClip);
+            }
+
+            // 5. Aplica Volume Base e Fade
+            min *= level * fadeFactor;
+            max *= level * fadeFactor;
+
+            const y = mid + min * mid;
+            const h = Math.max(1, (max - min) * mid);
+
+            ctx.fillRect(x, y, 1, h);
+        }
+    }
+
+    /**
+     * Redesenha o Canvas Base da Waveform e propaga os novos pixels para todos os clones visíveis.
+     * Acionado por _startFader e _startFade.
+     */
+    _rerenderWaveformOfClip(clip, track) {
+        if (!clip || !clip.id) return;
+        if (track.type !== "audio") return;
+
+        const asset = this.studio.project.assets.find(a => a.id === clip.assetId);
+        if (!asset || !asset.audioWaveCache || !asset._waveformBaseCanvas) return;
+
+        const baseCanvas = asset._waveformBaseCanvas;
+        const clipEl = document.querySelector(`.clip[data-clip-id="${clip.id}"]`);
+        
+        // 1. Redesenhar o CANVAS BASE (Apenas 1 ciclo) com o novo nível e FADE
+        const visualLevel = (clip.level ?? 1) * (clip.volume ?? 1);
+        const dpr = window.devicePixelRatio || 1;
+
+        const ctx = baseCanvas.getContext("2d", { willReadFrequently: true });
+        
+        const cssW = asset._lastRenderZoom ? asset.baseDuration * asset._lastRenderZoom : baseCanvas.width / dpr;
+        const cssH = clipEl?.offsetHeight || 80;
+
+        baseCanvas.width = Math.max(1, Math.floor(cssW * dpr));
+        baseCanvas.height = Math.max(1, Math.floor(cssH * dpr));
+        
+        ctx.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+        ctx.scale(dpr, dpr);
+        
+        this._optimizedWaveDraw(
+            ctx,
+            asset.audioWaveCache,
+            cssW, 
+            cssH, 
+            visualLevel,
+            clip.duration,
+            clip.offset,
+            clip 
+        );
+
+        // 2. Propagar a mudança para TODOS os clones visíveis na timeline
+        const allClipsWithAsset = document.querySelectorAll(`.clip[data-asset-id="${asset.id}"]`);
+        
+        const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true });
+        const imageData = baseCtx.getImageData(0, 0, baseCanvas.width, baseCanvas.height);
+
+        allClipsWithAsset.forEach(el => {
+            const repeater = el.querySelector('.waveform-repeater');
+            if (!repeater) return;
+
+            Array.from(repeater.children).forEach(childCanvas => {
+                if (childCanvas.tagName === 'CANVAS') {
+                    const cloneCtx = childCanvas.getContext('2d');
+                    childCanvas.width = baseCanvas.width;
+                    childCanvas.height = baseCanvas.height;
+                    cloneCtx.putImageData(imageData, 0, 0); 
+                }
+            });
+        });
     }
 
     /**
@@ -864,6 +1406,10 @@ export class TimelineManager {
     }
 
     _startFade(e, clip, el, type) {
+        // Encontra a track para a função de redraw
+        const trackId = el.closest('.track')?.dataset.trackId;
+        const track = this.studio.project.tracks.find(t => t.id === trackId);
+        
         const startX = e.clientX;
         const initialFadeIn = clip.fadeIn || 0;
         const initialFadeOut = clip.fadeOut || 0;
@@ -898,6 +1444,10 @@ export class TimelineManager {
             }
 
             this._updateFadeVisuals(clip, el);
+            
+            if (track) {
+                 this._rerenderWaveformOfClip(clip, track);
+            }
         };
 
         const onUp = () => {
@@ -909,6 +1459,46 @@ export class TimelineManager {
 
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup', onUp);
+    }
+
+    /**
+     * Calcula o fator de atenuação (0.0 a 1.0) baseado no Fade In/Out para um ponto de tempo relativo.
+     * Deve corresponder à curva senoidal usada no PlaybackManager.
+     * @param {object} clip - O objeto clipe contendo fadeIn e fadeOut.
+     * @param {number} timeInClip - O tempo (em segundos) relativo ao início do clipe.
+     */
+    _calculateLocalFadeFactor(clip, timeInClip) {
+        // Garante números válidos
+        const duration = clip.duration;
+        const fadeIn = Number(clip.fadeIn) || 0;
+        const fadeOut = Number(clip.fadeOut) || 0;
+
+        let factorIn = 1.0;
+        let factorOut = 1.0;
+
+        // 1. Cálculo do Fade In (Curva Senoidal)
+        if (fadeIn > 0) {
+            if (timeInClip < 0) factorIn = 0; // Antes do inicio
+            else if (timeInClip < fadeIn) {
+                const progress = timeInClip / fadeIn;
+                // Curva Senoidal (Ease-In-Out)
+                factorIn = 0.5 * (1 - Math.cos(progress * Math.PI));
+            }
+        }
+
+        // 2. Cálculo do Fade Out (Curva Senoidal)
+        if (fadeOut > 0) {
+            const timeStartFadeOut = duration - fadeOut;
+            if (timeInClip > duration) factorOut = 0; // Depois do fim
+            else if (timeInClip > timeStartFadeOut) {
+                const remaining = duration - timeInClip;
+                const progress = remaining / fadeOut; // Vai de 1 a 0
+                // Curva Senoidal (Ease-In-Out)
+                factorOut = 0.5 * (1 - Math.cos(progress * Math.PI));
+            }
+        }
+
+        return Math.max(0, Math.min(1, factorIn * factorOut));
     }
 
     _updateFadeVisuals(clip, el) {
@@ -937,6 +1527,28 @@ export class TimelineManager {
             const scale = w / totalFadeWidth;
             fiW *= scale;
             foW *= scale;
+        }
+
+        const fadeOverlay = el.querySelector('.clip-fade-overlay');
+
+        const fiPct = (fiW / w) * 100;
+        const foPct = 100 - (foW / w) * 100;
+
+        if (fadeOverlay) {            
+            const gradient = `linear-gradient(
+                to right,
+                rgba(0,0,0,1) 0%, 
+                rgba(0,0,0,1) ${fiPct}%, 
+                rgba(0,0,0,0) ${fiPct}%, 
+                rgba(0,0,0,0) ${foPct}%, 
+                rgba(0,0,0,1) ${foPct}%, 
+                rgba(0,0,0,1) 100%
+            )`;
+            
+            fadeOverlay.style.maskImage = gradient;
+            fadeOverlay.style.webkitMaskImage = gradient;
+            
+            fadeOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.4)'; 
         }
 
         // SVG Drawing
@@ -1051,7 +1663,7 @@ export class TimelineManager {
         };
     }
 
-    _startFader(e, clip, el) {
+    _startFader(e, clip, el, track) {
         const startY = e.clientY;
         const startLevel = clip.level;
         const height = el.clientHeight;
@@ -1065,38 +1677,43 @@ export class TimelineManager {
 
         const onMove = (ev) => {
             const deltaY = ev.clientY - startY;
-            const change = deltaY / height;
-            
+            const change = deltaY / Math.max(1, height);
+
             let newLevel = Math.max(0, Math.min(1, startLevel - change));
-            
-            if (Math.abs(clip.level - newLevel) > 0.01) {
+
+            // Atualiza somente se houve mudança significativa
+            if (Math.abs((clip.level || 0) - newLevel) > 0.01) {
                 clip.level = newLevel;
                 didChange = true;
 
                 const topPercent = (1 - newLevel) * 100;
-                if(line) line.style.top = topPercent + "%";
-                if(handle) handle.style.top = topPercent + "%";
-                if(overlay) overlay.style.opacity = 1 - newLevel;
-                if(handle) handle.title = `Nível: ${Math.round(newLevel*100)}%`;
-                
+                if (line) line.style.top = topPercent + "%";
+                if (handle) handle.style.top = topPercent + "%";
+                if (overlay) overlay.style.opacity = 1 - newLevel;
+                if (handle) handle.title = `Nível: ${Math.round(newLevel*100)}%`;
+
+                // atualiza fades visuais do próprio clipe
                 this._updateFadeVisuals(clip, el);
-                
-                syncPreview();
+
+                // redesenha a waveform em tempo-real (fast path)
+                this._rerenderWaveformOfClip(clip, track);
+
+                // sincroniza o player/preview
+                if (syncPreview) syncPreview();
             }
         };
 
-        const onUp = () => { 
-            window.removeEventListener("mousemove", onMove); 
-            window.removeEventListener("mouseup", onUp); 
-            
+        const onUp = () => {
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onUp);
+
             if (didChange) {
                 this.studio.historyManager.pushManualState(preFaderState);
             }
-
-            this.studio.markUnsavedChanges(); 
+            this.studio.markUnsavedChanges();
         };
 
-        window.addEventListener("mousemove", onMove); 
+        window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
     }
 
@@ -1114,7 +1731,7 @@ export class TimelineManager {
             el.style.opacity = '0.5'; 
         }
 
-        // Armazena estado original de TODOS os itens arrastados
+        // 1. Prepara dados iniciais e detecta "Auto-Crossfades" existentes
         const draggingItems = this.selectedClips.map(item => {
             const domEl = item.clip.id === clickedClip.id ? el : this._findDomElement(item.clip.id);
             let top = 0;
@@ -1122,22 +1739,93 @@ export class TimelineManager {
                 const r = domEl.getBoundingClientRect();
                 top = (r.top - containerRect.top) + tracksContainer.scrollTop;
             }
+            
+            // Estado inicial padrão (assume o que está lá)
+            const originalState = { 
+                fadeIn: item.clip.fadeIn || 0, 
+                fadeOut: item.clip.fadeOut || 0 
+            };
+
+            // --- DETECÇÃO HEURÍSTICA DE CROSSFADE ---
+            // Se o fade atual for igual à sobreposição com o vizinho, 
+            // assumimos que foi gerado automaticamente e deve zerar ao separar.
+            
+            const track = this.studio.project.tracks.find(t => t.id === item.trackId);
+            const myStart = item.clip.start;
+            const myEnd = item.clip.start + item.clip.duration;
+            const EPSILON = 0.05; // Tolerância de 50ms
+
+            if (track) {
+                // Checa Esquerda (Fade In vindo de um vizinho anterior)
+                const leftNeighbor = track.clips.find(c => c.id !== item.clip.id && (c.start + c.duration) > (myStart + 0.01));
+                if (leftNeighbor) {
+                    const overlap = (leftNeighbor.start + leftNeighbor.duration) - myStart;
+                    // Se existe overlap E o meu FadeIn é igual ao overlap...
+                    if (overlap > 0 && Math.abs(item.clip.fadeIn - overlap) < EPSILON) {
+                        originalState.fadeIn = 0; // O "verdadeiro" original é zero (hard cut)
+                    }
+                }
+
+                // Checa Direita (Fade Out indo para um vizinho posterior)
+                const rightNeighbor = track.clips.find(c => c.id !== item.clip.id && c.start < (myEnd - 0.01) && c.start > myStart);
+                if (rightNeighbor) {
+                    const overlap = myEnd - rightNeighbor.start;
+                    // Se existe overlap E o meu FadeOut é igual ao overlap...
+                    if (overlap > 0 && Math.abs(item.clip.fadeOut - overlap) < EPSILON) {
+                        originalState.fadeOut = 0; // O "verdadeiro" original é zero
+                    }
+                }
+            }
+
             return {
                 clip: item.clip, 
                 trackId: item.trackId, 
                 startStart: item.clip.start, 
-                // Snapshot vital: guarda o estado inicial para resetar a cada frame
-                originalFades: { 
-                    fadeIn: item.clip.fadeIn || 0, 
-                    fadeOut: item.clip.fadeOut || 0 
-                },
+                originalFades: originalState, // Usa o estado corrigido
                 el: domEl,
                 top: top,
                 height: domEl ? domEl.offsetHeight : 80
             };
         });
 
+        // Mapa de vizinhos que também precisam ser resetados se a gente se afastar
         const neighborsOriginalFades = new Map();
+        
+        // Popula o mapa de vizinhos afetados
+        draggingItems.forEach(item => {
+            const track = this.studio.project.tracks.find(t => t.id === item.trackId);
+            if(!track) return;
+            
+            const myStart = item.startStart;
+            const myEnd = item.startStart + item.clip.duration;
+            const EPSILON = 0.05;
+
+            // Vizinho Esquerdo (que está fazendo FadeOut sobre mim)
+            const leftNeighbor = track.clips.find(c => c.id !== item.clip.id && (c.start + c.duration) > (myStart + 0.01));
+            if (leftNeighbor) {
+                const overlap = (leftNeighbor.start + leftNeighbor.duration) - myStart;
+                if (overlap > 0 && Math.abs(leftNeighbor.fadeOut - overlap) < EPSILON) {
+                    neighborsOriginalFades.set(leftNeighbor.id, { 
+                        fadeIn: leftNeighbor.fadeIn || 0, // Mantém o que tinha
+                        fadeOut: 0, // Reseta o fadeOut se separar
+                        trackId: item.trackId
+                    });
+                }
+            }
+
+            // Vizinho Direito (que está fazendo FadeIn sobre mim)
+            const rightNeighbor = track.clips.find(c => c.id !== item.clip.id && c.start < (myEnd - 0.01) && c.start > myStart);
+            if (rightNeighbor) {
+                const overlap = myEnd - rightNeighbor.start;
+                if (overlap > 0 && Math.abs(rightNeighbor.fadeIn - overlap) < EPSILON) {
+                    neighborsOriginalFades.set(rightNeighbor.id, { 
+                        fadeIn: 0, // Reseta o fadeIn se separar
+                        fadeOut: rightNeighbor.fadeOut || 0,
+                        trackId: item.trackId
+                    });
+                }
+            }
+        });
 
         const onMove = (ev) => {
             const deltaPx = ev.clientX - startX;
@@ -1145,14 +1833,39 @@ export class TimelineManager {
             didActuallyChange = true;
             
             const deltaTime = deltaPx / this.studio.project.zoom;
-
             const elementBelow = document.elementFromPoint(ev.clientX, ev.clientY);
             const trackEl = elementBelow ? elementBelow.closest('.track') : null;
             let targetTrackId = null;
             if (trackEl && trackEl.dataset.trackId) targetTrackId = trackEl.dataset.trackId;
 
+            const SNAP_THRESHOLD_PX = 15; // Pixels de resistência antes de permitir o crossfade
+            const snapThresholdSec = SNAP_THRESHOLD_PX / this.studio.project.zoom;
+
             draggingItems.forEach(item => {
                 let rawNewStart = Math.max(0, item.startStart + deltaTime);
+
+                const currentTrackId = targetTrackId && targetTrackId !== item.trackId ? targetTrackId : item.trackId;
+                const trackRef = this.studio.project.tracks.find(t => t.id === currentTrackId);
+
+                if (trackRef) {
+                    const otherClips = trackRef.clips.filter(c => c.id !== item.clip.id);
+                    
+                    // 1. Checa colisão à Esquerda (Inicio do meu clipe x Fim do vizinho)
+                    const leftNeighbor = otherClips.find(c => Math.abs((c.start + c.duration) - rawNewStart) < snapThresholdSec);
+                    if (leftNeighbor) {
+                        // "Gruda" no final do vizinho, evitando o crossfade imediato
+                        rawNewStart = leftNeighbor.start + leftNeighbor.duration;
+                    }
+
+                    // 2. Checa colisão à Direita (Fim do meu clipe x Inicio do vizinho)
+                    const myEstimatedEnd = rawNewStart + item.clip.duration;
+                    const rightNeighbor = otherClips.find(c => Math.abs(c.start - myEstimatedEnd) < snapThresholdSec);
+                    if (rightNeighbor) {
+                        // "Gruda" no inicio do vizinho
+                        rawNewStart = rightNeighbor.start - item.clip.duration;
+                    }
+                }
+
                 let newStart = this._snapToFrame(rawNewStart); 
 
                 // Lógica de Troca de Trilha
@@ -1167,77 +1880,62 @@ export class TimelineManager {
                          item.trackId = targetTrackId;
                          const rect = newLane.getBoundingClientRect();
                          item.top = (rect.top - containerRect.top) + tracksContainer.scrollTop;
-                         const selRef = this.selectedClips.find(s => s.clip.id === item.clip.id);
-                         if (selRef) selRef.trackId = targetTrackId;
                      }
                 }
                 
-                // Atualiza Posição Física
                 item.clip.start = newStart;
                 if (item.el) item.el.style.left = (newStart * this.studio.project.zoom) + "px";
 
-                // =========================================================
-                // LÓGICA DE CROSSFADE DUPLO (Reset & Accumulate)
-                // =========================================================
-                const activeTrack = this.studio.project.tracks.find(t => t.id === item.trackId);
-                const otherClips = activeTrack ? activeTrack.clips.filter(c => c.id !== item.clip.id) : [];
-
-                // 1. Reseta o clipe atual para os valores originais (antes de calcular novas colisões)
+                // --- 1. RESET: Aplica os valores originais (sem crossfade) ---
                 item.clip.fadeIn = item.originalFades.fadeIn;
                 item.clip.fadeOut = item.originalFades.fadeOut;
 
-                // 2. Reseta vizinhos conhecidos para seus valores originais
                 neighborsOriginalFades.forEach((fades, id) => {
-                    const c = activeTrack ? activeTrack.clips.find(o => o.id === id) : null;
+                    const t = this.studio.project.tracks.find(tr => tr.id === fades.trackId);
+                    const c = t ? t.clips.find(o => o.id === id) : null;
                     if(c) { c.fadeIn = fades.fadeIn; c.fadeOut = fades.fadeOut; }
                 });
 
-                // 3. Verifica Vizinho Esquerdo (Afeta Fade In do item atual)
-                const leftNeighbor = otherClips.find(c => 
-                    c.start < item.clip.start && (c.start + c.duration) > item.clip.start
-                );
+                // --- 3. RE-CÁLCULO: Se ainda houver colisão (overlap), reaplica o crossfade ---
+                const activeTrack = this.studio.project.tracks.find(t => t.id === item.trackId);
+                const otherClips = activeTrack ? activeTrack.clips.filter(c => c.id !== item.clip.id) : [];
 
+                // Colisão Esquerda
+                const leftNeighbor = otherClips.find(c => c.start < item.clip.start && (c.start + c.duration) > item.clip.start);
                 if (leftNeighbor) {
                     const overlap = (leftNeighbor.start + leftNeighbor.duration) - item.clip.start;
                     if (overlap > 0.05) {
-                        if (!neighborsOriginalFades.has(leftNeighbor.id)) {
-                            neighborsOriginalFades.set(leftNeighbor.id, { fadeIn: leftNeighbor.fadeIn||0, fadeOut: leftNeighbor.fadeOut||0 });
-                        }
                         const safeOverlap = Math.min(overlap, leftNeighbor.duration, item.clip.duration);
-                        leftNeighbor.fadeOut = safeOverlap;
-                        
-                        // [IMPORTANTE] Define Fade In SEM tocar no Fade Out
-                        item.clip.fadeIn = safeOverlap; 
+                        leftNeighbor.fadeOut = safeOverlap; // Reaplica no vizinho
+                        item.clip.fadeIn = safeOverlap;     // Reaplica em mim
                     }
                 }
 
-                // 4. Verifica Vizinho Direito (Afeta Fade Out do item atual)
-                const rightNeighbor = otherClips.find(c => 
-                    c.start > item.clip.start && c.start < (item.clip.start + item.clip.duration)
-                );
-
+                // Colisão Direita
+                const rightNeighbor = otherClips.find(c => c.start > item.clip.start && c.start < (item.clip.start + item.clip.duration));
                 if (rightNeighbor) {
                      const overlap = (item.clip.start + item.clip.duration) - rightNeighbor.start;
                      if (overlap > 0.05) {
-                        if (!neighborsOriginalFades.has(rightNeighbor.id)) {
-                            neighborsOriginalFades.set(rightNeighbor.id, { fadeIn: rightNeighbor.fadeIn||0, fadeOut: rightNeighbor.fadeOut||0 });
-                        }
                         const safeOverlap = Math.min(overlap, rightNeighbor.duration, item.clip.duration);
-                        
-                        // [IMPORTANTE] Define Fade Out SEM tocar no Fade In (que pode ter sido setado acima)
-                        item.clip.fadeOut = safeOverlap; 
-                        rightNeighbor.fadeIn = safeOverlap;
+                        item.clip.fadeOut = safeOverlap;    // Reaplica em mim
+                        rightNeighbor.fadeIn = safeOverlap; // Reaplica no vizinho
                      }
                 }
 
-                // 5. Atualiza Visuais
+                // Atualiza Visuais (Meu e dos Vizinhos)
                 if (item.el) this._updateFadeVisuals(item.clip, item.el);
                 
+                // Atualiza visual de quem está no mapa de reset
                 neighborsOriginalFades.forEach((_, id) => {
                     const nEl = this._findDomElement(id);
-                    const c = activeTrack ? activeTrack.clips.find(o => o.id === id) : null;
+                    const t = this.studio.project.tracks.find(tr => tr.id === _.trackId); // Usa trackId salvo
+                    const c = t ? t.clips.find(o => o.id === id) : null;
                     if (nEl && c) this._updateFadeVisuals(c, nEl);
                 });
+                
+                // Atualiza visual de novos vizinhos (caso tenha colidido com gente nova)
+                if (leftNeighbor) { const el = this._findDomElement(leftNeighbor.id); if(el) this._updateFadeVisuals(leftNeighbor, el); }
+                if (rightNeighbor) { const el = this._findDomElement(rightNeighbor.id); if(el) this._updateFadeVisuals(rightNeighbor, el); }
             });
             
             if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
@@ -1245,16 +1943,11 @@ export class TimelineManager {
         };
 
         const onUp = () => { 
-            if(el) {
-                el.style.pointerEvents = 'auto'; 
-                el.style.zIndex = ''; 
-                el.style.opacity = ''; 
-            }
+            if(el) { el.style.pointerEvents = 'auto'; el.style.zIndex = ''; el.style.opacity = ''; }
             this._renderCrossfadeGuides(); 
             window.removeEventListener("mousemove", onMove); 
             window.removeEventListener("mouseup", onUp); 
             if (didActuallyChange) this.studio.historyManager.pushManualState(preMoveState);
-            this.renderTracks(); 
             this.studio.markUnsavedChanges();
         };
 
@@ -1360,22 +2053,58 @@ export class TimelineManager {
         const startX = e.clientX; 
         const startW = clip.duration * this.studio.project.zoom;
         const tracksContainer = document.getElementById('studio-tracks');
-        
-        // Coordenadas do container para cálculo relativo
         const containerRect = tracksContainer.getBoundingClientRect();
         
-        // Dados verticais do Clip ATUAL (que está sendo redimensionado)
+        // Dados para o Snap (baseados no clipe que está sob o mouse)
         const activeRect = el.getBoundingClientRect();
-        // Converte para coordenadas relativas ao container (considerando scroll)
         const activeTop = (activeRect.top - containerRect.top) + tracksContainer.scrollTop;
         const activeBottom = (activeRect.bottom - containerRect.top) + tracksContainer.scrollTop;
 
-        // 1. Mapeia pontos de snap com suas posições verticais (Top/Bottom)
-        const snapPoints = [];
+        // 1. Identificação de Alvos do Grupo (Targets)
+        const targets = [];
         
+        if (clip.groupId) {
+            this.studio.project.tracks.forEach(track => {
+                track.clips.forEach(c => {
+                    if (c.groupId === clip.groupId) {
+                        // Verifica se "possuem o mesmo tamanho"
+                        if (Math.abs(c.duration - clip.duration) < 0.1) {
+                            const domEl = c.id === clip.id ? el : this._findDomElement(c.id);
+                            targets.push({ clip: c, el: domEl });
+                        }
+                    }
+                });
+            });
+        }
+        
+        // Fallback: Se não houver grupo ou targets, adiciona apenas o atual
+        if (targets.length === 0) targets.push({ clip, el });
+        // Garante que o clipe clicado esteja incluso (caso a tolerância falhe por algum motivo raro)
+        if (!targets.some(t => t.clip.id === clip.id)) targets.push({ clip, el });
+
+        // 2. Mapeamento de Pontos Magnéticos (Snap)
+        const snapPoints = [];
+        const currentAsset = this.studio.project.assets.find(a => a.id === clip.assetId);
+        if (currentAsset && currentAsset.baseDuration > 0) {
+            // Calcula pontos de loop projetados no futuro (ex: até 50 loops à frente ou baseado no zoom)
+            // Isso garante que se o usuário esticar muito, ainda tenha snap.
+            const projectedLoops = 50; 
+            
+            for(let i = 1; i <= projectedLoops; i++) {
+                const loopTime = clip.start + (i * currentAsset.baseDuration);
+                
+                // Define limites visuais para a linha guia (usa o rect do clip atual)
+                snapPoints.push({ 
+                    time: loopTime, 
+                    top: activeTop, 
+                    bottom: activeBottom 
+                });
+            }
+        }
+
         this.studio.project.tracks.forEach(track => {
             track.clips.forEach(c => {
-                if (c.id === clip.id) return; 
+                if (targets.some(t => t.clip.id === c.id)) return; 
                 
                 const cEl = this._findDomElement(c.id);
                 let top = 0, bottom = 0;
@@ -1385,18 +2114,16 @@ export class TimelineManager {
                     top = (r.top - containerRect.top) + tracksContainer.scrollTop;
                     bottom = (r.bottom - containerRect.top) + tracksContainer.scrollTop;
                 } else {
-                    // Fallback se o elemento não estiver renderizado (usa altura estimada da track)
                     top = (track.index || 0) * 100; 
                     bottom = top + 80; 
                 }
 
-                // Registra início e fim deste clip como ímãs
                 snapPoints.push({ time: c.start, top, bottom });
                 snapPoints.push({ time: c.start + c.duration, top, bottom });
             });
         });
 
-        // Adiciona a agulha (Playhead) como ímã global (altura total)
+        // Agulha como ímã global
         snapPoints.push({ 
             time: this.studio.project.currentTime, 
             top: 0, 
@@ -1405,7 +2132,6 @@ export class TimelineManager {
         
         const preResizeState = this.studio.historyManager._createSnapshot();
         let didResize = false;
-
         const SNAP_THRESHOLD_PX = 10; 
 
         const onMove = (ev) => {
@@ -1414,12 +2140,13 @@ export class TimelineManager {
 
             didResize = true;
             
+            // Calcula novo tamanho baseado no clip original clicado
             let rawWidth = Math.max(10, startW + delta);
             let rawDur = rawWidth / this.studio.project.zoom;
             
             const projectedEndTime = clip.start + rawDur;
             
-            // 2. Lógica de Colisão
+            // 3. Lógica de Colisão (Snap)
             let bestSnapPoint = null;
             let minDistancePx = Infinity;
 
@@ -1434,35 +2161,118 @@ export class TimelineManager {
             }
 
             let newDur;
-
-            if (bestSnapPoint) {
+            if (bestSnapPoint) { 
                 newDur = bestSnapPoint.time - clip.start;
-                
-                // A linha conecta o topo mais alto ao fundo mais baixo
-                // entre os dois elementos envolvidos (Clip Atual e Ímã)
+                // Desenha linha magnética
                 const minTop = Math.min(activeTop, bestSnapPoint.top);
                 const maxBottom = Math.max(activeBottom, bestSnapPoint.bottom);
-                const lineHeight = maxBottom - minTop;
-                
-                this._updateSnapLine(bestSnapPoint.time, true, minTop, lineHeight);
+                this._updateSnapLine(bestSnapPoint.time, true, minTop, maxBottom - minTop);
             } else {
                 newDur = this._snapToFrame(rawDur); 
                 this._updateSnapLine(0, false);
             }
             
-            if (newDur < (1 / 30)) newDur = (1 / 30);
+            if (newDur < (1 / 30)) newDur = (1 / 30); // Mínimo 1 frame
 
-            // [VALIDAÇÃO FADE] Ajusta fades se o clip ficar menor que a soma deles
-            if ( (clip.fadeIn + clip.fadeOut) > newDur ) {
-                if (clip.fadeIn > newDur) clip.fadeIn = newDur;
-                clip.fadeOut = Math.max(0, newDur - clip.fadeIn);
-            }
-            
-            clip.duration = newDur;
-            el.style.width = (newDur * this.studio.project.zoom) + "px"; 
-            
-            // [ATUALIZAÇÃO VISUAL] Redesenha a curva de fade (S-Curve) em tempo real
-            this._updateFadeVisuals(clip, el);
+            // 4. Aplicação em Lote (Batch Update)
+            targets.forEach(target => {
+                const tClip = target.clip;
+                const tEl = target.el;
+
+                // Atualiza Modelo
+                tClip.duration = newDur;
+
+                // Ajusta fades se o clip ficar menor que eles
+                if ( (tClip.fadeIn + tClip.fadeOut) > newDur ) {
+                    if (tClip.fadeIn > newDur) tClip.fadeIn = newDur;
+                    tClip.fadeOut = Math.max(0, newDur - tClip.fadeIn);
+                }
+                
+                if (tEl) {
+                    tEl.style.width = (newDur * this.studio.project.zoom) + "px"; 
+                    this._updateFadeVisuals(tClip, tEl);
+                    
+                    // =========================================================
+                    // LÓGICA DE ATUALIZAÇÃO DE VINCOS EM TEMPO REAL (NOVO)
+                    // =========================================================
+                    const currentAsset = this.studio.project.assets.find(a => a.id === tClip.assetId);
+                    
+                    if (currentAsset && currentAsset.baseDuration > 0) {
+                        const baseDuration = currentAsset.baseDuration;
+                        const zoom = this.studio.project.zoom;
+                        const newLoops = Math.floor(newDur / baseDuration);
+                        
+                        // 1. Limpa todos os vincos existentes para evitar duplicatas
+                        Array.from(tEl.querySelectorAll('.loop-vinco')).forEach(m => m.remove());
+
+                        // 2. Cria e adiciona os novos vincos em tempo real
+                        for (let i = 1; i <= newLoops; i++) {
+                            const m = document.createElement("div");
+                            m.className = "loop-marker loop-vinco";
+                            m.style.left = (i * baseDuration * zoom) + "px";
+                            
+                            // Aplica exatamente o mesmo estilo de vinco
+                            m.style.cssText += `
+                                position: absolute; 
+                                top: 0; 
+                                bottom: 0; 
+                                width: 1px; 
+                                background-color: rgba(255, 255, 255, 0.5); /* Cor suave */
+                                border-left: 2px dashed rgba(0, 0, 0, 0.5); /* Para dar efeito 3D de vinco */
+                                z-index: 10;
+                                pointer-events: none; /* Não bloquear o drag */
+                            `;
+                            
+                            tEl.appendChild(m);
+                        }
+                    }
+                    // =========================================================
+                    
+                    // LÓGICA DE REPETIÇÃO INSTANTÂNEA VIA DOM (ON MOVE) (Waveforms)
+                    const repeater = tEl.querySelector('.waveform-repeater');
+                    
+                    if (currentAsset && repeater && currentAsset._waveformBaseCanvas) {
+                        const baseAssetDuration = currentAsset.baseDuration;
+                        const baseWaveformWidth = baseAssetDuration * this.studio.project.zoom;
+
+                        const currentLoops = repeater.children.length;
+                        const finalNewLoops = Math.ceil(newDur / baseAssetDuration); // Usa newDur para calcular loops
+
+                        if (finalNewLoops !== currentLoops) {
+                            // Adicionar Clones
+                            if (finalNewLoops > currentLoops) {
+                                for (let i = currentLoops; i < finalNewLoops; i++) {
+                                    const baseCanvas = currentAsset._waveformBaseCanvas;
+                                    
+                                    // Clonagem manual de pixels
+                                    const clone = document.createElement("canvas");
+                                    clone.width = baseCanvas.width;
+                                    clone.height = baseCanvas.height;
+                                    
+                                    const cloneCtx = clone.getContext('2d');
+                                    cloneCtx.drawImage(baseCanvas, 0, 0);
+                                    
+                                    // Aplica estilos CSS
+                                    clone.style.width = `${baseWaveformWidth}px`;
+                                    clone.style.height = `100%`;
+                                    
+                                    repeater.appendChild(clone);
+                                }
+                            }
+                            // Remover Clones
+                            else if (finalNewLoops < currentLoops) {
+                                for (let i = currentLoops; i > finalNewLoops; i--) {
+                                    if (repeater.lastChild && repeater.children.length > 1) { 
+                                        repeater.removeChild(repeater.lastChild);
+                                    }
+                                }
+                            }
+                        }
+                        // Ajusta a largura total do repeater 
+                        repeater.style.width = `${baseWaveformWidth * finalNewLoops}px`;
+                    }
+                }
+            });
 
             if(this.studio.playbackManager) {
                 this.studio.playbackManager.syncPreview();
@@ -1475,13 +2285,13 @@ export class TimelineManager {
             window.removeEventListener("mousemove", onMove); 
             window.removeEventListener("mouseup", onUp); 
             
-            this._updateSnapLine(0, false); // Limpa a linha
+            this._updateSnapLine(0, false); 
 
             if (didResize) {
                 this.studio.historyManager.pushManualState(preResizeState);
-                console.log("[Timeline] Resize finalizado.");
             }
 
+            // Renderiza para garantir consistência final (ex: marcadores de loop novos)
             this.renderTracks();
             this.studio.markUnsavedChanges();
         };
@@ -1532,35 +2342,74 @@ export class TimelineManager {
     }
 
     splitClip() {
-        const targetClip = this.selectedClips.length > 0 ? this.selectedClips[0].clip : null;
-        const targetTrackId = this.selectedClips.length > 0 ? this.selectedClips[0].trackId : null;
+        // 1. Identifica o clipe principal selecionado
+        const selection = this.selectedClips[0];
+        if (!selection) return;
         
-        if (!targetClip) return;
-        
+        const targetClip = selection.clip;
         const time = this.studio.project.currentTime;
-        if (time <= targetClip.start || time >= (targetClip.start + targetClip.duration)) return;
+        const groupId = targetClip.groupId;
         
-        const relativeSplit = time - targetClip.start;
-        const oldDuration = targetClip.duration;
+        // Novo ID de grupo para o lado direito (se houver grupo)
+        const rightSideGroupId = groupId ? "group_" + Date.now() + "_R" : null;
+
+        // 2. Monta a lista de clipes a serem cortados
+        let clipsToProcess = [];
+
+        if (groupId) {
+            this.studio.project.tracks.forEach(t => {
+                t.clips.forEach(c => {
+                    if (c.groupId === groupId) {
+                        clipsToProcess.push({ clip: c, track: t });
+                    }
+                });
+            });
+        } else {
+            const track = this.studio.project.tracks.find(t => t.id === selection.trackId);
+            if(track) clipsToProcess.push({ clip: targetClip, track: track });
+        }
+
+        let didSplit = false;
+        let newlyCreatedClips = []; // Lista para guardar os novos clipes
+
+        // 3. Executa o corte
+        clipsToProcess.forEach(({ clip, track }) => {
+            // Margem de segurança para não cortar nas pontas
+            if (time > (clip.start + 0.01) && time < (clip.start + clip.duration - 0.01)) {
+                
+                const relativeSplit = time - clip.start;
+                const oldDuration = clip.duration;
+                
+                // A: Ajusta o clipe original (Lado Esquerdo)
+                clip.duration = relativeSplit;
+                
+                // B: Cria o novo clipe (Lado Direito)
+                const newClip = {
+                    ...clip, 
+                    id: "clip_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
+                    start: time, 
+                    duration: oldDuration - relativeSplit, 
+                    offset: clip.offset + relativeSplit,
+                    groupId: rightSideGroupId
+                };
+                
+                track.clips.push(newClip);
+                newlyCreatedClips.push({ clip: newClip, trackId: track.id }); // Guarda para selecionar depois
+                didSplit = true;
+            }
+        });
         
-        // Ajusta clip atual
-        targetClip.duration = relativeSplit;
-        
-        // Cria novo clip com o restante
-        const track = this.studio.project.tracks.find(t => t.id === targetTrackId);
-        const newClip = {
-            ...targetClip, 
-            id: "clip_" + Date.now(),
-            start: time, 
-            duration: oldDuration - relativeSplit, 
-            offset: targetClip.offset + relativeSplit
-        };
-        
-        track.clips.push(newClip);
-        
-        this._clearSelection(); 
-        this.studio.markUnsavedChanges();
-        this.renderTracks();
-        this.studio.historyManager.recordState();
+        if (didSplit) {
+            this._clearSelection(); // Limpa a seleção antiga (lado esquerdo)
+            this.studio.markUnsavedChanges();
+            this.renderTracks(); // Renderiza o DOM com os novos clipes
+            
+            // Seleciona os NOVOS clipes (lado direito)
+            newlyCreatedClips.forEach(item => {
+                this._addToSelection(item.clip, item.trackId);
+            });
+            
+            this.studio.historyManager.recordState();
+        }
     }
 }

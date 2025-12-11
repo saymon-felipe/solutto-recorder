@@ -1,8 +1,10 @@
 import { getMediaDuration } from '../utils.js';
+import { VideoStorage } from '../../../services/VideoStorage.js';
 
 export class AssetManager {
     constructor(studio) {
         this.studio = studio;
+        this.videoStorage = new VideoStorage();
     }
 
     init() {
@@ -30,17 +32,21 @@ export class AssetManager {
         this.studio.project.assets.push(placeholder);
         this.renderBin();
 
-        this.studio.addTask(`Processando ${name}...`, async () => {
+        this.studio.addTask(`Processando ${name}.`, async () => {
             const result = await this._createAsset(file, name, mime);
             const idx = this.studio.project.assets.findIndex(a => a.id === assetId);
             if (idx !== -1) {
-                this.studio.project.assets[idx] = { 
+                const newAsset = { 
                     ...result, 
                     id: assetId, 
                     status: 'ready', 
                     sourceBlob: file, 
                     originalType: mime 
                 };
+                
+                await this.indexAssetVisuals(newAsset);
+                
+                this.studio.project.assets[idx] = newAsset;
                 this.renderBin();
                 this.studio.timelineManager.renderTracks();
             }
@@ -72,6 +78,204 @@ export class AssetManager {
         
         if (duration < 0.1) duration = 10; 
         return { blob, name, type, baseDuration: duration, url: URL.createObjectURL(blob) };
+    }
+
+    // =========================================================
+    // PERSISTÊNCIA: PREPARA OS DADOS PARA SEREM SALVOS
+    // =========================================================
+
+    /**
+     * Retorna a lista de assets, excluindo objetos de memória (Blobs, AudioBuffers)
+     * e incluindo o cache serializável (_frameCache).
+     * @returns {Array} Array de objetos Asset prontos para salvar.
+     */
+    async getSerializableAssets() {
+        return Promise.all(this.studio.project.assets.map(async (asset) => {
+            // Salva o Blob principal no VideoStorage
+            if (asset.sourceBlob) {
+                await this.videoStorage.saveVideo(asset.id, asset.sourceBlob);
+            }
+
+            // Serializa o _frameCache (convertendo Data URLs se necessário)
+            let serializableFrameCache = null;
+            if (asset._frameCache && typeof asset._frameCache === 'object') {
+                serializableFrameCache = { ...asset._frameCache };
+            }
+
+            // Remove propriedades não serializáveis
+            return {
+                id: asset.id,
+                name: asset.name,
+                type: asset.type,
+                baseDuration: asset.baseDuration,
+                originalType: asset.originalType,
+                status: asset.status,
+                _frameCache: serializableFrameCache,
+                // NÃO salva: blob, sourceBlob, url, _waveformBaseCanvas, audioBufferCache, audioWaveCache
+            };
+        }));
+    }
+
+    // =========================================================
+    // INDEXAÇÃO (Core Logic)
+    // =========================================================
+
+    /**
+     * Gera uma cache otimizada de waveform em múltiplos LODs (full, half, quarter, eighth)
+     * Retorna um objeto { sampleRate, full, half, quarter, eighth }
+     */
+    generateOptimizedWaveformCache(audioBuffer) {
+        const data = audioBuffer.getChannelData(0);
+        const total = data.length;
+
+        const build = (bin) => {
+            const arr = [];
+            for (let i = 0; i < total; i += bin) {
+                let min = +1, max = -1;
+                for (let j = 0; j < bin && (i + j) < total; j++) {
+                    const v = data[i + j];
+                    if (v < min) min = v;
+                    if (v > max) max = v;
+                }
+                arr.push({ min, max });
+            }
+            return arr;
+        };
+
+        return {
+            sampleRate: audioBuffer.sampleRate,
+            full: build(1),
+            half: build(2),
+            quarter: build(4),
+            eighth: build(8)
+        };
+    }
+
+    /**
+     * Gera e armazena frames indexados e audio buffer (cache) no Asset.
+     * Isso é a "Indexação" que permite o redimensionamento sem piscar.
+     */
+    async indexAssetVisuals(asset) {
+        const tm = this.studio.timelineManager;
+
+        // Abre AudioContext compartilhado no timelineManager para evitar duplicatas
+        if (!tm.audioContext) {
+            tm.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        // --- INDEXAÇÃO DE ÁUDIO (Regenerada, pois o buffer não é serializável) ---
+        if (asset.type === 'audio' || (asset.type === 'video' && !asset.audioBufferCache)) {
+            tm._updateVisualStatus(1);
+            try {
+                // Tentamos garantir um arrayBuffer mesmo sem sourceBlob (ex: projeto carregado)
+                let arrayBuffer = null;
+
+                if (asset.sourceBlob instanceof Blob) {
+                    arrayBuffer = await asset.sourceBlob.arrayBuffer();
+                } else if (asset.url) {
+                    // tenta buscar via URL se disponível (útil quando o asset foi serializado com url)
+                    try {
+                        const resp = await fetch(asset.url);
+                        if (resp.ok) arrayBuffer = await resp.arrayBuffer();
+                    } catch (e) {
+                        console.warn(`[AssetManager] fetch falhou para ${asset.url}:`, e);
+                    }
+                }
+
+                if (!arrayBuffer) {
+                    // Se não temos arrayBuffer, tentamos reusar cache audioBuffer existente
+                    if (asset.audioBufferCache) {
+                        // já está indexado
+                    } else {
+                        console.warn(`[AssetManager] Não foi possível obter blob/url para indexar áudio de ${asset.name}.`);
+                    }
+                } else {
+                    asset.audioBufferCache = await tm.audioContext.decodeAudioData(arrayBuffer);
+                    // gera cache otimizado (multi-resolução)
+                    try {
+                        asset.audioWaveCache = this.generateOptimizedWaveformCache(asset.audioBufferCache);
+                    } catch (err) {
+                        console.warn("[AssetManager] Falha ao gerar audioWaveCache:", err);
+                        asset.audioWaveCache = null;
+                    }
+                    console.log(`[AssetManager] Audio Buffer e Waveform cache gerados para ${asset.name}`);
+                }
+            } catch (e) {
+                console.error(`Erro ao indexar buffer de áudio para ${asset.name}:`, e);
+            } finally {
+                tm._updateVisualStatus(-1);
+            }
+        }
+
+        // --- INDEXAÇÃO DE VÍDEO/IMAGEM (Pulando se o cache existir) ---
+        if (asset.type !== 'audio' && (!asset._frameCache || Object.keys(asset._frameCache).length === 0)) {
+            tm._updateVisualStatus(1); 
+            
+            if (asset.type === 'image') {
+                asset._frameCache = { '0.0': asset.url }; 
+            } else if (asset.type === 'video') {
+                const framesPerSecond = 10;
+                const duration = asset.baseDuration; 
+                
+                const video = document.createElement('video');
+                video.src = asset.url; 
+                video.crossOrigin = 'anonymous';
+                video.muted = true;
+                
+                const frameCache = {};
+                
+                const capture = (time) => new Promise((resolve) => {
+                    video.currentTime = time;
+                    video.onseeked = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 160; canvas.height = 90;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        resolve(canvas.toDataURL());
+                    };
+                    // fallback timeout
+                    setTimeout(() => resolve(null), 1000); 
+                });
+
+                try {
+                    await new Promise(r => video.onloadedmetadata = r);
+                    for (let t = 0; t <= duration; t += 1 / framesPerSecond) {
+                        const timeKey = (Math.floor(t * 10) / 10).toFixed(1); 
+                        const dataUrl = await capture(t);
+                        if (dataUrl) frameCache[timeKey] = dataUrl;
+                    }
+                    asset._frameCache = frameCache;
+                    console.log(`[AssetManager] Indexação de ${asset.name} completa (${Object.keys(frameCache).length} frames).`);
+                } catch (e) {
+                    console.error(`[AssetManager] Erro indexando frames de vídeo ${asset.name}:`, e);
+                }
+            }
+            tm._updateVisualStatus(-1); 
+        }
+    }
+
+    async indexAllExistingAssets() {
+        console.log("[AssetManager] Verificando assets para re-indexação.");
+        const indexingPromises = this.studio.project.assets.map(asset => {
+            const needsCache = (asset.type === 'video' || asset.type === 'image');
+            // Checa se o cache de frames (serializável) está faltando
+            const frameCacheMissing = needsCache && (!asset._frameCache || Object.keys(asset._frameCache).length === 0);
+            
+            const needsAudioCache = (asset.type === 'audio' || asset.type === 'video');
+            const audioCacheMissing = needsAudioCache && !asset.audioBufferCache && !asset.audioWaveCache;
+
+            if (frameCacheMissing || audioCacheMissing) {
+                return this.indexAssetVisuals(asset).catch(e => {
+                    console.error(`Falha na re-indexação do asset ${asset.name}:`, e);
+                });
+            }
+            return Promise.resolve();
+        });
+
+        await Promise.all(indexingPromises);
+
+        console.log("[AssetManager] Re-indexação concluída. Renderizando Tracks.");
+        this.studio.timelineManager.renderTracks();
     }
 
     renderBin() {
