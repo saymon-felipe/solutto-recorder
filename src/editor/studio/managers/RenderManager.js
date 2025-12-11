@@ -58,38 +58,59 @@ export class RenderManager {
         const project = this.studio.project;
         const playback = this.studio.playbackManager;
 
-        // 1. Calcula Duração
-        let maxDuration = 0;
+        // 1. Calcula Intervalo Real de Renderização (Smart Bounds)
+        let minStart = Infinity;
+        let maxEnd = 0;
+        let hasClips = false;
+
         project.tracks.forEach(track => {
             track.clips.forEach(clip => {
+                hasClips = true;
+                // Encontra o início mais cedo
+                if (clip.start < minStart) minStart = clip.start;
+                
+                // Encontra o fim mais tardio
                 const clipEnd = clip.start + clip.duration;
-                if (clipEnd > maxDuration) maxDuration = clipEnd;
+                if (clipEnd > maxEnd) maxEnd = clipEnd;
             });
         });
-        const renderDuration = maxDuration > 0 ? maxDuration : 5;
+
+        // Se não tiver clipes, define padrão seguro
+        if (!hasClips) {
+            minStart = 0;
+            maxEnd = 5;
+        }
+
+        // Duração real do arquivo final (sem o espaço vazio inicial)
+        const renderDuration = maxEnd - minStart;
+        
+        // Proteção para duração muito pequena
+        if (renderDuration <= 0) {
+            alert("A duração do projeto é inválida.");
+            this.cancelRendering();
+            return;
+        }
+
         const totalFrames = Math.ceil(renderDuration * 30);
+
+        console.log(`[Render] Intervalo detectado: ${minStart.toFixed(2)}s até ${maxEnd.toFixed(2)}s. Duração: ${renderDuration.toFixed(2)}s`);
 
         try {
             playback.stop();
             await new Promise(r => setTimeout(r, 200)); 
             
-            await playback.seekAndRender(0);
+            // 2. Pula diretamente para o primeiro frame real (pula o espaço vazio)
+            await playback.seekAndRender(minStart);
 
             const stream = playback.getCompositeStream(30);
 
-            // Muta monitoramento
             if (playback.toggleMonitorMute) playback.toggleMonitorMute(true);
 
             if (stream.getAudioTracks().length === 0) {
                 console.warn("[Render] Atenção: Stream sem áudio.");
             }
 
-            // --- CORREÇÃO DE PERFORMANCE ---
-            // NUNCA tente gravar em 'video/mp4' nativamente. O Encoder H.264 do Chrome 
-            // engasga em tempo real com Canvas, causando travamentos.
-            // Gravamos SEMPRE em WebM (VP9/VP8) que é leve e fluido, 
-            // e deixamos a conversão para MP4 ocorrer no pós-processamento (_finishRender).
-            
+            // --- Configuração de Codec ---
             let mimeType = 'video/webm;codecs=vp9,opus';
             if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm;codecs=vp8,opus';
             if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
@@ -99,7 +120,6 @@ export class RenderManager {
                 videoBitsPerSecond: 8000000 // 8 Mbps
             };
 
-            console.log(`[Render] Gravando internamente em: ${mimeType} (Para estabilidade)`);
             this.recorder = new MediaRecorder(stream, optionsRec);
 
             this.recorder.ondataavailable = (e) => {
@@ -114,22 +134,26 @@ export class RenderManager {
             const checkInterval = setInterval(() => {
                 const current = project.currentTime;
                 
-                // Progresso Visual (Se MP4, vai até 80%, senão 100%)
+                // Progresso Visual
                 const maxVisualPct = (this.renderOptions.format === 'mp4') ? 0.8 : 1.0;
                 
-                const rawPct = Math.min(1, current / renderDuration);
+                // Ajuste matemático: O progresso agora é relativo ao intervalo [minStart, maxEnd]
+                // (current - minStart) nos dá quantos segundos já processamos dentro da área útil
+                const processedTime = Math.max(0, current - minStart);
+                const rawPct = Math.min(1, processedTime / renderDuration);
                 const visualPct = rawPct * maxVisualPct;
 
-                const currentFrame = Math.min(totalFrames, Math.floor(current * 30));
+                const currentFrame = Math.min(totalFrames, Math.floor(processedTime * 30));
                 
                 this.updateProgress(
                     visualPct, 
                     `Frames: ${currentFrame} / ${totalFrames}`, 
-                    Math.max(0, renderDuration - current), 
+                    Math.max(0, maxEnd - current), // Tempo restante baseado no fim absoluto
                     (Date.now() - this.renderStartTime) / 1000
                 );
 
-                if (current >= renderDuration || !this.isRendering) {
+                // Condição de Parada: Quando a agulha passar do ponto final máximo
+                if (current >= maxEnd || !this.isRendering) {
                     this._finishRender(checkInterval, mimeType, renderDuration);
                 }
             }, 30);
