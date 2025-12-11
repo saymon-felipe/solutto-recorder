@@ -1,5 +1,3 @@
-import { getHeaderWidth } from '../utils.js';
-
 const FPS = 30;
 
 export class PlaybackManager {
@@ -136,13 +134,13 @@ export class PlaybackManager {
     }
 
     updatePlayhead() {
-        const x = getHeaderWidth() + (this.studio.project.currentTime * this.studio.project.zoom);
+        const x = this.studio.project.currentTime * this.studio.project.zoom;
         const el = document.getElementById('timeline-playhead-overlay');
         if(el) el.style.left = x + "px";
         
         if (this.isPlaying) {
             const area = document.getElementById('studio-scroll-area');
-            if (x - area.scrollLeft > area.clientWidth * 0.9) area.scrollLeft = x - 150;
+            if (x - area.scrollLeft > area.clientWidth * 0.9) area.scrollLeft = x;
         }
         
         const disp = document.getElementById('studio-time-display');

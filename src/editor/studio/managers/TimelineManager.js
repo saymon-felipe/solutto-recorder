@@ -491,84 +491,220 @@ export class TimelineManager {
         container.appendChild(fragment);
     }
 
+    /**
+     * Garante que a estrutura do DOM esteja configurada para o layout de duas colunas.
+     * Cria a sidebar se não existir e ajusta margens.
+     */
+    _ensureLayoutStructure() {
+        const timelineEl = document.getElementById("studio-timeline-el");
+        const scrollArea = document.getElementById("studio-scroll-area");
+        const rulerContainer = document.getElementById("timeline-ruler-container");
+        
+        if (!timelineEl || !scrollArea) return null;
+
+        // Largura da Sidebar
+        const headerWidth = getHeaderWidth(); 
+
+        // 1. Cria ou Busca o Container da Sidebar (Esquerda)
+        let sidebar = document.getElementById("studio-sidebar-container");
+        if (!sidebar) {
+            sidebar = document.createElement("div");
+            sidebar.id = "studio-sidebar-container";
+            
+            // Estilo da Sidebar Principal (Container Geral)
+            sidebar.style.cssText = `
+                position: absolute;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                width: ${headerWidth}px;
+                background:rgb(42, 42, 42);
+                border-right: 1px solid rgba(255, 255, 255, 0.1);;
+                z-index: 102;
+                display: flex;
+                flex-direction: column;
+            `;
+            
+            // Sub-container para o Botão de Adicionar (Topo, altura da régua)
+            const sidebarTop = document.createElement("div");
+            sidebarTop.id = "studio-sidebar-top";
+            sidebarTop.style.cssText = `
+                height: 24px; 
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);;
+                background: rgb(42, 42, 42);
+                flex-shrink: 0;
+            `;
+            
+            // Sub-container para a Lista de Headers (Scrollável, mas sem barra visível)
+            const sidebarList = document.createElement("div");
+            sidebarList.id = "studio-sidebar-list";
+            sidebarList.style.cssText = `
+                flex: 1;
+                overflow: hidden; 
+                position: relative;
+                background: rgb(42, 42, 42);
+            `;
+
+            sidebar.appendChild(sidebarTop);
+            sidebar.appendChild(sidebarList);
+            timelineEl.insertBefore(sidebar, timelineEl.firstChild);
+
+            // 2. Ajusta Margens do Conteúdo Principal (Direita) para não ficar embaixo da sidebar
+            if (rulerContainer) {
+                rulerContainer.style.marginLeft = `${headerWidth}px`;
+                // Esconde o spacer antigo se existir
+                const oldSpacer = rulerContainer.querySelector('.ruler-header-spacer');
+                if (oldSpacer) oldSpacer.style.display = 'none';
+            }
+            scrollArea.style.marginLeft = `${headerWidth}px`; // Empurra as tracks
+            
+            // 3. Sincronia de Scroll Vertical
+            // Quando rolar as tracks, rola os headers junto.
+            scrollArea.addEventListener('scroll', () => {
+                sidebarList.scrollTop = scrollArea.scrollTop;
+            });
+        }
+        
+        return sidebar;
+    }
+
     renderTracks() {
-        const container = document.getElementById("studio-tracks");
-        if(!container) return;
-        
-        container.innerHTML = "";
-        this._renderAddTrackButton();
-        
+        // 1. Prepara o Layout Físico
+        const sidebar = this._ensureLayoutStructure();
+        if (!sidebar) return;
+
+        const sidebarTop = document.getElementById("studio-sidebar-top");
+        const sidebarList = document.getElementById("studio-sidebar-list");
+        const tracksContainer = document.getElementById("studio-tracks"); // Container das Lanes
+
+        if (!sidebarList || !tracksContainer) return;
+
+        // Limpa containers
+        sidebarList.innerHTML = "";
+        tracksContainer.innerHTML = "";
+
+        // 2. Renderiza Botão Add Track (No topo da sidebar)
+        this._renderAddTrackButton(sidebarTop);
+
+        // Ajusta largura do wrapper de conteúdo
         const maxTime = this._getMaxTimelineTime();
-        const totalWidth = (maxTime * this.studio.project.zoom) + getHeaderWidth() + 500;
+        const totalWidth = (maxTime * this.studio.project.zoom) + 500;
         const wrapper = document.getElementById('timeline-content-wrapper');
         if(wrapper) wrapper.style.width = totalWidth + "px";
 
+        // 3. Renderiza Listas Separadas (Headers vs Lanes)
         this.studio.project.tracks.forEach((track, index) => {
-            const el = document.createElement("div");
-            el.className = `track ${track.type}`;
-            el.dataset.trackId = track.id;
-            el.dataset.index = index;
-            el.innerHTML = `
-                <div class="track-header" draggable="true">
-                    <div class="drag-handle"><i class="fa-solid fa-bars"></i></div>
-                    <input type="text" class="track-name-input" value="${track.name}" />
-                    <div class="track-type-icon"><i class="fa-solid ${track.type==='video'?'fa-video':'fa-volume-high'}"></i></div>
-                </div>
-                <div class="track-lane"></div>
+            
+            // --- A. Renderiza HEADER (Na Sidebar) ---
+            const headerEl = document.createElement("div");
+            headerEl.className = "track-header-wrapper";
+            // Altura fixa ou min-height é importante para sincronia
+            headerEl.style.cssText = `
+                height: 100px; /* Altura da Track */
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                box-sizing: border-box;
+                display: flex;
+                align-items: center;
+                padding: 0 10px;
+                background: rgb(42, 42, 42);
             `;
             
-            const lane = el.querySelector(".track-lane");
-            const header = el.querySelector(".track-header");
-            const nameInput = el.querySelector(".track-name-input");
-            
-            header.oncontextmenu = (e) => this._handleTrackContextMenu(e, track);
+            headerEl.innerHTML = `
+                <div class="track-header" draggable="true" style="width:100%; display:flex; align-items:center; gap:10px;">
+                    <div class="drag-handle" style="cursor:grab; color:#999;"><i class="fa-solid fa-bars"></i></div>
+                    <input type="text" class="track-name-input" value="${track.name}" style="flex:1; border:1px solid transparent; background:transparent;" />
+                    <div class="track-type-icon"><i class="fa-solid ${track.type==='video'?'fa-video':'fa-volume-high'}"></i></div>
+                </div>
+            `;
 
+            // Eventos do Header
+            const headerContent = headerEl.querySelector(".track-header");
+            const nameInput = headerEl.querySelector(".track-name-input");
+            
+            headerContent.oncontextmenu = (e) => this._handleTrackContextMenu(e, track);
             nameInput.onchange = (e) => { track.name = e.target.value; };
             nameInput.onmousedown = (e) => e.stopPropagation();
+            this._bindTrackReorderEvents(headerContent, index);
+
+            sidebarList.appendChild(headerEl);
+
+            const laneEl = document.createElement("div");
+            laneEl.className = `track-lane-wrapper track ${track.type}`; 
+            laneEl.dataset.trackId = track.id;
             
-            this._bindTrackReorderEvents(header, index);
-            this._bindLaneEvents(lane, track);
+            laneEl.style.cssText = `
+                height: 100px; 
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                box-sizing: border-box;
+                position: relative;
+                width: 100%;
+            `;
+
+            // Área interna onde os clipes vivem
+            const innerLane = document.createElement("div");
+            innerLane.className = "track-lane";
+            innerLane.style.cssText = "width: 100%; height: 100%; position: relative;";
             
+            this._bindLaneEvents(innerLane, track);
+
+            // Renderiza Clipes
             track.clips.forEach(clip => {
                 const clipEl = this._createClipElement(clip, track.id);
-                
-                // Botão Pan/Crop
                 if (track.type !== 'audio' && ['video', 'image'].includes(clip.type)) {
-                    const btnPan = document.createElement('div');
-                    btnPan.className = 'clip-tool-btn pan-crop-btn';
-                    btnPan.innerHTML = '<i class="fa-solid fa-crop-simple"></i>';
-                    btnPan.title = "Pan/Crop";
-                    
-                    btnPan.style.cssText = `
-                        position: absolute; bottom: 2px; right: 2px;
-                        width: 20px; height: 20px;
-                        background: rgba(0,0,0,0.7); color: white;
-                        border-radius: 3px; display: flex; align-items: center; justify-content: center;
-                        font-size: 10px; cursor: pointer; z-index: 100;
-                    `;
-
-                    btnPan.onmousedown = (e) => {
-                        e.preventDefault();  
-                        e.stopPropagation();
-                        this.studio.uiManager.openPanCropModal(clip);
-                    };
-
-                    clipEl.appendChild(btnPan);
+                     const btnPan = document.createElement('div');
+                     btnPan.className = 'clip-tool-btn pan-crop-btn';
+                     btnPan.innerHTML = '<i class="fa-solid fa-crop-simple"></i>';
+                     btnPan.style.cssText = `position: absolute; bottom: 2px; right: 2px; width: 20px; height: 20px; background: rgba(0,0,0,0.7); color: white; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; z-index: 100;`;
+                     btnPan.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); this.studio.uiManager.openPanCropModal(clip); };
+                     clipEl.appendChild(btnPan);
                 }
-
-                lane.appendChild(clipEl);
+                innerLane.appendChild(clipEl);
             });
-            container.appendChild(el);
+
+            laneEl.appendChild(innerLane);
+            tracksContainer.appendChild(laneEl);
         });
         
-        this.renderRuler();
+        this.renderRuler(); // Atualiza régua
+        this._renderCrossfadeGuides(); // Atualiza guias
         
-        if (this.studio.playbackManager) {
-            this.studio.playbackManager.updatePlayhead();
-            this.studio.playbackManager.syncPreview();
+        // Garante sincronia inicial
+        if (sidebarList && document.getElementById('studio-scroll-area')) {
+            sidebarList.scrollTop = document.getElementById('studio-scroll-area').scrollTop;
         }
+    }
+
+    /**
+     * Renderiza o fundo lateral fixo (Sidebar Background).
+     * Ele é anexado ao container principal da timeline para ficar independente do scroll horizontal,
+     * mas deve respeitar a altura do conteúdo.
+     */
+    _renderSidebarBackground() {
+        const timelineEl = document.getElementById('studio-timeline-el');
+        if (!timelineEl) return;
+
+        const existingBg = timelineEl.querySelector('.timeline-sidebar-bg');
+        if (existingBg) existingBg.remove();
+
+        const bg = document.createElement('div');
+        bg.className = 'timeline-sidebar-bg';
         
-        this._renderCrossfadeGuides();
+        const headerWidth = getHeaderWidth(); 
+        
+        bg.style.cssText = `
+            position: absolute;
+            left: 0;
+            top: 0; 
+            bottom: 0;
+            width: ${headerWidth}px;
+            background: rgb(30, 30, 30);
+            border-bottom: 1px solid rgb(51, 51, 51);
+            z-index: 103; 
+            pointer-events: none;
+        `;
+
+        // Inserimos no início do container da timeline
+        timelineEl.insertBefore(bg, timelineEl.firstChild);
     }
 
     // =========================================================================
@@ -706,9 +842,6 @@ export class TimelineManager {
                     container.appendChild(l1);
                     container.appendChild(l2);
 
-                    // --- PARTE 2: GHOST OVERLAY ---
-                    // Queremos mostrar a curva de Fade Out do C1 (que está escondida embaixo do C2).
-                    // Clonamos o SVG do C1 e o colocamos num container recortado.
                     if (c1El) {
                         const originalSvg = c1El.querySelector('.fade-curve-layer');
                         if (originalSvg) {
@@ -725,10 +858,6 @@ export class TimelineManager {
 
                             const clonedSvg = originalSvg.cloneNode(true);
                             
-                            // Ajuste de Posição do SVG clonado:
-                            // O SVG original está posicionado relativo ao Clip C1.
-                            // O Wrapper está na interseção (xStart).
-                            // Precisamos deslocar o SVG para a esquerda para alinhar com o início original do C1.
                             
                             const c1ScreenLeft = (c1.start * this.studio.project.zoom) + headerOffset;
                             const relativeOffset = c1ScreenLeft - xStart;
@@ -741,7 +870,7 @@ export class TimelineManager {
                             if (pathStroke) {
                                 pathStroke.setAttribute('stroke', '#ffffff');
                                 pathStroke.setAttribute('stroke-width', '2'); 
-                                pathStroke.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.8))'; // Sombra para contraste
+                                pathStroke.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.8))'; 
                             }
                             
                             // Remove preenchimento escuro para não escurecer o clipe de cima
@@ -757,23 +886,26 @@ export class TimelineManager {
         });
     }
     
-    _renderAddTrackButton() {
-        const spacer = document.querySelector('.ruler-header-spacer');
-        if (!spacer) return;
-        
-        spacer.innerHTML = "";
-        const container = document.createElement('div');
-        container.className = "track-add-dropdown-container";
-        container.innerHTML = `
-            <button class="btn-add-track-header" title="Adicionar Track"><i class="fa-solid fa-plus"></i> Track</button>
-            <div class="dropdown-content-header">
+    _renderAddTrackButton(container) {
+        if (!container) return;
+        container.innerHTML = "";
+
+        const wrapper = document.createElement('div');
+        wrapper.className = "track-add-dropdown-container";
+        wrapper.style.cssText = `width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative;`;
+
+        wrapper.innerHTML = `
+            <button class="btn-add-track-header" title="Adicionar Track" style="border:none; background:transparent; cursor:pointer; font-weight:600; color:#b5b5b5; display:flex; gap:5px; width:100%; height:100%; align-items:center; justify-content:center;">
+                <i class="fa-solid fa-plus"></i> Track
+            </button>
+            <div class="dropdown-content-header" style="top: 100%; left: 0; width: 100%;">
                 <a href="#" data-type="video"><i class="fa-solid fa-video"></i> Video Track</a>
                 <a href="#" data-type="audio"><i class="fa-solid fa-volume-high"></i> Audio Track</a>
             </div>
         `;
         
-        const btn = container.querySelector('.btn-add-track-header');
-        const content = container.querySelector('.dropdown-content-header');
+        const btn = wrapper.querySelector('.btn-add-track-header');
+        const content = wrapper.querySelector('.dropdown-content-header');
         
         btn.onclick = (e) => { e.stopPropagation(); content.classList.toggle('show'); };
         
@@ -784,14 +916,15 @@ export class TimelineManager {
             window.hasGlobalDropdownListener = true;
         }
         
-        container.querySelectorAll('a').forEach(link => {
+        wrapper.querySelectorAll('a').forEach(link => {
             link.onclick = (e) => {
                 e.preventDefault();
                 this.studio.addTrack(e.currentTarget.dataset.type);
                 content.classList.remove('show');
             };
         });
-        spacer.appendChild(container);
+
+        container.appendChild(wrapper);
     }
 
     _createClipElement(clip, trackId) {

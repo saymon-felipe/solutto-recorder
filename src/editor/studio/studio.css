@@ -287,6 +287,7 @@ body.resizing iframe {
     position: relative; 
     background: #1e1e1e; 
     display: flex; 
+    margin-left: 120px;
     flex-direction: column; 
 }
 
@@ -306,7 +307,7 @@ body.resizing iframe {
     display: flex; 
     position: sticky; 
     top: 0; 
-    z-index: 102; 
+    z-index: 101; 
 }
 
 /* Espaçador do Cabeçalho (Canto Superior Esquerdo - Onde fica o botão Add) */
@@ -460,10 +461,11 @@ body.resizing iframe {
     gap: 5px;
     position: sticky; 
     left: 0; 
-    z-index: 101;
+    z-index: 103;
     box-shadow: 2px 0 5px rgba(0,0,0,0.2);
     cursor: grab;
     user-select: none;
+        height: 89px;
 }
 
 #studio-app .track-header:active { cursor: grabbing; }
