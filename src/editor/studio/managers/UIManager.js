@@ -303,8 +303,8 @@ export class UIManager {
                 </div>
             </div>
             
-            <div class="studio-workspace">
-                <div class="studio-bin">
+            <div class="studio-workspace" id="studio-workspace-el">
+                <div class="studio-bin" id="studio-bin-el">
                     <div class="bin-tabs">
                         <button class="bin-tab active" data-target="bin-media">Mídia</button>
                         <button class="bin-tab" data-target="bin-projects">Projetos</button>
@@ -317,7 +317,9 @@ export class UIManager {
                     </div>
                 </div>
                 
-                <div class="preview-container">
+                <div id="resizer-v" class="layout-resizer-v"></div>
+                
+                <div class="preview-container" id="preview-container-el">
                     <div class="studio-preview">
                         <div id="studio-preview-canvas" class="preview-canvas" style="position: relative; overflow: hidden;"></div>
                     </div>
@@ -329,7 +331,9 @@ export class UIManager {
                 </div>
             </div>
 
-            <div class="studio-timeline">
+            <div id="resizer-h" class="layout-resizer-h"></div>
+
+            <div class="studio-timeline" id="studio-timeline-el">
                 <div class="timeline-ruler-container" id="timeline-ruler-container">
                     <div class="ruler-header-spacer"></div>
                     <div class="ruler-ticks"></div>
@@ -563,6 +567,7 @@ export class UIManager {
         this._bindEvents();
         this._bindTabEvents();
         this._bindProjectSettingsEvents();
+        this._bindLayoutResizers();
     }
 
     // =========================================================================
@@ -620,6 +625,83 @@ export class UIManager {
         toast.innerText = message;
         container.appendChild(toast);
         setTimeout(() => toast.remove(), 3000);
+    }
+
+    _bindLayoutResizers() {
+        const workspace = document.getElementById('studio-workspace-el');
+        const bin = document.getElementById('studio-bin-el');
+        const resizerH = document.getElementById('resizer-h');
+        const resizerV = document.getElementById('resizer-v');
+        const app = document.getElementById('studio-app');
+
+        let startY, startHeight;
+
+        const onMouseMoveH = (e) => {
+            const newHeight = startHeight + (e.clientY - startY);
+            
+            if (newHeight > 150 && newHeight < window.innerHeight - 150) {
+                workspace.style.height = `${newHeight}px`;
+                workspace.style.flex = "none"; 
+                
+                if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+            }
+        };
+
+        const onMouseUpH = () => {
+            document.removeEventListener('mousemove', onMouseMoveH);
+            document.removeEventListener('mouseup', onMouseUpH);
+            document.body.classList.remove('resizing');
+            resizerH.classList.remove('active');
+            
+            window.dispatchEvent(new Event('resize'));
+        };
+
+        if (resizerH) {
+            resizerH.onmousedown = (e) => {
+                e.preventDefault();
+                startY = e.clientY;
+                startHeight = workspace.getBoundingClientRect().height;
+                
+                document.body.classList.add('resizing');
+                resizerH.classList.add('active');
+                
+                document.addEventListener('mousemove', onMouseMoveH);
+                document.addEventListener('mouseup', onMouseUpH);
+            };
+        }
+
+        let startX, startWidth;
+
+        const onMouseMoveV = (e) => {
+            const newWidth = startWidth + (e.clientX - startX);
+            
+            if (newWidth > 150 && newWidth < 600) {
+                bin.style.width = `${newWidth}px`;
+            }
+        };
+
+        const onMouseUpV = () => {
+            document.removeEventListener('mousemove', onMouseMoveV);
+            document.removeEventListener('mouseup', onMouseUpV);
+            document.body.classList.remove('resizing');
+            resizerV.classList.remove('active');
+            
+            if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+        };
+
+        if (resizerV) {
+            resizerV.onmousedown = (e) => {
+                e.preventDefault();
+                startX = e.clientX;
+                startWidth = bin.getBoundingClientRect().width;
+                
+                document.body.classList.add('resizing');
+                resizerV.classList.add('active');
+                
+                document.addEventListener('mousemove', onMouseMoveV);
+                document.addEventListener('mouseup', onMouseUpV);
+            };
+        }
     }
 
     // =========================================================================
