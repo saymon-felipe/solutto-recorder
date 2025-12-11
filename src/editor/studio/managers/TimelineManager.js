@@ -816,7 +816,9 @@ export class TimelineManager {
             ${isVideoVisual ? `<div class="clip-opacity-overlay" style="opacity: ${1 - clip.level}"></div>` : ''}
             
             <div class="clip-name" style="${nameStyle}">${clip.name}</div>
-            <div class="resize-handle right" data-action="resize" style="z-index: 25;"></div>
+            
+            <div class="resize-handle left" data-action="resize-left" style="z-index: 25; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; cursor: w-resize;"></div>
+            <div class="resize-handle right" data-action="resize-right" style="z-index: 25;"></div>
         `;
         
         this._injectFadeStyles(el);
@@ -835,29 +837,39 @@ export class TimelineManager {
         }
 
         // Loop Markers
-        if (clip.duration > asset.baseDuration) {
-            const loops = Math.floor(clip.duration / asset.baseDuration);
+        // NOTA: Agora consideramos o offset para posicionar corretamente os loops visuais
+        if (clip.duration + clip.offset > asset.baseDuration) {
+            const baseDur = asset.baseDuration;
+            const totalTime = clip.duration + clip.offset;
+            const loops = Math.floor(totalTime / baseDur);
+            
             for(let i=1; i<=loops; i++) {
-                const m = document.createElement("div");
-                m.className = "loop-marker";
-                
-                m.classList.add('loop-vinco');
-                
-                // Posição: Multiplica o índice do loop pela duração base em pixels
-                m.style.left = (i * asset.baseDuration * this.studio.project.zoom) + "px";
-                
-                // Estilo do Vinco (Linha fina vertical que simula uma dobra/vinco)
-                m.style.cssText += `
-                    position: absolute; 
-                    top: 0; 
-                    bottom: 0; 
-                    width: 1px; 
-                    background-color: rgba(255, 255, 255, 0.5); /* Cor suave */
-                    border-left: 2px dashed rgba(0, 0, 0, 0.5); /* Para dar efeito 3D de vinco */
-                    z-index: 10;
-                `;
-                
-                el.appendChild(m);
+                // Calcula a posição relativa ao INÍCIO DO CLIP VISUAL
+                // Posição Real = (Tempo Absoluto - Offset) * Zoom
+                const timePoint = i * baseDur;
+                const relativePixel = (timePoint - clip.offset) * this.studio.project.zoom;
+
+                // Só renderiza se estiver dentro da área visível do clipe
+                if (relativePixel > 0 && relativePixel < (clip.duration * this.studio.project.zoom)) {
+                    const m = document.createElement("div");
+                    m.className = "loop-marker loop-vinco";
+                    
+                    m.style.left = relativePixel + "px";
+                    
+                    // Estilo do Vinco
+                    m.style.cssText += `
+                        position: absolute; 
+                        top: 0; 
+                        bottom: 0; 
+                        width: 1px; 
+                        background-color: rgba(255, 255, 255, 0.5); 
+                        border-left: 2px dashed rgba(0, 0, 0, 0.5); 
+                        z-index: 10;
+                        pointer-events: none;
+                    `;
+                    
+                    el.appendChild(m);
+                }
             }
         }
 
@@ -874,8 +886,10 @@ export class TimelineManager {
 
             this._handleSelection(e, clip, trackId, el);
             
-            if (action === 'resize') {
-                this._startResize(e, clip, el, asset.baseDuration);
+            // LÓGICA DE RESIZE ATUALIZADA
+            if (action === 'resize-left' || action === 'resize-right' || action === 'resize') {
+                // Passa o action específico ('resize-left' ou 'resize-right')
+                this._startResize(e, clip, el, asset.baseDuration, action);
             } else if (action === 'fader') {
                 this._startFader(e, clip, el, track);
             } else {
@@ -2049,26 +2063,31 @@ export class TimelineManager {
         line.style.display = 'block';
     }
 
-    _startResize(e, clip, el, baseDuration) {
+    _startResize(e, clip, el, baseDuration, actionStr = 'resize-right') {
         const startX = e.clientX; 
-        const startW = clip.duration * this.studio.project.zoom;
+        
+        // Estado Inicial
+        const initialStart = clip.start;
+        const initialDuration = clip.duration;
+        const initialOffset = clip.offset || 0;
+        const isLeft = (actionStr === 'resize-left');
+
         const tracksContainer = document.getElementById('studio-tracks');
         const containerRect = tracksContainer.getBoundingClientRect();
         
-        // Dados para o Snap (baseados no clipe que está sob o mouse)
+        // Dados para o Snap
         const activeRect = el.getBoundingClientRect();
         const activeTop = (activeRect.top - containerRect.top) + tracksContainer.scrollTop;
         const activeBottom = (activeRect.bottom - containerRect.top) + tracksContainer.scrollTop;
 
-        // 1. Identificação de Alvos do Grupo (Targets)
+        // 1. Identificação de Alvos (Targets)
         const targets = [];
-        
         if (clip.groupId) {
             this.studio.project.tracks.forEach(track => {
                 track.clips.forEach(c => {
                     if (c.groupId === clip.groupId) {
-                        // Verifica se "possuem o mesmo tamanho"
-                        if (Math.abs(c.duration - clip.duration) < 0.1) {
+                        // Aplica apenas a clipes alinhados verticalmente (mesmo start/duration)
+                        if (Math.abs(c.start - initialStart) < 0.01 && Math.abs(c.duration - initialDuration) < 0.01) {
                             const domEl = c.id === clip.id ? el : this._findDomElement(c.id);
                             targets.push({ clip: c, el: domEl });
                         }
@@ -2076,29 +2095,19 @@ export class TimelineManager {
                 });
             });
         }
-        
-        // Fallback: Se não houver grupo ou targets, adiciona apenas o atual
         if (targets.length === 0) targets.push({ clip, el });
-        // Garante que o clipe clicado esteja incluso (caso a tolerância falhe por algum motivo raro)
         if (!targets.some(t => t.clip.id === clip.id)) targets.push({ clip, el });
 
-        // 2. Mapeamento de Pontos Magnéticos (Snap)
+        // 2. Mapeamento de Pontos Magnéticos
         const snapPoints = [];
+        
+        // -- Adiciona Snap nos Loops (Lógica que já implementamos antes) --
         const currentAsset = this.studio.project.assets.find(a => a.id === clip.assetId);
         if (currentAsset && currentAsset.baseDuration > 0) {
-            // Calcula pontos de loop projetados no futuro (ex: até 50 loops à frente ou baseado no zoom)
-            // Isso garante que se o usuário esticar muito, ainda tenha snap.
             const projectedLoops = 50; 
-            
             for(let i = 1; i <= projectedLoops; i++) {
-                const loopTime = clip.start + (i * currentAsset.baseDuration);
-                
-                // Define limites visuais para a linha guia (usa o rect do clip atual)
-                snapPoints.push({ 
-                    time: loopTime, 
-                    top: activeTop, 
-                    bottom: activeBottom 
-                });
+                // Se for Esquerda, o loop point relevante muda em relação ao start atual
+                // Para simplificar UX da esquerda, focamos snap em outros clipes e agulha.
             }
         }
 
@@ -2108,190 +2117,206 @@ export class TimelineManager {
                 
                 const cEl = this._findDomElement(c.id);
                 let top = 0, bottom = 0;
-                
                 if (cEl) {
                     const r = cEl.getBoundingClientRect();
                     top = (r.top - containerRect.top) + tracksContainer.scrollTop;
                     bottom = (r.bottom - containerRect.top) + tracksContainer.scrollTop;
                 } else {
-                    top = (track.index || 0) * 100; 
-                    bottom = top + 80; 
+                    top = (track.index || 0) * 100; bottom = top + 80; 
                 }
 
                 snapPoints.push({ time: c.start, top, bottom });
                 snapPoints.push({ time: c.start + c.duration, top, bottom });
             });
         });
-
-        // Agulha como ímã global
-        snapPoints.push({ 
-            time: this.studio.project.currentTime, 
-            top: 0, 
-            bottom: tracksContainer.scrollHeight 
-        });
+        snapPoints.push({ time: this.studio.project.currentTime, top: 0, bottom: tracksContainer.scrollHeight });
         
         const preResizeState = this.studio.historyManager._createSnapshot();
         let didResize = false;
-        const SNAP_THRESHOLD_PX = 10; 
+        const SNAP_THRESHOLD_PX = 15; 
 
         const onMove = (ev) => {
-            const delta = ev.clientX - startX;
-            if (Math.abs(delta) < 2 && !didResize) return;
-
+            const deltaPx = ev.clientX - startX;
+            if (Math.abs(deltaPx) < 2 && !didResize) return;
             didResize = true;
             
-            // Calcula novo tamanho baseado no clip original clicado
-            let rawWidth = Math.max(10, startW + delta);
-            let rawDur = rawWidth / this.studio.project.zoom;
-            
-            const projectedEndTime = clip.start + rawDur;
-            
-            // 3. Lógica de Colisão (Snap)
-            let bestSnapPoint = null;
-            let minDistancePx = Infinity;
+            const deltaSec = deltaPx / this.studio.project.zoom;
+            let finalStart = initialStart;
+            let finalDuration = initialDuration;
+            let finalOffset = initialOffset;
 
-            for (const pointData of snapPoints) {
-                const distTime = Math.abs(pointData.time - projectedEndTime);
-                const distPx = distTime * this.studio.project.zoom;
-
-                if (distPx <= SNAP_THRESHOLD_PX && distPx < minDistancePx) {
-                    minDistancePx = distPx;
-                    bestSnapPoint = pointData;
+            if (isLeft) {
+                // --- LÓGICA ESQUERDA ---
+                
+                // 1. Calcula Projeção sem restrições
+                let rawNewStart = initialStart + deltaSec;
+                
+                // 2. Snap Magnético (no Start)
+                let bestSnap = null;
+                let minDist = Infinity;
+                
+                for (const pt of snapPoints) {
+                    const distPx = Math.abs(pt.time - rawNewStart) * this.studio.project.zoom;
+                    if (distPx < SNAP_THRESHOLD_PX && distPx < minDist) {
+                        minDist = distPx;
+                        bestSnap = pt;
+                    }
                 }
-            }
+                
+                if (bestSnap) {
+                    rawNewStart = bestSnap.time;
+                    this._updateSnapLine(bestSnap.time, true, Math.min(activeTop, bestSnap.top), Math.max(activeBottom, bestSnap.bottom) - Math.min(activeTop, bestSnap.top));
+                } else {
+                    rawNewStart = this._snapToFrame(rawNewStart);
+                    this._updateSnapLine(0, false);
+                }
 
-            let newDur;
-            if (bestSnapPoint) { 
-                newDur = bestSnapPoint.time - clip.start;
-                // Desenha linha magnética
-                const minTop = Math.min(activeTop, bestSnapPoint.top);
-                const maxBottom = Math.max(activeBottom, bestSnapPoint.bottom);
-                this._updateSnapLine(bestSnapPoint.time, true, minTop, maxBottom - minTop);
+                // 3. Calcula Delta efetivo após Snap
+                const effectiveDelta = rawNewStart - initialStart;
+
+                // 4. Restrição de Duração Mínima (não inverter o clipe)
+                if ((initialDuration - effectiveDelta) < (1/30)) {
+                    rawNewStart = initialStart + initialDuration - (1/30);
+                }
+
+                // 5. Restrição de Início de Arquivo (Offset >= 0)
+                // Se eu estou puxando para esquerda (delta negativo), o offset diminui.
+                // Offset Novo = Offset Inicial + Delta
+                let proposedOffset = initialOffset + (rawNewStart - initialStart);
+                
+                if (proposedOffset < 0) {
+                    // Bateu no início do arquivo
+                    proposedOffset = 0;
+                    // Recalcula o start baseado no offset 0
+                    // Start = InitialStart - InitialOffset
+                    rawNewStart = initialStart - initialOffset; 
+                }
+
+                finalStart = rawNewStart;
+                finalOffset = proposedOffset;
+                finalDuration = initialDuration - (finalStart - initialStart);
+
             } else {
-                newDur = this._snapToFrame(rawDur); 
-                this._updateSnapLine(0, false);
+                // --- LÓGICA DIREITA (Mantida e Ajustada) ---
+                let rawWidth = Math.max(10, (initialDuration * this.studio.project.zoom) + deltaPx);
+                let rawDur = rawWidth / this.studio.project.zoom;
+                const projectedEnd = initialStart + rawDur;
+                
+                let bestSnap = null;
+                let minDist = Infinity;
+                for (const pt of snapPoints) {
+                    const distPx = Math.abs(pt.time - projectedEnd) * this.studio.project.zoom;
+                    if (distPx < SNAP_THRESHOLD_PX && distPx < minDist) {
+                        minDist = distPx;
+                        bestSnap = pt;
+                    }
+                }
+                
+                if (bestSnap) {
+                    finalDuration = bestSnap.time - initialStart;
+                    this._updateSnapLine(bestSnap.time, true, Math.min(activeTop, bestSnap.top), Math.max(activeBottom, bestSnap.bottom) - Math.min(activeTop, bestSnap.top));
+                } else {
+                    finalDuration = this._snapToFrame(rawDur);
+                    this._updateSnapLine(0, false);
+                }
+                if (finalDuration < (1/30)) finalDuration = (1/30);
             }
-            
-            if (newDur < (1 / 30)) newDur = (1 / 30); // Mínimo 1 frame
 
-            // 4. Aplicação em Lote (Batch Update)
+            // --- APLICAÇÃO EM LOTE ---
             targets.forEach(target => {
                 const tClip = target.clip;
                 const tEl = target.el;
 
-                // Atualiza Modelo
-                tClip.duration = newDur;
+                tClip.start = finalStart;
+                tClip.duration = finalDuration;
+                tClip.offset = finalOffset;
 
-                // Ajusta fades se o clip ficar menor que eles
-                if ( (tClip.fadeIn + tClip.fadeOut) > newDur ) {
-                    if (tClip.fadeIn > newDur) tClip.fadeIn = newDur;
-                    tClip.fadeOut = Math.max(0, newDur - tClip.fadeIn);
+                // Ajuste de Fades (segurança)
+                if ((tClip.fadeIn + tClip.fadeOut) > finalDuration) {
+                     if (tClip.fadeIn > finalDuration) tClip.fadeIn = finalDuration;
+                     tClip.fadeOut = Math.max(0, finalDuration - tClip.fadeIn);
                 }
-                
+
                 if (tEl) {
-                    tEl.style.width = (newDur * this.studio.project.zoom) + "px"; 
+                    tEl.style.left = (finalStart * this.studio.project.zoom) + "px";
+                    tEl.style.width = (finalDuration * this.studio.project.zoom) + "px";
                     this._updateFadeVisuals(tClip, tEl);
-                    
-                    // =========================================================
-                    // LÓGICA DE ATUALIZAÇÃO DE VINCOS EM TEMPO REAL (NOVO)
-                    // =========================================================
-                    const currentAsset = this.studio.project.assets.find(a => a.id === tClip.assetId);
-                    
-                    if (currentAsset && currentAsset.baseDuration > 0) {
-                        const baseDuration = currentAsset.baseDuration;
+
+                    // ATUALIZAÇÃO VISUAL INTERNA (Waveforms e Loops)
+                    if (currentAsset) {
+                        // 1. Vincos de Loop
+                        const baseDur = currentAsset.baseDuration;
                         const zoom = this.studio.project.zoom;
-                        const newLoops = Math.floor(newDur / baseDuration);
                         
-                        // 1. Limpa todos os vincos existentes para evitar duplicatas
-                        Array.from(tEl.querySelectorAll('.loop-vinco')).forEach(m => m.remove());
-
-                        // 2. Cria e adiciona os novos vincos em tempo real
-                        for (let i = 1; i <= newLoops; i++) {
-                            const m = document.createElement("div");
-                            m.className = "loop-marker loop-vinco";
-                            m.style.left = (i * baseDuration * zoom) + "px";
-                            
-                            // Aplica exatamente o mesmo estilo de vinco
-                            m.style.cssText += `
-                                position: absolute; 
-                                top: 0; 
-                                bottom: 0; 
-                                width: 1px; 
-                                background-color: rgba(255, 255, 255, 0.5); /* Cor suave */
-                                border-left: 2px dashed rgba(0, 0, 0, 0.5); /* Para dar efeito 3D de vinco */
-                                z-index: 10;
-                                pointer-events: none; /* Não bloquear o drag */
-                            `;
-                            
-                            tEl.appendChild(m);
+                        // Limpa vincos antigos
+                        Array.from(tEl.querySelectorAll('.loop-marker')).forEach(m => m.remove());
+                        
+                        // Recria vincos apenas se duration > baseDuration (Direita)
+                        // Na esquerda não criamos loop, mas se o clipe já for longo, os vincos devem se mover
+                        // Calculamos onde os múltiplos de baseDuration caem RELATIVO ao novo Start
+                        
+                        const loops = Math.floor((tClip.duration + tClip.offset) / baseDur);
+                        // Apenas desenha se o loop estiver visível dentro da janela atual do clipe
+                        for(let i=1; i<=loops; i++) {
+                             const loopTimePoint = i * baseDur; // Tempo absoluto no source
+                             // Converte para pixels relativos ao inicio da div
+                             const relativePixel = (loopTimePoint - tClip.offset) * zoom;
+                             
+                             if (relativePixel > 0 && relativePixel < (tClip.duration * zoom)) {
+                                const m = document.createElement("div");
+                                m.className = "loop-marker loop-vinco";
+                                m.style.left = relativePixel + "px";
+                                m.style.cssText += `position: absolute; top: 0; bottom: 0; width: 1px; background-color: rgba(255, 255, 255, 0.5); border-left: 2px dashed rgba(0, 0, 0, 0.5); z-index: 10; pointer-events: none;`;
+                                tEl.appendChild(m);
+                             }
                         }
-                    }
-                    // =========================================================
-                    
-                    // LÓGICA DE REPETIÇÃO INSTANTÂNEA VIA DOM (ON MOVE) (Waveforms)
-                    const repeater = tEl.querySelector('.waveform-repeater');
-                    
-                    if (currentAsset && repeater && currentAsset._waveformBaseCanvas) {
-                        const baseAssetDuration = currentAsset.baseDuration;
-                        const baseWaveformWidth = baseAssetDuration * this.studio.project.zoom;
 
-                        const currentLoops = repeater.children.length;
-                        const finalNewLoops = Math.ceil(newDur / baseAssetDuration); // Usa newDur para calcular loops
-
-                        if (finalNewLoops !== currentLoops) {
-                            // Adicionar Clones
-                            if (finalNewLoops > currentLoops) {
-                                for (let i = currentLoops; i < finalNewLoops; i++) {
-                                    const baseCanvas = currentAsset._waveformBaseCanvas;
-                                    
-                                    // Clonagem manual de pixels
-                                    const clone = document.createElement("canvas");
-                                    clone.width = baseCanvas.width;
-                                    clone.height = baseCanvas.height;
-                                    
-                                    const cloneCtx = clone.getContext('2d');
-                                    cloneCtx.drawImage(baseCanvas, 0, 0);
-                                    
-                                    // Aplica estilos CSS
-                                    clone.style.width = `${baseWaveformWidth}px`;
-                                    clone.style.height = `100%`;
-                                    
-                                    repeater.appendChild(clone);
-                                }
-                            }
-                            // Remover Clones
-                            else if (finalNewLoops < currentLoops) {
-                                for (let i = currentLoops; i > finalNewLoops; i--) {
-                                    if (repeater.lastChild && repeater.children.length > 1) { 
-                                        repeater.removeChild(repeater.lastChild);
-                                    }
-                                }
-                            }
+                        // 2. Waveform Repeater (Deslocamento Visual)
+                        const repeater = tEl.querySelector('.waveform-repeater');
+                        if (repeater) {
+                             // Atualiza o Translate X para compensar o Offset
+                             const offsetX = tClip.offset * zoom;
+                             repeater.style.transform = `translateX(-${offsetX}px)`;
+                             
+                             // Garante tamanho suficiente do repeater
+                             const totalRequiredTime = tClip.offset + tClip.duration;
+                             const requiredLoops = Math.ceil(totalRequiredTime / baseDur);
+                             const currentLoops = repeater.children.length;
+                             const baseWaveWidth = baseDur * zoom;
+                             
+                             // Adiciona clones se necessário (para cobrir offset alto + duração)
+                             if (requiredLoops > currentLoops && currentAsset._waveformBaseCanvas) {
+                                 for(let k=currentLoops; k<requiredLoops; k++) {
+                                     const clone = document.createElement("canvas");
+                                     clone.width = currentAsset._waveformBaseCanvas.width;
+                                     clone.height = currentAsset._waveformBaseCanvas.height;
+                                     clone.getContext('2d').drawImage(currentAsset._waveformBaseCanvas, 0, 0);
+                                     clone.style.width = `${baseWaveWidth}px`;
+                                     clone.style.height = "100%";
+                                     repeater.appendChild(clone);
+                                 }
+                                 repeater.style.width = `${baseWaveWidth * requiredLoops}px`;
+                             }
                         }
-                        // Ajusta a largura total do repeater 
-                        repeater.style.width = `${baseWaveformWidth * finalNewLoops}px`;
+                        
+                        // 3. Thumbnails (Recalcula se for vídeo/imagem)
+                        if (currentAsset.type === 'video' || currentAsset.type === 'image') {
+                             const visuals = tEl.querySelector('.clip-visuals');
+                             if(visuals) this._renderThumbnails(currentAsset, visuals, tClip.duration, zoom);
+                        }
                     }
                 }
             });
 
-            if(this.studio.playbackManager) {
-                this.studio.playbackManager.syncPreview();
-            }
-
+            if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
             this._renderCrossfadeGuides();
         };
 
         const onUp = () => { 
             window.removeEventListener("mousemove", onMove); 
             window.removeEventListener("mouseup", onUp); 
-            
             this._updateSnapLine(0, false); 
-
-            if (didResize) {
-                this.studio.historyManager.pushManualState(preResizeState);
-            }
-
-            // Renderiza para garantir consistência final (ex: marcadores de loop novos)
+            if (didResize) this.studio.historyManager.pushManualState(preResizeState);
             this.renderTracks();
             this.studio.markUnsavedChanges();
         };
