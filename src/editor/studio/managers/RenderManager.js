@@ -2,13 +2,11 @@ export class RenderManager {
     constructor(studio) {
         this.studio = studio;
         this.isRendering = false;
-        this.renderStartTime = 0;
-        this.recorder = null;
-        this.chunks = [];
-        this.renderOptions = {};
+        this.abortController = null;
         
-        this.RECORDING_WEIGHT = 0.8; // 80% para gravação
-        this.CONVERSION_WEIGHT = 0.2; // 20% para conversão
+        // Estatísticas
+        this.renderStartTime = 0;
+        this.framesProcessed = 0;
     }
 
     init() {
@@ -21,210 +19,243 @@ export class RenderManager {
         if (!modal) return;
         modal.classList.remove('hidden');
         
-        document.getElementById("btn-render-cancel").onclick = () => modal.classList.add('hidden');
+        const btnCancel = document.getElementById("btn-render-cancel");
+        const newCancel = btnCancel.cloneNode(true);
+        btnCancel.parentNode.replaceChild(newCancel, btnCancel);
         
-        document.getElementById("btn-render-confirm").onclick = () => {
+        const btnConfirm = document.getElementById("btn-render-confirm");
+        const newConfirm = btnConfirm.cloneNode(true);
+        btnConfirm.parentNode.replaceChild(newConfirm, btnConfirm);
+
+        newCancel.onclick = () => modal.classList.add('hidden');
+        
+        newConfirm.onclick = () => {
             modal.classList.add('hidden');
-            const formatInput = document.getElementById("render-format");
+            const resInput = document.getElementById("render-resolution");
+            const fmtInput = document.getElementById("render-format");
+            const qualInput = document.getElementById("render-quality");
+
+            const defaultRes = `${this.studio.project.settings.width}x${this.studio.project.settings.height}`;
+            
             const options = {
-                resolution: document.getElementById("render-resolution").value,
-                quality: document.getElementById("render-quality").value,
-                format: formatInput ? formatInput.value : 'mp4'
+                resolution: (resInput && resInput.value) ? resInput.value : defaultRes,
+                format: (fmtInput && fmtInput.value) ? fmtInput.value : 'mp4',
+                quality: (qualInput && qualInput.value) ? qualInput.value : 'high'
             };
+            
             this.renderProject(options);
         };
+    }
 
-        const btnAbort = document.getElementById("btn-render-abort");
-        if (btnAbort) btnAbort.onclick = () => this.cancelRendering();
-
-        const resSelect = document.getElementById("render-resolution");
-        if(resSelect) {
-            const { width, height } = this.studio.project.settings;
-            resSelect.innerHTML = `<option value="project" selected>Projeto (${width}x${height})</option>`;
-            resSelect.disabled = true;
-        }
+    _getProjectEndTime() {
+        let maxTime = 0;
+        this.studio.project.tracks.forEach(track => {
+            track.clips.forEach(clip => {
+                const end = clip.start + clip.duration;
+                if (end > maxTime) maxTime = end;
+            });
+        });
+        return maxTime > 0 ? maxTime : 1;
     }
 
     async renderProject(options) {
         if (this.isRendering) return;
-
-        this.renderOptions = options; 
-        this._showProgressOverlay();
         this.isRendering = true;
+        this.abortController = new AbortController();
+
+        // Reset Stats
         this.renderStartTime = Date.now();
-        this.chunks = [];
+        this.framesProcessed = 0;
 
-        const project = this.studio.project;
-        const playback = this.studio.playbackManager;
-
-        let minStart = Infinity;
-        let maxEnd = 0;
-        let hasClips = false;
-
-        project.tracks.forEach(track => {
-            track.clips.forEach(clip => {
-                hasClips = true;
-                if (clip.start < minStart) minStart = clip.start;
-                const clipEnd = clip.start + clip.duration;
-                if (clipEnd > maxEnd) maxEnd = clipEnd;
-            });
-        });
-
-        if (!hasClips) {
-            minStart = 0;
-            maxEnd = 5;
-        }
-
-        const renderDuration = maxEnd - minStart;
+        const overlay = document.getElementById('render-progress-overlay');
+        if (overlay) overlay.classList.remove('hidden');
         
-        if (renderDuration <= 0) {
-            alert("A duração do projeto é inválida.");
-            this.cancelRendering();
-            return;
+        const btnAbort = document.getElementById('btn-render-abort');
+        if (btnAbort) {
+            btnAbort.onclick = () => {
+                if (confirm("Deseja realmente cancelar a renderização?")) {
+                    this.abortController.abort();
+                }
+            };
         }
 
-        const totalFrames = Math.ceil(renderDuration * 30);
+        this._updateProgress(0, "Inicializando motor de renderização...");
 
-        console.log(`[Render] Intervalo detectado: ${minStart.toFixed(2)}s até ${maxEnd.toFixed(2)}s. Duração: ${renderDuration.toFixed(2)}s`);
+        if(this.studio.playbackManager) this.studio.playbackManager.pause();
+
+        let logHandler = null; 
 
         try {
-            playback.stop();
-            await new Promise(r => setTimeout(r, 200)); 
-            
-            await playback.seekAndRender(minStart);
+            const transcoder = this.studio.editor.transcoder;
+            if (!transcoder.isLoaded) {
+                if(typeof transcoder.load === 'function') await transcoder.load();
+                else await transcoder.init();
+            }
+            const ffmpeg = transcoder.ffmpeg;
 
-            const statusText = document.getElementById('render-speed-text');
-            if(statusText) statusText.innerText = "Preparando assets...";
-            
-            await playback.waitForReady(4100); 
-
-            await new Promise(r => setTimeout(r, 150));
-
-            const stream = playback.getCompositeStream(30);
-
-            if (playback.toggleMonitorMute) playback.toggleMonitorMute(true);
-
-            if (stream.getAudioTracks().length === 0) {
-                console.warn("[Render] Atenção: Stream sem áudio.");
+            let [width, height] = options.resolution.split('x').map(Number);
+            if (!width || !height || isNaN(width) || isNaN(height)) {
+                width = this.studio.project.settings.width || 1280;
+                height = this.studio.project.settings.height || 720;
             }
 
-            let mimeType = 'video/webm;codecs=vp9,opus';
-            if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm;codecs=vp8,opus';
-            if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
+            const fps = 30;
+            const duration = this._getProjectEndTime();
+            const totalFrames = Math.ceil(duration * fps);
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d', { alpha: false });
 
-            const optionsRec = {
-                mimeType: mimeType,
-                videoBitsPerSecond: 8000000 // 8 Mbps
-            };
+            console.log(`[Render] Início: ${width}x${height} @ ${fps}fps. Dur: ${duration.toFixed(2)}s. Frames: ${totalFrames}`);
 
-            this.recorder = new MediaRecorder(stream, optionsRec);
+            // 1. Áudio (Rápido - conta como parte do inicio)
+            this._updateProgress(1, "Renderizando Áudio Master...");
+            const audioBlob = await this._renderMasterAudio(duration);
+            const audioFilename = "master.wav";
+            await ffmpeg.writeFile(audioFilename, await this._fetchFile(audioBlob));
 
-            this.recorder.ondataavailable = (e) => {
-                if (e.data && e.data.size > 0) this.chunks.push(e.data);
-            };
+            // 2. Loop de Vídeo (0% -> 80% do progresso total)
+            let videoChunks = [];
+            let frameBuffer = [];
+            const BATCH_SIZE = 30; 
+            
+            const originalTime = this.studio.project.currentTime;
 
-            this.recorder.start();
-            playback.play(); 
+            for (let i = 0; i < totalFrames; i++) {
+                if (this.abortController.signal.aborted) throw new Error("Renderização cancelada pelo usuário.");
 
-            const checkInterval = setInterval(() => {
-                const current = project.currentTime;
+                const time = i / fps;
                 
-                const maxVisualPct = (this.renderOptions.format === 'mp4') ? 0.8 : 1.0;
-                const processedTime = Math.max(0, current - minStart);
-                const rawPct = Math.min(1, processedTime / renderDuration);
-                const visualPct = rawPct * maxVisualPct;
+                // Pausa para GC a cada 15 frames
+                if (i % 15 === 0) await new Promise(r => setTimeout(r, 0));
 
-                const currentFrame = Math.min(totalFrames, Math.floor(processedTime * 30));
+                let blob = await this.studio.playbackManager.renderFrameOffline(time, ctx, width, height);
+                if (!blob) continue;
+
+                const relativeIndex = frameBuffer.length; 
+                const frameName = `img_${relativeIndex.toString().padStart(3, '0')}.jpg`;
                 
-                this.updateProgress(
-                    visualPct, 
-                    `Frames: ${currentFrame} / ${totalFrames}`, 
-                    Math.max(0, maxEnd - current),
-                    (Date.now() - this.renderStartTime) / 1000
-                );
+                let buf = await blob.arrayBuffer();
+                await ffmpeg.writeFile(frameName, new Uint8Array(buf));
+                
+                // Limpeza JS
+                blob = null;
+                buf = null;
+                
+                frameBuffer.push(frameName);
+                this.framesProcessed++;
 
-                if (current >= maxEnd || !this.isRendering) {
-                    this._finishRender(checkInterval, mimeType, renderDuration);
-                }
-            }, 30);
+                // ATUALIZAÇÃO FASE 1 (0% a 80%)
+                const framePct = (this.framesProcessed / totalFrames) * 80;
+                this._updateProgress(framePct, `Processando frame ${i}/${totalFrames}`, null); // null = calcula auto
 
-        } catch (e) {
-            console.error(e);
-            alert("Erro ao renderizar: " + e.message);
-            this.cancelRendering();
-        }
-    }
+                // Processa Batch
+                if (frameBuffer.length >= BATCH_SIZE || i === totalFrames - 1) {
+                    if (frameBuffer.length === 0) continue;
 
-    async _finishRender(intervalId, recordedMimeType, duration) {
-        clearInterval(intervalId);
-        
-        this.studio.playbackManager.pause();
-        
-        if (this.recorder && this.recorder.state !== 'inactive') {
-            this.recorder.stop();
-        }
+                    const chunkName = `chunk_${videoChunks.length}.mp4`;
+                    
+                    await ffmpeg.exec([
+                        "-framerate", `${fps}`,
+                        "-start_number", "0",
+                        "-i", "img_%03d.jpg",
+                        "-frames:v", `${frameBuffer.length}`,
+                        "-c:v", "libx264",
+                        "-preset", "ultrafast",
+                        "-pix_fmt", "yuv420p",
+                        chunkName
+                    ]);
 
-        // Se for WebM (sem conversão), já pula para 100%
-        if (this.renderOptions.format !== 'mp4') {
-            this.updateProgress(1, "Finalizando...", 0, (Date.now() - this.renderStartTime)/1000);
-        }
+                    videoChunks.push(chunkName);
 
-        setTimeout(async () => {
-            let finalBlob = new Blob(this.chunks, { type: recordedMimeType });
-            let finalExt = 'webm';
-
-            const TRIM_START = 0.1;
-            const finalDuration = Math.max(0, duration - TRIM_START);
-
-            if (this.renderOptions.format === 'mp4') {
-                const conversionTicker = setInterval(() => {
-                    const overlay = document.getElementById('render-progress-overlay');
-                    if (overlay && !overlay.classList.contains('hidden')) {
-                        const elapsed = (Date.now() - this.renderStartTime) / 1000;
-                        const el = document.getElementById('render-timer-elapsed');
-                        if(el) el.innerText = this._fmt(elapsed);
+                    for (const f of frameBuffer) {
+                        try { await ffmpeg.deleteFile(f); } catch(e){}
                     }
-                }, 1000);
-
-                try {
-                    const elLog = document.getElementById('render-speed-text');
-                    if(elLog) elLog.innerText = "Refinando e Convertendo...";
-                    
-                    const onConvertProgress = (info) => {
-                        const startPct = 0.8; 
-                        const range = 0.19; // Vai até 99%
-                        const totalPct = startPct + (info.percent * range);
-                        
-                        let estimatedRem = 0;
-                        if (info.speed > 0) {
-                            estimatedRem = (duration - info.secondsProcessed) / info.speed;
-                        }
-
-                        this.updateProgress(
-                            totalPct,
-                            `Processando: ${info.speed.toFixed(2)}x`, 
-                            Math.max(0, estimatedRem),
-                            (Date.now() - this.renderStartTime) / 1000 
-                        );
-                    };
-
-                    const mp4Url = await this.studio.editor.transcoder.processVideo(
-                        finalBlob, "render", TRIM_START, finalDuration, 'mp4', {}, onConvertProgress
-                    );
-                    
-                    const res = await fetch(mp4Url);
-                    finalBlob = await res.blob();
-                    finalExt = 'mp4';
-                    
-                } catch (e) {
-                    console.error("Erro MP4:", e);
-                    alert("Conversão falhou. Salvando como WebM (Sem corte).");
-                } finally {
-                    clearInterval(conversionTicker);
+                    frameBuffer = [];
                 }
             }
 
-            // --- FINALIZAÇÃO ---
+            // 3. Concatenação (80% fixo)
+            this._updateProgress(80, "Unindo segmentos de vídeo...");
+            
+            const listName = "chunks.txt";
+            const listContent = videoChunks.map(c => `file '${c}'`).join('\n');
+            await ffmpeg.writeFile(listName, new TextEncoder().encode(listContent));
+
+            const videoOnlyName = "video_silent.mp4";
+            
+            await ffmpeg.exec([
+                "-f", "concat", "-safe", "0", "-i", listName, "-c", "copy", videoOnlyName
+            ]);
+
+            await this._cleanupFS(ffmpeg, [...videoChunks, listName]);
+            videoChunks = [];
+
+            // 4. Mixagem Final (80% -> 100%)
+            // Configura listener de log para progresso real do FFmpeg
+            logHandler = ({ message }) => {
+                // Parse do tempo: time=00:00:05.20
+                const timeMatch = typeof message === 'string' ? message.match(/time=\s*(\d{2}:\d{2}:\d{2}\.\d{2})/) : null;
+                // Parse da velocidade: speed=1.5x
+                const speedMatch = typeof message === 'string' ? message.match(/speed=\s*([\d.]+)x/) : null;
+
+                if (timeMatch) {
+                    const tStr = timeMatch[1];
+                    const [h, m, s] = tStr.split(':');
+                    const processedSeconds = (parseInt(h) * 3600) + (parseInt(m) * 60) + parseFloat(s);
+                    
+                    // Progresso dentro dos 20% finais
+                    const encodePct = Math.min(1, processedSeconds / duration);
+                    const globalPct = 80 + (encodePct * 20);
+                    
+                    let speedText = speedMatch ? `${speedMatch[1]}x (Encoding)` : "Encoding...";
+                    
+                    this._updateProgress(globalPct, "Finalizando (Encoding)...", speedText);
+                }
+            };
+            
+            ffmpeg.on("log", logHandler);
+
+            const outputName = `final.${options.format}`;
+            const outputArgs = [];
+            
+            if (options.format === 'webm') {
+                // VP8 para WebM
+                outputArgs.push("-c:v", "libvpx", "-b:v", "1M", "-crf", "10", "-c:a", "libvorbis");
+            } else { 
+                // MP4 Copy
+                outputArgs.push("-c:v", "copy", "-c:a", "aac");
+            }
+
+            await ffmpeg.exec([
+                "-i", videoOnlyName,
+                "-i", audioFilename,
+                "-map", "0:v:0", 
+                "-map", "1:a:0",
+                "-shortest",
+                ...outputArgs,
+                outputName
+            ]);
+
+            // Remove listener
+            ffmpeg.off("log", logHandler);
+            logHandler = null;
+
+            await this._cleanupFS(ffmpeg, [videoOnlyName, audioFilename]);
+
+            // 5. Resultado
+            const data = await ffmpeg.readFile(outputName);
+            const finalBlob = new Blob([data.buffer], { type: `video/${options.format}` });
+
+            try { await ffmpeg.deleteFile(outputName); } catch(e){}
+            
+            this.studio.project.currentTime = originalTime;
+            this.studio.playbackManager.syncPreview();
+
+            this._updateProgress(100, "Concluído!", "Finalizado");
+            
             this.studio.editor.videoBlob = finalBlob;
             
             if (typeof this.studio.editor._generateFileName === 'function') {
@@ -233,12 +264,12 @@ export class RenderManager {
                 this.studio.editor.fileName = `render_${Date.now()}`;
             }
 
-            this.studio.editor.currentExtension = finalExt; 
+            this.studio.editor.currentExtension = options.format; 
             const url = URL.createObjectURL(finalBlob);
             await this.studio.editor._loadVideo(url);
             
-            if (finalExt === 'mp4') {
-                const sig = `0.00_${finalDuration.toFixed(2)}_${finalBlob.size}`;
+            if (options.format === 'mp4') {
+                const sig = `0.00_${duration.toFixed(2)}_${finalBlob.size}`;
                 this.studio.editor.cachedMp4 = { blob: finalBlob, signature: sig };
             }
 
@@ -261,40 +292,115 @@ export class RenderManager {
             const btn = document.getElementById("btn-studio-render");
             if(btn) btn.disabled = false;
 
-        }, 500);
-    }
-    
-    updateProgress(percentage, infoText, remainingSeconds, elapsedSeconds) {
-        const overlay = document.getElementById('render-progress-overlay');
-        if (!this.isRendering || !overlay) return;
-
-        overlay.classList.remove('hidden');
-        const fill = overlay.querySelector('.vegas-progress-fill');
-        const textPerc = document.getElementById('render-percentage-text');
-        const textInfo = document.getElementById('render-speed-text');
-        const textLeft = document.getElementById('render-timer-left');
-        const textElapsed = document.getElementById('render-timer-elapsed');
-
-        if(fill) fill.style.width = `${percentage * 100}%`;
-        if(textPerc) textPerc.innerText = `${Math.round(percentage * 100)}%`;
-        if(textInfo) textInfo.innerText = infoText;
-        if(textLeft) textLeft.innerText = this._fmt(Math.max(0, remainingSeconds));
-        if(textElapsed) textElapsed.innerText = this._fmt(elapsedSeconds);
-    }
-    
-    _showProgressOverlay() {
-        const overlay = document.getElementById('render-progress-overlay');
-        if (overlay) {
-            overlay.classList.remove('hidden');
-            const fill = overlay.querySelector('.vegas-progress-fill');
-            if(fill) fill.style.width = '0%';
+        } catch (error) {
+            console.error("Render Error:", error);
+            if (logHandler) {
+                // Tenta limpar se der erro no meio
+                try { 
+                    const transcoder = this.studio.editor.transcoder;
+                    if(transcoder && transcoder.ffmpeg) transcoder.ffmpeg.off("log", logHandler);
+                } catch(e){}
+            }
             
-            // Limpa textos
-            document.getElementById('render-speed-text').innerText = "Iniciando...";
-            document.getElementById('render-timer-left').innerText = "--:--:--";
+            if (error.message !== "Renderização cancelada pelo usuário.") {
+                alert("Erro: " + error.message);
+            }
+        } finally {
+            this.isRendering = false;
+            if (btnAbort) btnAbort.onclick = null;
         }
-        const btn = document.getElementById("btn-studio-render");
-        if(btn) btn.disabled = true;
+    }
+
+    async _renderMasterAudio(duration) {
+        const sampleRate = 44100;
+        const safeDur = Math.max(0.1, duration);
+        const offlineCtx = new OfflineAudioContext(2, sampleRate * safeDur, sampleRate);
+        
+        for (const track of this.studio.project.tracks) {
+            if (track.muted) continue;
+            for (const clip of track.clips) {
+                const asset = this.studio.assetManager.getAsset(clip.assetId);
+                if (!asset) continue;
+
+                let buffer = asset.audioBuffer; 
+                if (!buffer && asset.sourceBlob) {
+                    try {
+                        const ab = await asset.sourceBlob.arrayBuffer();
+                        buffer = await offlineCtx.decodeAudioData(ab);
+                        asset.audioBuffer = buffer; 
+                    } catch(e) {}
+                }
+
+                if (buffer) {
+                    const src = offlineCtx.createBufferSource();
+                    src.buffer = buffer;
+                    const gain = offlineCtx.createGain();
+                    gain.gain.value = (clip.volume || 1) * (clip.level !== undefined ? clip.level : 1);
+                    src.connect(gain);
+                    gain.connect(offlineCtx.destination);
+                    try { src.start(clip.start, clip.offset, clip.duration); } catch(e){}
+                }
+            }
+        }
+        const rendered = await offlineCtx.startRendering();
+        return this._bufferToWave(rendered, rendered.length);
+    }
+
+    /**
+     * Atualiza a UI com cálculos de tempo baseados na porcentagem GLOBAL (0-100).
+     * @param {number} pct - Porcentagem Global (0 a 100)
+     * @param {string} statusText - Texto de status
+     * @param {string|null} speedOverride - Texto de velocidade opcional (para fase 2)
+     */
+    _updateProgress(pct, statusText, speedOverride = null) {
+        const overlay = document.getElementById('render-progress-overlay');
+        const elPercentage = document.getElementById('render-percentage-text');
+        const elElapsed = document.getElementById('render-timer-elapsed');
+        const elRemaining = document.getElementById('render-timer-left');
+        const elSpeed = document.getElementById('render-speed-text');
+        const elLog = document.getElementById('render-log-text');
+        
+        let elBar = null;
+        if(overlay) elBar = overlay.querySelector('.vegas-progress-fill');
+
+        // Clamp
+        pct = Math.max(0, Math.min(100, pct));
+
+        if(elBar) elBar.style.width = `${pct}%`;
+        if(elPercentage) elPercentage.innerText = `${Math.floor(pct)}%`;
+        if(elLog) elLog.innerText = statusText;
+
+        if (this.renderStartTime > 0) {
+            const now = Date.now();
+            const elapsedSeconds = (now - this.renderStartTime) / 1000;
+            
+            // Atualiza Tempo Decorrido
+            if (elElapsed) elElapsed.innerText = this._fmt(elapsedSeconds);
+
+            // Atualiza Tempo Restante (Estimativa Linear baseada no progresso global)
+            // Se pct < 1, evita divisão por zero ou números gigantes
+            if (pct > 1 && pct < 100) {
+                const totalEstimatedSeconds = (elapsedSeconds / pct) * 100;
+                const remainingSeconds = Math.max(0, totalEstimatedSeconds - elapsedSeconds);
+                if (elRemaining) elRemaining.innerText = `Faltam: ${this._fmt(remainingSeconds)}`;
+            } else if (pct >= 100) {
+                if (elRemaining) elRemaining.innerText = "Finalizado";
+            } else {
+                if (elRemaining) elRemaining.innerText = "Calculando...";
+            }
+
+            // Atualiza Velocidade
+            if (elSpeed) {
+                if (speedOverride) {
+                    elSpeed.innerText = speedOverride;
+                } else if (pct > 0 && pct <= 80) {
+                    // Fase 1: Baseada em FPS
+                    const fps = this.framesProcessed / elapsedSeconds;
+                    const speedX = fps / 30; // Assumindo base 30fps
+                    elSpeed.innerText = `${speedX.toFixed(1)}x (${Math.floor(fps)} fps)`;
+                }
+            }
+        }
     }
 
     _fmt(s) {
@@ -302,24 +408,48 @@ export class RenderManager {
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);
         const sec = Math.floor(s % 60);
-        return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     }
-    
-    async cancelRendering() {
-        if (this.isRendering) {
-            if(confirm("Deseja cancelar?")) {
-                this.isRendering = false;
-                await this.studio.editor.transcoder.cancelJob();
-                
-                this.studio.playbackManager.stop();
-                if(this.recorder && this.recorder.state !== 'inactive') this.recorder.stop();
-                if(this.studio.playbackManager.toggleMonitorMute) this.studio.playbackManager.toggleMonitorMute(false);
-                
-                const overlay = document.getElementById('render-progress-overlay');
-                if(overlay) overlay.classList.add('hidden');
-                const btn = document.getElementById("btn-studio-render");
-                if(btn) btn.disabled = false;
-            }
+
+    async _fetchFile(data) {
+        if (data instanceof Blob) return new Uint8Array(await data.arrayBuffer());
+        return data;
+    }
+
+    async _cleanupFS(ffmpeg, files) {
+        for (const f of files) {
+            try { await ffmpeg.deleteFile(f); } catch(e){}
         }
+    }
+
+    _bufferToWave(abuffer, len) {
+        let numOfChan = abuffer.numberOfChannels,
+            length = len * numOfChan * 2 + 44,
+            buffer = new ArrayBuffer(length),
+            view = new DataView(buffer),
+            channels = [], i, sample,
+            offset = 0, pos = 0;
+
+        setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157); 
+        setUint32(0x20746d66); setUint32(16); setUint16(1); setUint16(numOfChan);
+        setUint32(abuffer.sampleRate); setUint32(abuffer.sampleRate * 2 * numOfChan);
+        setUint16(numOfChan * 2); setUint16(16); setUint32(0x61746164); 
+        setUint32(length - pos - 4);
+
+        for(i = 0; i < numOfChan; i++) channels.push(abuffer.getChannelData(i));
+
+        while(pos < len) {
+            for(i = 0; i < numOfChan; i++) {
+                sample = Math.max(-1, Math.min(1, channels[i][pos]));
+                sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0;
+                view.setInt16(44 + offset, sample, true);
+                offset += 2;
+            }
+            pos++;
+        }
+        return new Blob([buffer], {type: "audio/wav"});
+
+        function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
+        function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
     }
 }

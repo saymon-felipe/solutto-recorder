@@ -38,35 +38,37 @@ export class TranscodeService {
         }
     }
 
+    async load() {
+        return this.init();
+    }
+
     /**
      * Inicializa a instância do FFmpeg e carrega os binários WASM.
      * @returns {Promise<void>}
      */
     async init() {
-        if (this.isLoaded) return;
+        if (this.isLoaded && this.ffmpeg) return;
 
         const scope = window.FFmpegWASM || window.FFmpeg;
         if (!scope) throw new Error("Biblioteca FFmpeg não encontrada no escopo global.");
 
         const { FFmpeg } = scope;
-        const mem = this._calcMemory();
-        const byteSize = mem.pages * 65536;
 
         this.ffmpeg = new FFmpeg({
             coreURL: this.coreUrl,
             wasmURL: this.wasmUrl,
-            workerURL: this.workerUrl,
-            wasmOptions: {
-                initialMemory: byteSize,
-                maximumMemory: byteSize,
-            }
+            workerURL: this.workerUrl
         });
 
-        // Configuração de logs internos
         this.ffmpeg.on("log", (evt) => {
-            const msg = typeof evt === "string" ? evt : evt && evt.message;
-            if (typeof msg === "string") {
-                console.log("[FFmpeg]:", msg); 
+            // Garante que msg seja string segura
+            const msg = (typeof evt === "string") ? evt : (evt && evt.message);
+            
+            // Verifica explicitamente se msg existe antes de usar startsWith
+            if (msg && typeof msg === "string") {
+                if (!msg.startsWith('Aborted')) {
+                    console.log("[FFmpeg]:", msg);
+                }
             }
         });
 
@@ -79,6 +81,7 @@ export class TranscodeService {
             this.isLoaded = true;
         } catch (error) {
             console.error("Solutto Transcoder: Erro crítico na inicialização.", error);
+            this.isLoaded = false;
             throw error;
         }
     }

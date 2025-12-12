@@ -1047,4 +1047,153 @@ export class PlaybackManager {
         return track.clips.filter(c => c.type !== 'subtitle' && time >= c.start && time < (c.start + c.duration))
                           .sort((a, b) => a.start - b.start); 
     }
+
+    /**
+     * Renderiza o frame exato no canvas fornecido e retorna um Blob.
+     * Inclui vídeo, imagem e AGORA AS LEGENDAS.
+     * @param {number} time - Tempo do projeto
+     * @param {CanvasRenderingContext2D} ctx - Contexto onde desenhar
+     * @param {number} w - Largura
+     * @param {number} h - Altura
+     */
+    async renderFrameOffline(time, ctx, w, h) {
+        this.studio.project.currentTime = time;
+
+        // 2. Limpa o Canvas
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, w, h);
+
+        // 3. Obtém clips de VÍDEO visíveis
+        const visibleClips = [];
+        // Tracks reversas para desenhar na ordem correta de empilhamento (Se track 0 for topo, inverta conforme sua lógica visual)
+        const tracks = [...this.studio.project.tracks].reverse();
+        
+        tracks.forEach(track => {
+            if (track.muted || track.type !== 'video') return;
+            const clips = this._getClipsAtTime(track.id, time);
+            if (clips.length > 0) visibleClips.push({ clip: clips[0], track });
+        });
+
+        // 4. PREPARAÇÃO DA MÍDIA (Wait for Seek)
+        await this._waitForMediaReady(visibleClips, time);
+
+        // 5. DESENHO DE VÍDEO/IMAGEM
+        visibleClips.forEach(({ clip, track }) => {
+            const asset = this.studio.assetManager.getAsset(clip.assetId);
+            if (!asset) return;
+
+            let layer = this.trackLayers.get(track.id);
+            if (!layer) {
+                layer = this._createTrackLayer(track);
+                this.trackLayers.set(track.id, layer);
+            }
+
+            const drawable = (asset.type === 'image') ? layer.imgEl : layer.videoEl;
+
+            // Opacidade
+            const alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
+            ctx.globalAlpha = alpha;
+
+            // Transformações (Pan/Crop/Zoom)
+            ctx.save();
+            const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
+            
+            ctx.translate(w/2, h/2);
+            ctx.translate(t.x, t.y);
+            ctx.rotate(t.rotation * Math.PI / 180);
+            ctx.scale(t.width / 100, t.height / 100);
+
+            const dw = drawable.videoWidth || drawable.naturalWidth || w;
+            const dh = drawable.videoHeight || drawable.naturalHeight || h;
+            
+            if (dw > 0 && dh > 0) {
+                const ratioSrc = dw / dh;
+                const ratioDest = w / h;
+                let renderW, renderH;
+
+                if (ratioSrc > ratioDest) {
+                    renderW = w; 
+                    renderH = w / ratioSrc;
+                } else {
+                    renderH = h;
+                    renderW = h * ratioSrc;
+                }
+                
+                ctx.drawImage(drawable, -renderW/2, -renderH/2, renderW, renderH);
+            }
+
+            ctx.restore();
+        });
+
+        // Itera sobre as tracks originais (Track de cima desenha por último)
+        this.studio.project.tracks.forEach(track => {
+            if (track.muted) return;
+            
+            // Filtra apenas clips de legenda ativos neste tempo
+            const activeSubClips = track.clips.filter(c => 
+                c.type === 'subtitle' && 
+                time >= c.start && 
+                time < (c.start + c.duration)
+            );
+
+            activeSubClips.forEach(clip => {
+                // Chama a função de desenho que já existe no PlaybackManager
+                this._renderSubtitleOverlay(ctx, clip, time, w, h);
+            });
+        });
+
+        ctx.globalAlpha = 1;
+
+        // Retorna blob JPEG
+        return new Promise(resolve => {
+            ctx.canvas.toBlob(resolve, 'image/jpeg', 0.90);
+        });
+    }
+
+    async _waitForMediaReady(visibleClips, globalTime) {
+        const promises = [];
+
+        visibleClips.forEach(({ clip, track }) => {
+            const layer = this.trackLayers.get(track.id);
+            if (!layer) return;
+
+            const asset = this.studio.assetManager.getAsset(clip.assetId);
+            if (!asset || asset.type === 'image') return; // Imagens geralmente já estão carregadas
+
+            const video = layer.videoEl;
+            
+            // Garante source
+            if (video.src !== asset.url) {
+                video.src = asset.url;
+            }
+
+            const videoTime = clip.offset + (globalTime - clip.start);
+            
+            // Se a diferença for grande ou o vídeo não estiver pronto
+            const needsSeek = Math.abs(video.currentTime - videoTime) > 0.05 || video.readyState < 2;
+
+            if (needsSeek) {
+                video.currentTime = videoTime;
+                
+                const p = new Promise(resolve => {
+                    if (video.readyState >= 3) { // HAVE_FUTURE_DATA
+                        resolve();
+                        return;
+                    }
+                    
+                    const onSeeked = () => {
+                        video.removeEventListener('seeked', onSeeked);
+                        resolve();
+                    };
+                    // Timeout de segurança (se travar, libera em 1s)
+                    setTimeout(resolve, 1000); 
+                    video.addEventListener('seeked', onSeeked);
+                });
+                promises.push(p);
+            }
+        });
+
+        await Promise.all(promises);
+    }
 }

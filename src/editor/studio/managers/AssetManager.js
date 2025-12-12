@@ -339,4 +339,8 @@ export class AssetManager {
             list.appendChild(item);
         });
     }
+
+    getAsset(id) {
+        return this.studio.project.assets.find(a => a.id === id);
+    }
 }
