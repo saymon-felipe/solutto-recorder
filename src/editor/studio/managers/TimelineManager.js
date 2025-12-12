@@ -2362,7 +2362,6 @@ export class TimelineManager {
         // 1. Identificação de Alvos (Targets)
         const targets = [];
         
-        // Helper para adicionar targets e persistir a referência da TRACK (importante para saber se é track de áudio)
         const addTarget = (c, element, t) => {
             if (!targets.some(existing => existing.clip.id === c.id)) {
                 targets.push({ clip: c, el: element, track: t });
@@ -2373,7 +2372,6 @@ export class TimelineManager {
             this.studio.project.tracks.forEach(track => {
                 track.clips.forEach(c => {
                     if (c.groupId === clip.groupId) {
-                        // Aplica apenas a clipes alinhados verticalmente
                         if (Math.abs(c.start - initialStart) < 0.01 && Math.abs(c.duration - initialDuration) < 0.01) {
                             const domEl = c.id === clip.id ? el : this._findDomElement(c.id);
                             addTarget(c, domEl, track);
@@ -2383,7 +2381,6 @@ export class TimelineManager {
             });
         }
         
-        // Garante que o clipe clicado está na lista
         if (!targets.some(t => t.clip.id === clip.id)) {
             const track = this.studio.project.tracks.find(t => t.clips.some(c => c.id === clip.id));
             addTarget(clip, el, track);
@@ -2430,7 +2427,6 @@ export class TimelineManager {
                 // --- LÓGICA ESQUERDA ---
                 let rawNewStart = initialStart + deltaSec;
                 
-                // Snap Magnético
                 let bestSnap = null;
                 let minDist = Infinity;
                 
@@ -2452,12 +2448,10 @@ export class TimelineManager {
 
                 const effectiveDelta = rawNewStart - initialStart;
 
-                // Restrição de Duração Mínima
                 if ((initialDuration - effectiveDelta) < (1/30)) {
                     rawNewStart = initialStart + initialDuration - (1/30);
                 }
 
-                // Restrição de Início de Arquivo
                 let proposedOffset = initialOffset + (rawNewStart - initialStart);
                 if (proposedOffset < 0) {
                     proposedOffset = 0;
@@ -2498,16 +2492,26 @@ export class TimelineManager {
             targets.forEach(target => {
                 const tClip = target.clip;
                 const tEl = target.el;
-                const tTrack = target.track; // Recupera a track correta
+                const tTrack = target.track;
 
                 tClip.start = finalStart;
                 tClip.duration = finalDuration;
                 tClip.offset = finalOffset;
 
-                // Ajuste de Fades (segurança para não estourar a duração)
                 if ((tClip.fadeIn + tClip.fadeOut) > finalDuration) {
                      if (tClip.fadeIn > finalDuration) tClip.fadeIn = finalDuration;
                      tClip.fadeOut = Math.max(0, finalDuration - tClip.fadeIn);
+                }
+
+                // Estica o tempo do último segmento de texto para acompanhar o clipe
+                if (tClip.type === 'subtitle' && tClip.transcriptionData && tClip.transcriptionData.length > 0) {
+                    const lastSeg = tClip.transcriptionData[tClip.transcriptionData.length - 1];
+                    const newEndTime = tClip.duration + tClip.offset;
+                    
+                    // Se estamos aumentando para a direita, estica o texto junto
+                    if (!isLeft && newEndTime > lastSeg.end) {
+                        lastSeg.end = newEndTime;
+                    }
                 }
 
                 if (tEl) {
@@ -2515,44 +2519,51 @@ export class TimelineManager {
                     tEl.style.width = (finalDuration * zoom) + "px";
                     this._updateFadeVisuals(tClip, tEl);
 
-                    // ATUALIZAÇÃO VISUAL INTERNA (Waveforms e Loops)
-                    const tAsset = this.studio.project.assets.find(a => a.id === tClip.assetId);
+                    // Busca o asset real
+                    let tAsset = this.studio.project.assets.find(a => a.id === tClip.assetId);
                     
+                    if (!tAsset && tClip.type === 'subtitle') {
+                        tAsset = { 
+                            id: 'virtual_subtitle_asset',
+                            type: 'subtitle',
+                            // Define duração base igual à duração atual para evitar loop markers
+                            baseDuration: tClip.duration + tClip.offset 
+                        };
+                    }
+
                     if (tAsset) {
-                        // Determina se é visualização de áudio (Asset Áudio OU Track Áudio)
                         const isAudioTrack = tTrack && tTrack.type === 'audio';
 
-                        // 1. Loop Markers
+                        // 1. Loop Markers (Só desenha se o clipe for maior que o asset original)
                         if (tAsset.baseDuration > 0) {
                             const baseDur = tAsset.baseDuration;
                             
-                            // Remove marcadores antigos (limpeza)
                             const oldMarkers = tEl.querySelectorAll('.loop-marker');
                             for(let m of oldMarkers) m.remove();
                             
-                            // Calcula novos loops baseados na nova duração
-                            const totalTime = tClip.duration + tClip.offset;
-                            const loops = Math.floor(totalTime / baseDur);
-                            
-                            for(let i=1; i<=loops; i++) {
-                                const timePoint = i * baseDur;
-                                const relativePixel = (timePoint - tClip.offset) * zoom; // Usa 'zoom' corrigido
+                            // Tolerância pequena para float
+                            if (baseDur < (tClip.duration + tClip.offset - 0.01)) {
+                                const totalTime = tClip.duration + tClip.offset;
+                                const loops = Math.floor(totalTime / baseDur);
+                                
+                                for(let i=1; i<=loops; i++) {
+                                    const timePoint = i * baseDur;
+                                    const relativePixel = (timePoint - tClip.offset) * zoom;
 
-                                if (relativePixel > 0 && relativePixel < (tClip.duration * zoom)) {
-                                    const m = document.createElement("div");
-                                    m.className = "loop-marker loop-vinco";
-                                    m.style.left = relativePixel + "px";
-                                    m.style.cssText = `position: absolute; top: 0; bottom: 0; width: 1px; background-color: rgba(255, 255, 255, 0.5); border-left: 2px dashed rgba(0, 0, 0, 0.5); z-index: 10; pointer-events: none;`;
-                                    tEl.appendChild(m);
+                                    if (relativePixel > 0 && relativePixel < (tClip.duration * zoom)) {
+                                        const m = document.createElement("div");
+                                        m.className = "loop-marker loop-vinco";
+                                        m.style.left = relativePixel + "px";
+                                        m.style.cssText = `position: absolute; top: 0; bottom: 0; width: 1px; background-color: rgba(255, 255, 255, 0.5); border-left: 2px dashed rgba(0, 0, 0, 0.5); z-index: 10; pointer-events: none;`;
+                                        tEl.appendChild(m);
+                                    }
                                 }
                             }
                         }
 
                         // 2. Waveform vs Thumbnails
-                        
                         if (tAsset.type === 'audio' || isAudioTrack) {
                              const repeater = tEl.querySelector('.waveform-repeater');
-                             
                              if (repeater) {
                                  const offsetX = tClip.offset * zoom;
                                  repeater.style.transform = `translateX(-${offsetX}px)`;
@@ -2563,7 +2574,6 @@ export class TimelineManager {
                                  const currentLoops = repeater.children.length;
                                  const baseWaveWidth = baseDur * zoom;
                                  
-                                 // Adiciona clones se necessário (para cobrir a nova duração)
                                  if (requiredLoops > currentLoops && tAsset._waveformBaseCanvas) {
                                      for(let k=currentLoops; k<requiredLoops; k++) {
                                          const clone = document.createElement("canvas");
