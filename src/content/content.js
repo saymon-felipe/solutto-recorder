@@ -186,64 +186,61 @@
         
         let localMicId = null;
         let localCamId = null;
+        
+        if (options.microfoneLabel) {
+            const foundId = await findDeviceIdByLabel('audio', options.microfoneLabel);
+            localMicId = foundId || options.microfoneId;
+        } else {
+            localMicId = options.microfoneId;
+        }
 
-        // Resolve IDs de dispositivos se labels foram fornecidos
-        if (options.microfoneLabel) localMicId = await findDeviceIdByLabel('audio', options.microfoneLabel);
-        if (options.webcamLabel) localCamId = await findDeviceIdByLabel('video', options.webcamLabel);
+        if (options.webcamLabel) {
+            const foundId = await findDeviceIdByLabel('video', options.webcamLabel);
+            localCamId = foundId || options.webcamId;
+        } else {
+            localCamId = options.webcamId;
+        }
 
         // --- CONSTRAINTS DE ALTA QUALIDADE ---
         const highQualityConstraints = {
             audio: {
-                echoCancellation: false, // Desliga para som de sistema fiel
+                echoCancellation: false, 
                 noiseSuppression: false,
                 autoGainControl: false,
                 sampleRate: 48000
             },
             video: {
-                // 'ideal' solicita a melhor qualidade possível sem quebrar se o hardware não suportar
                 width: { ideal: 1920, max: 3840 },
                 height: { ideal: 1080, max: 2160 },
                 frameRate: { ideal: 30, max: 30 },
-                resizeMode: "none" // Impede downscaling do navegador
+                resizeMode: "none" 
             }
         };
 
         // --- MODO: ABA (TAB) ---
         if (options.type === C.SOURCE_TYPE.TAB) {
-            // Abre aba auxiliar invisível para manter áudio ativo
             await chrome.runtime.sendMessage({ action: C.ACTIONS.OPEN_PLAYBACK_TAB, tabId: null });
-            
-            // Solicita ID da stream ao background (chrome.tabCapture)
             const streamId = await chrome.runtime.sendMessage({ action: "requestStream", tabId: null });
             if (!streamId) throw new Error("Falha ao obter ID da aba.");
 
             mainStream = await navigator.mediaDevices.getUserMedia({
                 audio: { 
-                    mandatory: { 
-                        chromeMediaSource: "tab", 
-                        chromeMediaSourceId: streamId 
-                    } 
+                    mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } 
                 },
                 video: { 
                     mandatory: { 
                         chromeMediaSource: "tab", 
                         chromeMediaSourceId: streamId, 
-                        maxWidth: 3840, 
-                        maxHeight: 2160, 
-                        maxFrameRate: 30 
+                        maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30 
                     } 
                 }
             });
 
         // --- MODO: TELA INTEIRA (SCREEN) ---
         } else if (options.type === C.SOURCE_TYPE.SCREEN) {
-            // getDisplayMedia não suporta 'min', usamos apenas 'ideal' nas constraints
             mainStream = await navigator.mediaDevices.getDisplayMedia({
                 audio: highQualityConstraints.audio,
-                video: { 
-                    ...highQualityConstraints.video,
-                    displaySurface: "monitor"
-                }
+                video: { ...highQualityConstraints.video, displaySurface: "monitor" }
             });
 
         // --- MODO: SOMENTE WEBCAM ---
@@ -264,14 +261,13 @@
                 console.warn("[Content] Fallback de webcam para padrão.");
                 mainStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             }
-            return { mainStream, secondaryStream: null }; // Sem secundária neste modo
+            return { mainStream, secondaryStream: null }; 
         }
 
         // --- STREAM SECUNDÁRIA (MICROFONE) ---
-        if (options.microfoneLabel || localMicId) {
+        if (localMicId || options.microfoneLabel) {
             const micConstraints = {
                 deviceId: localMicId ? { exact: localMicId } : undefined,
-                // Para voz, mantemos processamento para evitar feedback/eco
                 echoCancellation: true, 
                 noiseSuppression: true,
                 sampleRate: 48000
@@ -280,6 +276,7 @@
             try {
                 secondaryStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints });
             } catch (e) {
+                // Fallback silencioso se o ID específico falhar (usa o padrão)
                 try { secondaryStream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (err) {}
             }
         }

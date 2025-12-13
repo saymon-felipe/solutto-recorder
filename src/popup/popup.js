@@ -172,32 +172,35 @@ function setupListeners() {
     // Lógica do Slider de Fontes
     ui.sources.forEach((src, index) => {
         src.addEventListener('click', () => {
-            // Remove seleção visual antiga
             ui.sources.forEach(s => s.classList.remove('selected'));
-            
-            // Adiciona na nova
             src.classList.add('selected');
-            
-            // Atualiza o índice no pai para o CSS mover o slider
             ui.sliderContainer.setAttribute('data-selected-index', index);
-
-            // Salva preferência
             savePreference(STORAGE_KEYS.SOURCE, src.dataset.source);
             
-            // Se selecionar webcam, garante que uma câmera esteja selecionada no dropdown
             if (src.dataset.source === 'webcam') {
                 ensureCameraSelected();
             }
         });
     });
 
-    // Listeners de mudança para salvar preferências automaticamente
-    ui.cameraSelect.addEventListener('change', (e) => savePreference(STORAGE_KEYS.CAMERA, e.target.value));
-    ui.micSelect.addEventListener('change', (e) => savePreference(STORAGE_KEYS.MIC, e.target.value));
+    // [CORREÇÃO] Salva o LABEL (texto) em vez do ID, pois o ID muda
+    ui.cameraSelect.addEventListener('change', (e) => {
+        const selectedOption = e.target.options[e.target.selectedIndex];
+        if (selectedOption) {
+            savePreference(STORAGE_KEYS.CAMERA, selectedOption.text);
+        }
+    });
+
+    ui.micSelect.addEventListener('change', (e) => {
+        const selectedOption = e.target.options[e.target.selectedIndex];
+        if (selectedOption) {
+            savePreference(STORAGE_KEYS.MIC, selectedOption.text);
+        }
+    });
+
     ui.timerSelect.addEventListener('change', (e) => savePreference(STORAGE_KEYS.TIMER, e.target.value));
     ui.useTimerCheckbox.addEventListener('change', (e) => savePreference(STORAGE_KEYS.USE_TIMER, e.target.checked));
 
-    // Botões de ação
     ui.startBtn.addEventListener('click', handleStart);
     ui.closeBtn.addEventListener('click', closePopup);
 
@@ -253,13 +256,23 @@ async function loadPreferences() {
 
 async function restoreDeviceSelection() {
     const data = await chrome.storage.local.get([STORAGE_KEYS.CAMERA, STORAGE_KEYS.MIC]);
-    if (data[STORAGE_KEYS.CAMERA]) setSelectValue(ui.cameraSelect, data[STORAGE_KEYS.CAMERA]);
-    if (data[STORAGE_KEYS.MIC]) setSelectValue(ui.micSelect, data[STORAGE_KEYS.MIC]);
+    
+    if (data[STORAGE_KEYS.CAMERA]) {
+        setSelectByLabel(ui.cameraSelect, data[STORAGE_KEYS.CAMERA]);
+    }
+    
+    if (data[STORAGE_KEYS.MIC]) {
+        setSelectByLabel(ui.micSelect, data[STORAGE_KEYS.MIC]);
+    }
 }
 
-function setSelectValue(select, value) {
-    const exists = Array.from(select.options).some(o => o.value === value);
-    if (exists) select.value = value;
+function setSelectByLabel(select, label) {
+    const options = Array.from(select.options);
+    const matchingOption = options.find(opt => opt.text === label);
+    
+    if (matchingOption) {
+        select.value = matchingOption.value; // Define o valor para o ID atual do dispositivo
+    }
 }
 
 function savePreference(key, value) { chrome.storage.local.set({ [key]: value }); }
