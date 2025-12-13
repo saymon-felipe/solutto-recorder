@@ -70,10 +70,49 @@ export class UIManager {
 
                 /* SUBTITLE MODAL ESPECÍFICO */
                 #modal-subtitle-settings {
-                    min-width: 400px;
-                    min-height: 500px;
-                    width: 450px;
-                    height: 600px;
+                    min-width: 500px; 
+                    min-height: 650px; 
+                    width: 550px;
+                }
+
+                .sub-style-grid {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr 1fr 1fr;
+                    gap: 10px;
+                    margin-bottom: 15px;
+                }
+
+                .sub-style-btn {
+                    background: #222;
+                    border: 2px solid #444;
+                    border-radius: 6px;
+                    padding: 10px 5px;
+                    cursor: pointer;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 5px;
+                    transition: all 0.2s;
+                }
+
+                .sub-style-btn:hover { background: #333; border-color: #666; }
+                .sub-style-btn.selected { 
+                    background: #1e1e1e; 
+                    border-color: #0078d7; 
+                    box-shadow: 0 0 10px rgba(0, 120, 215, 0.3);
+                }
+
+                .sub-style-preview {
+                    width: 100%;
+                    height: 30px;
+                    background: #000;
+                    border-radius: 4px;
+                    display: flex; 
+                    align-items: center; 
+                    justify-content: center; 
+                    font-size: 8px;
+                    position: relative;
+                    overflow: hidden;
                 }
                 
                 /* --- STATS GRID (RENDER) --- */
@@ -581,68 +620,98 @@ export class UIManager {
 
             <div id="modal-subtitle-settings" class="studio-floating-window hidden" style="top: 50%; left: 50%;">
                 <div class="vegas-header" id="sub-header" style="cursor: move; padding: 10px 15px; background: #333; border-bottom: 1px solid #111; flex-shrink: 0;">
-                    <span style="font-weight:600; color:#eee;"><i class="fa-solid fa-closed-captioning"></i> &nbsp;Configurar Legendas</span>
+                    <span style="font-weight:600; color:#eee;"><i class="fa-solid fa-closed-captioning"></i> &nbsp;Editor de Legendas</span>
                     <button id="btn-sub-close" style="background:transparent;border:none;color:#aaa;cursor:pointer;font-size:14px;"><i class="fa-solid fa-times"></i></button>
                 </div>
-                <div class="vegas-body">
-                    <div class="subtitle-preview-box">
-                        <span id="sub-preview-target" class="subtitle-preview-text">Exemplo de Texto</span>
+                <div class="vegas-body" style="padding: 20px; overflow-y: auto;">
+                    
+                    <label style="display:block;margin-bottom:8px;font-size:11px;color:#aaa; font-weight:bold;">ESTILO VISUAL</label>
+                    <div class="sub-style-grid">
+                        <div class="sub-style-btn" data-style="classic" title="Texto Simples">
+                            <div class="sub-style-preview" style="color:white;">Texto</div>
+                            <span style="font-size:10px; color:#ccc;">Clássico</span>
+                        </div>
+                        <div class="sub-style-btn" data-style="karaoke" title="Karaoke (Cor)">
+                            <div class="sub-style-preview" style="color:white;">Tex<span style="color:yellow">to</span></div>
+                            <span style="font-size:10px; color:#ccc;">Karaoke</span>
+                        </div>
+                        <div class="sub-style-btn" data-style="box" title="Fundo Box">
+                            <div class="sub-style-preview" style="background:rgba(0,0,0,0.7); color:white; border-radius:4px;">
+                                Tex<span style="color:yellow">to</span>
+                            </div>
+                            <span style="font-size:10px; color:#ccc;">Box Fundo</span>
+                        </div>
+                        <div class="sub-style-btn" data-style="word-pill" title="Destaque Dinâmico">
+                            <div class="sub-style-preview" style="color:white;">
+                                Tex<span style="background:white; color:black; padding:0 2px; border-radius:4px;">to</span>
+                            </div>
+                            <span style="font-size:10px; color:#ccc;">Dinâmico</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display:block;margin-bottom:5px;font-size:11px;color:#aaa;">CONTEÚDO</label>
+                        <textarea id="sub-text-edit" rows="3" style="width:100%; padding:8px; background:#111; border:1px solid #444; color:white; resize:vertical; font-family:sans-serif; border-radius:4px;"></textarea>
+                    </div>
+
+                    <div class="subtitle-preview-box" style="margin-bottom: 20px; background: #111; border: 1px solid #333; padding: 20px; text-align: center; border-radius:4px; min-height:60px; display:flex; align-items:center; justify-content:center;">
+                        <span id="sub-preview-target" class="subtitle-preview-text">Preview</span>
                     </div>
                     
-                    <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr;">
-                        <div class="input-group" style="display:block; margin-bottom:0;">
-                            <label style="display:block;margin-bottom:5px;">Fonte</label>
-                            <select id="sub-font-family" style="width:100%; padding:5px; background:#222; border:1px solid #444; color:white;">
+                    <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr; gap:15px; background:transparent; border:none; padding:0;">
+                        <div class="input-group" style="margin:0;">
+                            <label style="font-size:11px;color:#aaa;">Fonte</label>
+                            <select id="sub-font-family" style="width:100%; padding:8px; background:#222; border:1px solid #444; color:white; border-radius:4px;">
                                 <option value="Arial">Arial</option>
                                 <option value="'Segoe UI'">Segoe UI</option>
                                 <option value="'Courier New'">Courier New</option>
                                 <option value="Impact">Impact</option>
                             </select>
                         </div>
-                        <div class="input-group" style="display:block; margin-bottom:0;">
-                            <label style="display:block;margin-bottom:5px;">Tamanho (px)</label>
-                            <input type="number" id="sub-font-size" value="30" style="width:100%; padding:5px; background:#222; border:1px solid #444; color:white;">
+                        <div class="input-group" style="margin:0;">
+                            <label style="font-size:11px;color:#aaa;">Tamanho (px)</label>
+                            <input type="number" id="sub-font-size" value="30" style="width:100%; padding:8px; background:#222; border:1px solid #444; color:white; border-radius:4px;">
                         </div>
                     </div>
 
-                    <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
-                        <div class="input-group" style="display:block; margin-bottom:0;">
-                            <label style="display:block;margin-bottom:5px;">Cor do Texto</label>
-                            <input type="color" id="sub-color" value="#ffffff" style="width:100%; height:30px; border:none;">
+                    <div class="vegas-stats-grid" style="grid-template-columns: 1fr 1fr 1fr; gap:15px; background:transparent; border:none; padding:0; margin-top:15px;">
+                        <div class="input-group" style="margin:0;">
+                            <label style="font-size:11px;color:#aaa;">Texto</label>
+                            <input type="color" id="sub-color" value="#ffffff" style="width:100%; height:35px; border:none; cursor:pointer; background:none;">
                         </div>
-                        <div class="input-group" style="display:block; margin-bottom:0;">
-                            <label style="display:block;margin-bottom:5px;">Cor do Fundo</label>
-                            <input type="color" id="sub-bg-color" value="#000000" style="width:100%; height:30px; border:none;">
+                        <div class="input-group" style="margin:0;">
+                            <label style="font-size:11px;color:#aaa;">Destaque</label>
+                            <input type="color" id="sub-highlight" value="#ffff00" style="width:100%; height:35px; border:none; cursor:pointer; background:none;">
+                        </div>
+                        <div class="input-group" style="margin:0;">
+                            <label style="font-size:11px;color:#aaa;">Fundo</label>
+                            <input type="color" id="sub-bg-color" value="#000000" style="width:100%; height:35px; border:none; cursor:pointer; background:none;">
                         </div>
                     </div>
 
-                    <div style="margin-top:10px; display:flex; gap:10px;">
-                        <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
-                            <input type="checkbox" id="sub-bold"> Negrito
+                    <div style="margin-top:15px; display:flex; gap:20px;">
+                        <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; color:#ccc;">
+                            <input type="checkbox" id="sub-bold"> <strong>Negrito</strong>
                         </label>
-                        <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
-                            <input type="checkbox" id="sub-italic"> Itálico
+                        <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; color:#ccc;">
+                            <input type="checkbox" id="sub-italic"> <em>Itálico</em>
                         </label>
                     </div>
 
-                    <div style="background: #252526; padding: 10px; border-radius: 4px; margin-top: 15px; border: 1px solid #3e3e42;">
-                        <div style="font-size: 11px; color: #aaa; margin-bottom: 10px;">
-                            <i class="fa-solid fa-microphone-lines"></i>&nbsp; A transcrição utiliza a reprodução do vídeo.
-                        </div>
-                        <button id="btn-sub-transcribe" class="studio-btn" style="width: 100%; justify-content: center; background: #2e7d32; border-color: #1b5e20;">
-                            <i class="fa-solid fa-play"></i>&nbsp; Iniciar Transcrição Automática
+                    <div style="background: #252526; padding: 10px; border-radius: 4px; margin-top: 20px; border: 1px solid #3e3e42;">
+                        <button id="btn-sub-transcribe" class="studio-btn" style="width: 100%; justify-content: center; background: #333; border-color: #555; font-size: 11px;">
+                            <i class="fa-solid fa-rotate"></i>&nbsp; Re-Transcrever Áudio
                         </button>
                         <div id="sub-transcribe-progress" style="display:none; margin-top:5px;">
                             <div style="height:4px; background:#333; border-radius:2px; overflow:hidden;">
-                                <div id="sub-transcribe-bar" style="width:0%; height:100%; background:#4caf50; transition: width 0.2s;"></div>
+                                <div id="sub-transcribe-bar" style="width:0%; height:100%; background:#4caf50;"></div>
                             </div>
-                            <div style="text-align:center; font-size:10px; color:#888; margin-top:3px;">Processando áudio...</div>
                         </div>
                     </div>
 
-                    <div class="modal-actions" style="margin-top:15px; padding-top:10px; border-top:1px solid #333;">
-                        <button class="studio-btn" id="btn-sub-cancel">Fechar</button>
-                        <button class="studio-btn primary" id="btn-sub-confirm">Salvar Estilo</button>
+                    <div class="modal-actions" style="margin-top:20px; padding-top:15px; border-top:1px solid #333; display: flex; justify-content: flex-end; gap: 10px;">
+                        <button class="studio-btn" id="btn-sub-cancel">Cancelar</button>
+                        <button class="studio-btn primary" id="btn-sub-confirm">Salvar Alterações</button>
                     </div>
                 </div>
             </div>
@@ -1461,106 +1530,254 @@ export class UIManager {
         const modal = document.getElementById('modal-subtitle-settings');
         const preview = document.getElementById('sub-preview-target');
         
-        // Centraliza
-        if (modal && (!modal.style.top || modal.style.top === "50%")) {
-            const rect = modal.getBoundingClientRect();
-            modal.style.top = `${(window.innerHeight - 600)/2}px`;
-            modal.style.left = `${(window.innerWidth - 450)/2}px`;
-            modal.style.transform = "none";
+        if (!modal) return;
+
+        if (modal.classList.contains('hidden')) {
+            modal.style.top = '50%';
+            modal.style.left = '50%';
+            modal.style.transform = 'translate(-50%, -50%)';
         }
 
         this._makeDraggable(modal, "sub-header");
 
+        const iText = document.getElementById('sub-text-edit');
         const iFont = document.getElementById('sub-font-family');
         const iSize = document.getElementById('sub-font-size');
         const iColor = document.getElementById('sub-color');
+        const iHighlight = document.getElementById('sub-highlight');
         const iBg = document.getElementById('sub-bg-color');
         const iBold = document.getElementById('sub-bold');
         const iItalic = document.getElementById('sub-italic');
+        const styleBtns = document.querySelectorAll('.sub-style-btn');
 
-        // Defaults
         const defaults = {
-            font: 'Arial', size: 30, color: '#ffffff', bgColor: '#000000', bold: false, italic: false
+            font: 'Arial', size: 30, color: '#ffffff', highlightColor: '#ffff00', 
+            bgColor: '#000000', bold: true, italic: false, styleMode: 'karaoke'
         };
 
         const config = (existingClip && existingClip.subtitleConfig) 
             ? { ...defaults, ...existingClip.subtitleConfig } 
             : defaults;
 
-        iFont.value = config.font;
-        iSize.value = config.size;
-        iColor.value = config.color;
-        iBg.value = config.bgColor;
-        iBold.checked = config.bold;
-        iItalic.checked = config.italic;
+        const currentText = (existingClip && existingClip.transcriptionData && existingClip.transcriptionData.length > 0)
+            ? existingClip.transcriptionData.map(w => w.text).join(' ')
+            : (existingClip ? existingClip.name : "Legenda...");
+
+        if(iText) iText.value = currentText;
+        if(iFont) iFont.value = config.font;
+        if(iSize) iSize.value = config.size;
+        if(iColor) iColor.value = config.color;
+        if(iHighlight) iHighlight.value = config.highlightColor || '#ffff00';
+        if(iBg) iBg.value = config.bgColor;
+        if(iBold) iBold.checked = config.bold;
+        if(iItalic) iItalic.checked = config.italic;
+
+        let currentStyle = config.styleMode || 'karaoke';
+
+        const updateStyleUI = () => {
+            styleBtns.forEach(btn => {
+                if(btn.dataset.style === currentStyle) btn.classList.add('selected');
+                else btn.classList.remove('selected');
+            });
+            updatePreview();
+        };
+
+        styleBtns.forEach(btn => {
+            btn.onclick = () => {
+                currentStyle = btn.dataset.style;
+                updateStyleUI();
+            };
+        });
 
         const updatePreview = () => {
+            if(!preview) return;
+            preview.innerText = iText.value || "Preview";
             preview.style.fontFamily = iFont.value;
-            preview.style.fontSize = iSize.value + "px";
-            preview.style.color = iColor.value;
-            preview.style.backgroundColor = iBg.value;
+            preview.style.fontSize = Math.min(parseInt(iSize.value), 28) + "px"; 
             preview.style.fontWeight = iBold.checked ? 'bold' : 'normal';
             preview.style.fontStyle = iItalic.checked ? 'italic' : 'normal';
+            preview.style.color = iColor.value;
+            preview.style.background = 'transparent';
+            preview.style.padding = '0';
+            preview.style.textShadow = 'none';
+            preview.style.borderRadius = '0';
+            
+            if (currentStyle === 'word-pill') {
+                const txt = iText.value.split(' ')[0] || "Texto"; 
+                const rest = iText.value.substring(txt.length);
+                preview.innerHTML = `<span style="background:${iHighlight.value}; color:black; padding:0 4px; border-radius:6px;">${txt}</span>${rest}`;
+                return;
+            } 
+            
+            preview.innerHTML = preview.innerText; 
+
+            if (currentStyle === 'karaoke') {
+                preview.style.textShadow = `0 0 5px ${iHighlight.value}`;
+            }
+            else if (currentStyle === 'box') {
+                preview.style.background = iBg.value;
+                preview.style.padding = '5px 10px';
+                preview.style.borderRadius = '8px';
+            }
         };
         
-        [iFont, iSize, iColor, iBg, iBold, iItalic].forEach(el => el.oninput = updatePreview);
-        updatePreview();
-
+        const inputs = [iText, iFont, iSize, iColor, iHighlight, iBg, iBold, iItalic];
+        inputs.forEach(el => { if(el) { el.oninput = updatePreview; el.onchange = updatePreview; } });
+        
+        updateStyleUI(); 
         modal.classList.remove('hidden');
 
-        // Botão Transcrever
+        const close = () => modal.classList.add('hidden');
+        document.getElementById('btn-sub-close').onclick = close;
+        document.getElementById('btn-sub-cancel').onclick = close;
+
         const btnTranscribe = document.getElementById('btn-sub-transcribe');
         const progressBox = document.getElementById('sub-transcribe-progress');
         const progressBar = document.getElementById('sub-transcribe-bar');
 
-        btnTranscribe.disabled = false;
-        btnTranscribe.innerHTML = '<i class="fa-solid fa-play"></i>&nbsp; Iniciar Transcrição Automática';
-        progressBox.style.display = 'none';
+        if(btnTranscribe) {
+            btnTranscribe.onclick = async () => {
+                if (!existingClip) return alert("Erro: O clipe precisa ser criado antes.");
+                btnTranscribe.disabled = true;
+                const oldText = btnTranscribe.innerHTML;
+                btnTranscribe.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>&nbsp; Processando...';
+                if(progressBox) progressBox.style.display = 'block';
 
-        btnTranscribe.onclick = async () => {
-            if (!existingClip) {
-                // Agora isso não deve acontecer, pois criamos antes
-                alert("Erro: O clipe precisa ser criado antes de transcrever.");
-                return;
-            }
-
-            btnTranscribe.disabled = true;
-            btnTranscribe.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>&nbsp; Transcrevendo...';
-            progressBox.style.display = 'block';
-
-            try {
-                await this.studio.runSubtitleTranscription(existingClip, (progress) => {
-                    progressBar.style.width = `${progress}%`;
-                });
-                modal.classList.add('hidden'); 
-            } catch (error) {
-                console.error(error);
-                alert("Erro na transcrição: " + error.message);
-                btnTranscribe.disabled = false;
-                btnTranscribe.innerHTML = '<i class="fa-solid fa-play"></i>&nbsp; Tentar Novamente';
-            }
-        };
-
-        // Botão Salvar Estilo
-        document.getElementById('btn-sub-confirm').onclick = () => {
-            const newConfig = {
-                font: iFont.value,
-                size: parseInt(iSize.value),
-                color: iColor.value,
-                bgColor: iBg.value,
-                bold: iBold.checked,
-                italic: iItalic.checked
+                try {
+                    await this.studio.runSubtitleTranscription(existingClip, (progress) => {
+                        if(progressBar) progressBar.style.width = `${progress}%`;
+                    });
+                    close();
+                } catch (error) {
+                    console.error(error);
+                    alert("Erro na transcrição: " + error.message);
+                    btnTranscribe.disabled = false;
+                    btnTranscribe.innerHTML = oldText; 
+                }
             };
-            
-            if (existingClip) {
-                existingClip.subtitleConfig = newConfig;
-                this.studio.timelineManager.renderTracks();
-            }
-            modal.classList.add('hidden');
-        };
+        }
 
-        document.getElementById('btn-sub-close').onclick = () => modal.classList.add('hidden');
-        document.getElementById('btn-sub-cancel').onclick = () => modal.classList.add('hidden');
+        const btnConfirm = document.getElementById('btn-sub-confirm');
+        if(btnConfirm) {
+            btnConfirm.onclick = () => {
+                const rawText = iText.value;
+                
+                const newConfig = {
+                    font: iFont.value,
+                    size: parseInt(iSize.value),
+                    color: iColor.value,
+                    highlightColor: iHighlight.value,
+                    bgColor: iBg.value,
+                    bold: iBold.checked,
+                    italic: iItalic.checked,
+                    styleMode: currentStyle 
+                };
+
+                const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+                if (existingClip && lines.length > 0) {
+                    
+                    // --- MODO SPLIT (Quebra de Linha) ---
+                    if (lines.length > 1) {
+                        console.log("[UIManager] Quebra de linha detectada. Dividindo clipe...");
+                        
+                        let parentTrack = this.studio.project.tracks.find(t => t.clips.find(c => c.id === existingClip.id));
+                        
+                        if (parentTrack) {
+                            const totalChars = rawText.replace(/\s+/g, '').length;
+                            const totalDuration = existingClip.duration;
+                            const originalStart = existingClip.start;
+                            const originalOffset = existingClip.offset;
+                            const timePerChar = totalDuration / (totalChars || 1);
+
+                            // CRUCIAL: Salva o transform (Pan/Crop) original antes de remover
+                            const originalTransform = existingClip.transform ? JSON.parse(JSON.stringify(existingClip.transform)) : null;
+
+                            parentTrack.clips = parentTrack.clips.filter(c => c.id !== existingClip.id);
+
+                            let cursorStart = originalStart;
+                            let cursorOffset = originalOffset;
+
+                            lines.forEach((lineText, index) => {
+                                const lineChars = lineText.replace(/\s+/g, '').length;
+                                let lineDuration = lineChars * timePerChar;
+                                
+                                if (index === lines.length - 1) {
+                                    lineDuration = (originalStart + totalDuration) - cursorStart;
+                                }
+
+                                const newTranscriptionData = this._redistributeWordTimestamps(
+                                    lineText, 
+                                    lineDuration, 
+                                    cursorOffset
+                                );
+
+                                const newClip = {
+                                    id: "clip_" + Date.now() + "_" + index + Math.random().toString(36).substr(2, 5),
+                                    assetId: existingClip.assetId,
+                                    start: cursorStart,
+                                    duration: lineDuration,
+                                    offset: cursorOffset,
+                                    type: 'subtitle',
+                                    name: lineText,
+                                    transcriptionData: newTranscriptionData,
+                                    subtitleConfig: { ...newConfig },
+                                    transform: originalTransform ? JSON.parse(JSON.stringify(originalTransform)) : null
+                                };
+
+                                parentTrack.clips.push(newClip);
+
+                                cursorStart += lineDuration;
+                                cursorOffset += lineDuration;
+                            });
+                        }
+                    } 
+                    // --- MODO EDIÇÃO SIMPLES ---
+                    else {
+                        existingClip.subtitleConfig = newConfig;
+                        const newSingleText = lines[0];
+                        const originalText = (existingClip.transcriptionData || []).map(w => w.text).join(' ');
+                        
+                        if (newSingleText !== originalText.trim()) {
+                            existingClip.name = newSingleText;
+                            existingClip.transcriptionData = this._redistributeWordTimestamps(
+                                newSingleText, 
+                                existingClip.duration, 
+                                existingClip.offset
+                            );
+                        }
+                    }
+
+                    this.studio.timelineManager.renderTracks();
+                    this.studio.playbackManager.syncPreview();
+                    this.studio.markUnsavedChanges();
+                }
+                
+                modal.classList.add('hidden');
+            };
+        }
+    }
+
+    /**
+     * Mantém o efeito Karaoke sincronizado matematicamente.
+     */
+    _redistributeWordTimestamps(fullText, clipDuration, clipOffset) {
+        const words = fullText.trim().split(/\s+/);
+        if (words.length === 0) return [];
+        const assetStartTime = clipOffset; 
+        const totalChars = fullText.replace(/\s+/g, '').length;
+        const timePerChar = clipDuration / (totalChars || 1);
+        const newTranscriptionData = [];
+        let currentOffset = 0;
+        words.forEach(word => {
+            const wordLen = word.length;
+            const wordDuration = wordLen * timePerChar;
+            const wordStart = assetStartTime + currentOffset;
+            const wordEnd = wordStart + wordDuration;
+            newTranscriptionData.push({ text: word, start: wordStart, end: wordEnd });
+            currentOffset += wordDuration; 
+        });
+        return newTranscriptionData;
     }
 
     _bindTabEvents() {

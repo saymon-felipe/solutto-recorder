@@ -501,8 +501,8 @@ export class StudioManager {
                         console.log("[StudioManager] Transcrição recebida:", output);
                         
                         const segments = output.chunks.map(chunk => ({
-                            start: chunk.timestamp[0],
-                            end: chunk.timestamp[1] || (chunk.timestamp[0] + 2),
+                            start: chunk.start,
+                            end: chunk.end,
                             text: chunk.text.trim()
                         }));
 
@@ -665,5 +665,195 @@ export class StudioManager {
         console.log(`[AudioExtract] Renderização concluída. Amplitude Máxima Detectada: ${maxAmp.toFixed(5)}`);
 
         return channelData;
+    }
+
+    async retranscribeClipGap(clip) {
+        if (!clip.needsTranscription) return;
+
+        // 1. Encontra a última palavra válida para saber onde começar
+        const lastWord = clip.transcriptionData[clip.transcriptionData.length - 1];
+        const existingEndTime = lastWord ? lastWord.end : 0;
+        
+        // Onde termina o clipe agora (no tempo do asset)
+        const newEndTime = clip.offset + clip.duration;
+        
+        // Se não há lacuna real, cancela
+        if (newEndTime <= existingEndTime) {
+            clip.needsTranscription = false;
+            this.timelineManager.renderTracks();
+            return;
+        }
+
+        // 2. Prepara UI
+        const originalText = document.querySelector(`.clip[data-clip-id="${clip.id}"] .clip-name`).innerText;
+        this.setLoading(true, "Transcrevendo trecho novo...");
+        
+        // 3. Obtém o Asset de Áudio/Vídeo Original
+        const asset = this.project.assets.find(a => a.id === clip.assetId);
+        if (!asset) return;
+
+        // 4. Recorta o áudio APENAS da parte nova
+        // Precisamos do AudioContext para decodificar e cortar
+        const audioCtx = this.timelineManager.audioContext;
+        let fullBuffer = asset.audioBufferCache; // Assumindo que já temos cache
+        
+        if (!fullBuffer && asset.sourceBlob) {
+            // Fallback: decodifica se não tiver cache
+            const arrayBuffer = await asset.sourceBlob.arrayBuffer();
+            fullBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        }
+
+        if (fullBuffer) {
+            const sampleRate = fullBuffer.sampleRate;
+            // Margem de segurança de 0.1s antes para não cortar fonema
+            const startFrame = Math.floor(Math.max(0, existingEndTime - 0.1) * sampleRate); 
+            const endFrame = Math.floor(newEndTime * sampleRate);
+            const frameCount = endFrame - startFrame;
+
+            if (frameCount > 0) {
+                const cutBuffer = audioCtx.createBuffer(1, frameCount, sampleRate);
+                // Copia canal 0 (mono é suficiente para transcrição)
+                const channelData = fullBuffer.getChannelData(0);
+                const cutData = cutBuffer.getChannelData(0);
+                
+                for (let i = 0; i < frameCount; i++) {
+                    if (startFrame + i < channelData.length) {
+                        cutData[i] = channelData[startFrame + i];
+                    }
+                }
+
+                // 5. Envia para o Worker
+                const worker = new Worker('whisper.worker.js', { type: "module" });
+                
+                worker.postMessage({
+                    type: 'transcribe',
+                    audio: cutData, // Envia Float32Array
+                    language: 'portuguese',
+                    offsetCorrection: Math.max(0, existingEndTime - 0.1) 
+                });
+
+                worker.onmessage = (e) => {
+                    const { status, output } = e.data;
+
+                    if (status === 'loading') {
+                        // Atualiza barra de progresso se houver
+                        if (this.setLoadingProgress) this.setLoadingProgress(output.progress);
+                    } 
+                    else if (status === 'complete') {
+                        console.log("[StudioManager] Transcrição concluída:", output);
+
+                        // Passamos o array de chunks (que contém as palavras) para o processador
+                        if (output.chunks && output.chunks.length > 0) {
+                            // Se você cria uma track nova antes, use o ID dela.
+                            const targetTrackId = this.ensureSubtitleTrackExists(); 
+                            
+                            this.processTranscriptionToClips(output.chunks, targetTrackId);
+                        }
+
+                        if (this.setLoading) this.setLoading(false);
+                        worker.terminate();
+                    } 
+                    else if (status === 'error') {
+                        console.error("Erro na transcrição:", e.data.error);
+                        if (this.setLoading) this.setLoading(false);
+                        worker.terminate();
+                    }
+                };
+            }
+        }
+    }
+
+    /**
+     * Processa o output do Worker (Palavras) e cria Clipes de Legenda agrupados na Timeline.
+     * @param {Array} words - O array 'output.chunks' vindo do worker
+     * @param {string} trackId - ID da track de legendas
+     */
+    processTranscriptionToClips(words, trackId) {
+        if (!words || words.length === 0) return;
+
+        const MAX_CHARS_PER_SEGMENT = 40; // Máximo de caracteres por linha
+        const MAX_SILENCE_GAP = 0.5;      // Pausa > 0.5s força nova legenda
+        
+        let currentSegmentWords = [];
+        let currentSegmentTextLength = 0;
+        
+        // Função auxiliar para criar o clipe na timeline
+        const createClipFromSegment = (segmentWords) => {
+            if (segmentWords.length === 0) return;
+
+            const firstWord = segmentWords[0];
+            const lastWord = segmentWords[segmentWords.length - 1];
+            
+            // Texto visual para o clipe (frase completa)
+            const fullText = segmentWords.map(w => w.text).join(" ");
+
+            // Cria o objeto do clipe
+            const clipData = {
+                id: "clip_" + Date.now() + Math.random().toString(36).substr(2, 5),
+                assetId: null, // Asset virtual
+                start: firstWord.start,
+                duration: lastWord.end - firstWord.start,
+                offset: 0,
+                type: 'subtitle',
+                name: fullText,
+                transcriptionData: segmentWords, // Guarda as palavras individuais para o efeito Karaoke
+                subtitleConfig: {
+                    font: 'Arial',
+                    size: 40,
+                    color: '#ffffff',
+                    highlightColor: '#ffff00', // Cor do destaque Karaoke
+                    bgColor: 'rgba(0,0,0,0.5)',
+                    bold: true
+                }
+            };
+            
+            // Adiciona à track via TimelineManager
+            const track = this.timelineManager.studio.project.tracks.find(t => t.id === trackId);
+            if (track) {
+                track.clips.push(clipData);
+            }
+        };
+
+        // Algoritmo de Agrupamento
+        for (let i = 0; i < words.length; i++) {
+            const word = words[i];
+            const prevWord = words[i-1];
+            
+            // 1. Detecta Silêncio Grande entre palavras
+            const isBigGap = prevWord && (word.start - prevWord.end > MAX_SILENCE_GAP);
+            
+            // 2. Detecta Tamanho Máximo da frase
+            const willExceedLength = (currentSegmentTextLength + word.text.length) > MAX_CHARS_PER_SEGMENT;
+
+            if ((isBigGap || willExceedLength) && currentSegmentWords.length > 0) {
+                createClipFromSegment(currentSegmentWords);
+                currentSegmentWords = [];
+                currentSegmentTextLength = 0;
+            }
+
+            currentSegmentWords.push(word);
+            currentSegmentTextLength += word.text.length + 1; 
+        }
+
+        // Cria o último segmento que sobrou no buffer
+        if (currentSegmentWords.length > 0) {
+            createClipFromSegment(currentSegmentWords);
+        }
+
+        // Atualiza a UI
+        this.timelineManager.renderTracks();
+        this.timelineManager.studio.markUnsavedChanges();
+    }
+
+    ensureSubtitleTrackExists() {
+        let track = this.timelineManager.studio.project.tracks.find(t => t.type === 'subtitle'); // Ou use uma lógica específica
+        if (!track) {
+            track = this.timelineManager.studio.project.tracks.find(t => t.type === 'video');
+            if(!track) {
+                this.timelineManager.studio.addTrack('video');
+                track = this.timelineManager.studio.project.tracks[this.timelineManager.studio.project.tracks.length-1];
+            }
+        }
+        return track.id;
     }
 }

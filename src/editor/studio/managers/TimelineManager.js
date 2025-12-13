@@ -1095,6 +1095,21 @@ export class TimelineManager {
             box-shadow: 0 1px 2px rgba(0,0,0,0.5);
         `;
 
+        const isSubtitle = clip.type === 'subtitle';
+        let warningBtn = '';
+
+        if (isSubtitle && clip.needsTranscription) {
+            warningBtn = `
+                <div class="clip-tool-btn warning-btn" 
+                     title="Trecho novo detectado. Clique para transcrever."
+                     style="position: absolute; top: 2px; right: 25px; width: 20px; height: 20px; 
+                            background: #ff9800; color: white; border-radius: 3px; 
+                            display: flex; align-items: center; justify-content: center; 
+                            font-size: 11px; cursor: pointer; z-index: 100; animation: pulse-warning 2s infinite;">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>`;
+        }
+
         el.innerHTML = `
             ${bgVisuals}
             ${fadeOverlay}
@@ -1110,7 +1125,7 @@ export class TimelineManager {
             <div class="fader-line" style="top: ${faderTop}%"></div>
             
             ${isVideoVisual ? `<div class="clip-opacity-overlay" style="opacity: ${1 - clip.level}"></div>` : ''}
-            
+            ${warningBtn}
             <div class="clip-name" style="${nameStyle}">${clip.name}</div>
             
             <div class="resize-handle left" data-action="resize-left" style="z-index: 25; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; cursor: w-resize;"></div>
@@ -1119,6 +1134,21 @@ export class TimelineManager {
         
         this._injectFadeStyles(el);
         requestAnimationFrame(() => this._updateFadeVisuals(clip, el));
+
+        if (isSubtitle && clip.needsTranscription) {
+            const btnWarn = el.querySelector('.warning-btn');
+            if (btnWarn) {
+                btnWarn.onmousedown = (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    // Chama a função global de re-transcrição parcial
+                    if (this.studio.retranscribeClipGap) {
+                        this.studio.retranscribeClipGap(clip);
+                    } else {
+                        console.error("Função retranscribeClipGap não implementada no Studio.");
+                    }
+                };
+            }
+        }
 
         if (clip.type === 'subtitle') {
             const btnSettings = document.createElement('div');
@@ -2505,12 +2535,18 @@ export class TimelineManager {
 
                 // Estica o tempo do último segmento de texto para acompanhar o clipe
                 if (tClip.type === 'subtitle' && tClip.transcriptionData && tClip.transcriptionData.length > 0) {
-                    const lastSeg = tClip.transcriptionData[tClip.transcriptionData.length - 1];
-                    const newEndTime = tClip.duration + tClip.offset;
-                    
-                    // Se estamos aumentando para a direita, estica o texto junto
-                    if (!isLeft && newEndTime > lastSeg.end) {
-                        lastSeg.end = newEndTime;
+                    const lastWord = tClip.transcriptionData[tClip.transcriptionData.length - 1];
+                    // O fim "lógico" dos dados atuais (levando em conta que o offset pode ter mudado se for resize-left)
+                    // Mas focando no resize-right pedido:
+                    const contentEndTime = lastWord.end; 
+                    const clipEndTime = tClip.offset + tClip.duration; // Tempo relativo ao asset (offset + duration)
+
+                    // Se a duração do clipe excede o último dado de texto por mais de 0.5s
+                    if (clipEndTime > (contentEndTime + 0.5)) {
+                        tClip.needsTranscription = true;
+                    } else {
+                        // Se encolheu de volta, remove o aviso (opcional)
+                        if(tClip.needsTranscription) tClip.needsTranscription = false;
                     }
                 }
 
@@ -2655,69 +2691,99 @@ export class TimelineManager {
     }
 
     splitClip() {
-        // 1. Identifica o clipe principal selecionado
-        const selection = this.selectedClips[0];
-        if (!selection) return;
+        // 1. Validação Inicial
+        if (this.selectedClips.length === 0) return;
         
-        const targetClip = selection.clip;
-        const time = this.studio.project.currentTime;
-        const groupId = targetClip.groupId;
+        // Usa o primeiro clipe selecionado como referência para o tempo (cursor)
+        const primarySelection = this.selectedClips[0];
+        const cursorTime = this.studio.project.currentTime;
         
-        // Novo ID de grupo para o lado direito (se houver grupo)
-        const rightSideGroupId = groupId ? "group_" + Date.now() + "_R" : null;
-
-        // 2. Monta a lista de clipes a serem cortados
-        let clipsToProcess = [];
+        // 2. Identificação do Escopo (Grupo ou Individual)
+        let clipsToSplit = [];
+        const groupId = primarySelection.clip.groupId;
 
         if (groupId) {
-            this.studio.project.tracks.forEach(t => {
-                t.clips.forEach(c => {
-                    if (c.groupId === groupId) {
-                        clipsToProcess.push({ clip: c, track: t });
+            this.studio.project.tracks.forEach(track => {
+                track.clips.forEach(clip => {
+                    if (clip.groupId === groupId) {
+                        clipsToSplit.push({ clip, track });
                     }
                 });
             });
         } else {
-            const track = this.studio.project.tracks.find(t => t.id === selection.trackId);
-            if(track) clipsToProcess.push({ clip: targetClip, track: track });
+            const track = this.studio.project.tracks.find(t => t.id === primarySelection.trackId);
+            if (track) {
+                clipsToSplit.push({ clip: primarySelection.clip, track });
+            }
         }
 
+        const newRightGroupId = groupId ? "group_" + Date.now() + "_R" : null;
+        
         let didSplit = false;
-        let newlyCreatedClips = []; // Lista para guardar os novos clipes
+        const newlyCreatedClips = [];
 
-        // 3. Executa o corte
-        clipsToProcess.forEach(({ clip, track }) => {
-            // Margem de segurança para não cortar nas pontas
-            if (time > (clip.start + 0.01) && time < (clip.start + clip.duration - 0.01)) {
+        // 3. Processamento do Corte
+        clipsToSplit.forEach(({ clip, track }) => {
+            // Verifica se o cursor está DENTRO do clipe (margem 10ms)
+            if (cursorTime > (clip.start + 0.01) && cursorTime < (clip.start + clip.duration - 0.01)) {
                 
-                const relativeSplit = time - clip.start;
+                const relativeSplitPoint = cursorTime - clip.start;
                 const oldDuration = clip.duration;
                 
-                // A: Ajusta o clipe original (Lado Esquerdo)
-                clip.duration = relativeSplit;
+                // --- A: Ajusta o Clipe Original (Lado Esquerdo) ---
+                clip.duration = relativeSplitPoint;
                 
-                // B: Cria o novo clipe (Lado Direito)
-                const newClip = {
-                    ...clip, 
-                    id: "clip_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
-                    start: time, 
-                    duration: oldDuration - relativeSplit, 
-                    offset: clip.offset + relativeSplit,
-                    groupId: rightSideGroupId
-                };
+                // --- B: Cria o Novo Clipe (Lado Direito) ---
+                // Deep clone para preservar configs (Style, Transform, etc)
+                const newClip = JSON.parse(JSON.stringify(clip));
                 
+                newClip.id = "clip_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
+                newClip.start = cursorTime;
+                newClip.duration = oldDuration - relativeSplitPoint;
+                newClip.offset = clip.offset + relativeSplitPoint;
+                newClip.groupId = newRightGroupId;
+
+                // --- C: Lógica Especial para Legendas (Word-Level Split) ---
+                if (clip.type === 'subtitle' && Array.isArray(clip.transcriptionData)) {
+                    const absoluteSplitPointAsset = clip.offset + relativeSplitPoint;
+                    const allWords = clip.transcriptionData;
+                    
+                    let leftWords, rightWords;
+
+                    // [INTELIGÊNCIA NOVA] Se houver apenas 1 chunk, copia para ambos os lados.
+                    // Isso evita que um lado fique "zumbi" (sem dados) se o usuário cortar no silêncio.
+                    if (allWords.length === 1) {
+                        leftWords = [...allWords];
+                        rightWords = [...allWords];
+                    } else {
+                        // Lógica de Interseção para frases longas:
+                        // Esquerda: Palavras que começam antes do corte
+                        leftWords = allWords.filter(w => w.start < absoluteSplitPointAsset);
+                        
+                        // Direita: Palavras que terminam DEPOIS do corte
+                        // (Garante que palavras cortadas no meio apareçam também na direita para continuidade)
+                        rightWords = allWords.filter(w => w.end > absoluteSplitPointAsset);
+                    }
+
+                    // Atualiza os dados nos objetos
+                    clip.transcriptionData = leftWords;
+                    newClip.transcriptionData = rightWords;
+                }
+
                 track.clips.push(newClip);
-                newlyCreatedClips.push({ clip: newClip, trackId: track.id }); // Guarda para selecionar depois
+                newlyCreatedClips.push({ clip: newClip, trackId: track.id });
+                
                 didSplit = true;
             }
         });
-        
+
+        // 4. Finalização
         if (didSplit) {
-            this._clearSelection(); // Limpa a seleção antiga (lado esquerdo)
+            this._clearSelection();
             this.studio.markUnsavedChanges();
-            this.renderTracks(); // Renderiza o DOM com os novos clipes
+            this.renderTracks(); 
             
-            // Seleciona os NOVOS clipes (lado direito)
+            // Seleciona o lado direito para facilitar fluxo de edição
             newlyCreatedClips.forEach(item => {
                 this._addToSelection(item.clip, item.trackId);
             });

@@ -465,82 +465,185 @@ export class PlaybackManager {
         return Promise.race([Promise.all(promises), timeout]);
     }
 
+    /**
+     * Função de Easing para dar um efeito de "pulo" elástico na animação.
+     * x: progresso linear (0 a 1)
+     */
+    _easeOutBack(x) {
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+    }
+
     _renderSubtitleOverlay(ctx, clip, time, w, h) {
-        if (!clip.transcriptionData || !clip.subtitleConfig) return;
+        if (!clip.transcriptionData || clip.transcriptionData.length === 0) return;
+        if (!clip.subtitleConfig) return;
+
+        const assetTime = (time - clip.start) + clip.offset;
+        const cfg = clip.subtitleConfig;
         
-        const localTime = time - clip.start;
-        const currentSegment = clip.transcriptionData.find(s => 
-            localTime >= s.start && localTime <= s.end
-        );
+        let baseLevel = clip.level !== undefined ? clip.level : 1;
+        const fadeFactor = this._calculateFadeFactor(clip, time);
+        const finalAlpha = baseLevel * fadeFactor;
+        if (finalAlpha < 0.01) return;
 
-        if (currentSegment && currentSegment.text) {
-            const cfg = clip.subtitleConfig;
+        ctx.save();
+        ctx.globalAlpha = finalAlpha;
+
+        const projectW = (this.studio.project.settings && this.studio.project.settings.width) || 1280;
+        const s = w / projectW; 
+
+        ctx.translate(w / 2, h / 2);
+        if (clip.transform) {
+            const t = clip.transform;
+            ctx.translate(t.x * s, t.y * s);
+            ctx.rotate(t.rotation * Math.PI / 180);
+            ctx.scale(t.width / 100, t.height / 100);
+        }
+
+        const baseSize = cfg.size || 40;
+        const scaledFontSize = Math.max(10, baseSize * s);
+        const fontName = cfg.font || 'Arial';
+        const fontStyle = cfg.italic ? 'italic' : 'normal';
+        const fontWeight = cfg.bold ? 'bold' : 'normal';
+        
+        ctx.font = `${fontStyle} ${fontWeight} ${scaledFontSize}px ${fontName}`;
+        ctx.textBaseline = 'middle';
+
+        const visibleWords = clip.transcriptionData;
+        const wordMetrics = visibleWords.map(wordObj => {
+            const metrics = ctx.measureText(wordObj.text + " "); 
+            return {
+                obj: wordObj,
+                width: metrics.width,
+                text: wordObj.text,
+                active: (assetTime >= wordObj.start && assetTime <= wordObj.end)
+            };
+        });
+
+        const totalWidth = wordMetrics.reduce((acc, item) => acc + item.width, 0);
+        let cursorX = -totalWidth / 2;
+
+        const styleMode = cfg.styleMode || 'karaoke';
+        const activeColor = cfg.highlightColor || '#ffff00';
+        const inactiveColor = cfg.color || '#ffffff';
+        const bgColor = cfg.bgColor || '#000000';
+
+        // ESTILO 3: BOX (Fundo estático)
+        if (styleMode === 'box') {
+            const paddingX = 20 * s;
+            const paddingY = 15 * s;
+            const bgHeight = (scaledFontSize * 1.4);
+            const radius = 12 * s;
+
+            ctx.fillStyle = bgColor;
+            this._drawRoundedRect(ctx, -totalWidth / 2 - paddingX, -bgHeight / 2, totalWidth + (paddingX * 2), bgHeight, radius);
+            ctx.fill();
+        }
+
+        // RENDERIZAÇÃO PALAVRA POR PALAVRA
+        wordMetrics.forEach((item, index) => {
+            let fillStyle = inactiveColor;
             
-            let baseLevel = clip.level !== undefined ? clip.level : 1;
-            const fadeFactor = this._calculateFadeFactor(clip, time);
-            const finalAlpha = baseLevel * fadeFactor;
-
-            if (finalAlpha < 0.01) return;
-
-            ctx.save();
-            ctx.globalAlpha = finalAlpha;
-
-            const projectW = (this.studio.project.settings && this.studio.project.settings.width) || 1920;
-            
-            const s = w / projectW; 
-
-            ctx.translate(w / 2, h / 2);
-            
-            if (clip.transform) {
-                const t = clip.transform;
-                ctx.translate(t.x * s, t.y * s);
-                ctx.rotate(t.rotation * Math.PI / 180);
-                ctx.scale(t.width / 100, t.height / 100);
+            if (styleMode === 'karaoke') {
+                if (item.active) fillStyle = activeColor;
+            } else if (styleMode === 'word-pill') {
+                if (item.active) fillStyle = '#000000'; 
             }
 
-            const baseSize = cfg.size || 30;
-            const scaledFontSize = Math.max(10, baseSize * s);
+            // --- ESTILO 4: WORD PILL COM ANIMAÇÃO CUSTOMIZADA ---
+            if (styleMode === 'word-pill' && item.active) {
+                const pillPaddingX = 6 * s;
+                const pillHeight = scaledFontSize * 1.2;
+                const pillY = -pillHeight / 2;
+                const radius = 8 * s;
 
-            const fontStyle = cfg.italic ? 'italic' : 'normal';
-            const fontWeight = cfg.bold ? 'bold' : 'normal';
-            ctx.font = `${fontStyle} ${fontWeight} ${scaledFontSize}px ${cfg.font}`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            
-            const text = currentSegment.text;
-            
-            if (cfg.bgColor && cfg.bgColor !== 'transparent') {
-                const metrics = ctx.measureText(text);
+                // Animação
+                const animDuration = 0.15; // 150ms
+                const timeIn = assetTime - item.obj.start;
+                const timeOut = item.obj.end - assetTime;
                 
-                const paddingX = 20 * s; 
-                const paddingY = 10 * s; 
-                const radius = 8 * s;    
+                let scaleAnim = 1;
+                let opacityAnim = 1;
 
-                const bgWidth = metrics.width + (paddingX * 2); 
-                const bgHeight = (scaledFontSize * 1.2) + paddingY; 
-                
-                ctx.fillStyle = cfg.bgColor;
-                
-                const currentGlobalAlpha = ctx.globalAlpha;
-                ctx.globalAlpha = currentGlobalAlpha * 0.7; 
-                
-                if (ctx.roundRect) {
-                    ctx.beginPath();
-                    ctx.roundRect(-bgWidth / 2, -bgHeight / 2, bgWidth, bgHeight, radius);
-                    ctx.fill();
-                } else {
-                    ctx.fillRect(-bgWidth / 2, -bgHeight / 2, bgWidth, bgHeight);
+                if (timeIn < animDuration) {
+                    // --- FASE DE ENTRADA ---
+                    if (index === 0) {
+                        // Acelera a opacidade (dividir por 0.3 = 30% do tempo da animação)
+                        opacityAnim = Math.min(1, timeIn / (animDuration * 0.3)); 
+                        scaleAnim = 1; // Mantém tamanho fixo
+                    } else {
+                        // Demais palavras: Efeito Pop Elástico (Normal)
+                        scaleAnim = this._easeOutBack(timeIn / animDuration);
+                        opacityAnim = Math.min(1, timeIn / (animDuration * 0.5));
+                    }
+                } else if (timeOut < animDuration) {
+                    // --- FASE DE SAÍDA (Shrink) ---
+                    const p = Math.max(0, timeOut / animDuration);
+                    scaleAnim = p;
+                    opacityAnim = p;
                 }
 
-                ctx.globalAlpha = currentGlobalAlpha;
+                ctx.save();
+                
+                const wordCenterX = cursorX + (item.width / 2);
+                ctx.translate(wordCenterX, 0);
+                ctx.scale(scaleAnim, scaleAnim);
+                ctx.translate(-wordCenterX, 0);
+                
+                ctx.globalAlpha = finalAlpha * opacityAnim;
+                ctx.fillStyle = activeColor; 
+
+                const visualWordWidth = ctx.measureText(item.text).width;
+                this._drawRoundedRect(ctx, cursorX - pillPaddingX, pillY, visualWordWidth + (pillPaddingX*2), pillHeight, radius);
+                ctx.fill();
+                
+                ctx.shadowColor = 'rgba(0,0,0,0.3)';
+                ctx.shadowBlur = 4 * s;
+                
+                ctx.restore();
             }
+
+            // Texto
+            ctx.fillStyle = fillStyle;
             
-            // Renderiza Texto
-            ctx.fillStyle = cfg.color;
-            ctx.fillText(text, 0, 2 * s);
-            
-            ctx.restore();
-        }
+            if (styleMode !== 'box' && !(styleMode === 'word-pill' && item.active)) {
+                ctx.shadowColor = 'rgba(0,0,0,0.5)';
+                ctx.shadowBlur = 2 * s;
+            } else {
+                ctx.shadowColor = 'transparent';
+            }
+
+            if (styleMode === 'karaoke' && item.active) {
+                ctx.save();
+                const wordCenterX = cursorX + (item.width / 2);
+                ctx.translate(wordCenterX, 0);
+                ctx.scale(1.1, 1.1); 
+                ctx.translate(-wordCenterX, 0);
+                ctx.fillText(item.text, cursorX, 0);
+                ctx.restore();
+            } else {
+                ctx.fillText(item.text, cursorX, 0);
+            }
+
+            cursorX += item.width;
+        });
+
+        ctx.restore();
+    }
+
+    _drawRoundedRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
     }
 
     // =========================================================
@@ -1170,14 +1273,19 @@ export class PlaybackManager {
 
             const videoTime = clip.offset + (globalTime - clip.start);
             
-            // Se a diferença for grande ou o vídeo não estiver pronto
-            const needsSeek = Math.abs(video.currentTime - videoTime) > 0.05 || video.readyState < 2;
+            // [CORREÇÃO CRÍTICA DE FPS]
+            // A tolerância anterior (0.05) era maior que um frame de 30fps (0.033).
+            // Isso fazia com que frames fossem pulados/duplicados.
+            // Reduzimos para 0.01 (10ms) para forçar o seek em cada frame novo.
+            const needsSeek = Math.abs(video.currentTime - videoTime) > 0.01 || video.readyState < 2;
 
             if (needsSeek) {
                 video.currentTime = videoTime;
                 
                 const p = new Promise(resolve => {
-                    if (video.readyState >= 3) { // HAVE_FUTURE_DATA
+                    // Se já tiver dados suficientes para este frame exato
+                    // Nota: readyState 3 ou 4 é ideal, mas o seeked garante atualização visual
+                    if (video.readyState >= 3 && Math.abs(video.currentTime - videoTime) < 0.01 && !video.seeking) { 
                         resolve();
                         return;
                     }
@@ -1186,8 +1294,14 @@ export class PlaybackManager {
                         video.removeEventListener('seeked', onSeeked);
                         resolve();
                     };
-                    // Timeout de segurança (se travar, libera em 1s)
-                    setTimeout(resolve, 1000); 
+                    
+                    // Timeout de segurança reduzido para renderização mais ágil, 
+                    // mas suficiente para decodificar frames (500ms)
+                    setTimeout(() => {
+                        video.removeEventListener('seeked', onSeeked);
+                        resolve(); 
+                    }, 1000); 
+                    
                     video.addEventListener('seeked', onSeeked);
                 });
                 promises.push(p);

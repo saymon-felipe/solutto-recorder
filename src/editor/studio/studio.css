@@ -1113,3 +1113,7 @@ body.resizing iframe {
     padding: 5px 10px;
     text-align: center;
 }
+
+.type-subtitle .loop-vinco {
+    display: none !important;
+}
