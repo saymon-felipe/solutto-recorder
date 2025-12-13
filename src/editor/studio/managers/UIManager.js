@@ -331,6 +331,30 @@ export class UIManager {
                 .vegas-btn:hover { background: #505055; }
                 
                 ::-webkit-resizer { background-color: transparent; }
+
+                .timeline-marker-strip {
+                    height: 25px;
+                    background-color: #252526;
+                    border-bottom: 1px solid #3e3e42;
+                    position: relative;
+                    overflow: hidden;
+                    z-index: 102;
+                    display: flex;
+                    align-items: flex-end;
+                }
+
+                #timeline-marker-track {
+                    position: absolute;
+                    top: 0; 
+                    left: 0;
+                    height: 100%;
+                    width: 100%; 
+                    pointer-events: none; 
+                }
+
+                .timeline-ruler-container {
+                    border-top: none; 
+                }
             </style>
         `;
         
@@ -407,6 +431,9 @@ export class UIManager {
             <div id="resizer-h" class="layout-resizer-h"></div>
 
             <div class="studio-timeline" id="studio-timeline-el">
+                <div class="timeline-marker-strip" id="timeline-marker-strip">
+                    <div id="timeline-marker-track"></div>
+                </div>
                 <div class="timeline-ruler-container" id="timeline-ruler-container">
                     <div class="ruler-header-spacer"></div>
                     <div class="ruler-ticks"></div>

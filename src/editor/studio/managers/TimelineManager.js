@@ -27,6 +27,10 @@ export class TimelineManager {
         this.lastRenderedRange = { start: -1, end: -1 };
 
         this.pendingVisualTasks = 0;
+
+        if (!this.studio.project.markers) {
+            this.studio.project.markers = [];
+        }
     }
 
     init() {
@@ -62,7 +66,7 @@ export class TimelineManager {
             });
 
             scrollArea.addEventListener('mousedown', (e) => {
-                if (e.target.closest('.clip') || e.target.closest('.track-header')) return;
+                if (e.target.closest('.clip') || e.target.closest('.track-header') || e.target.closest('.timeline-marker')) return;
                 
                 this._startScrubbingInteraction(e);
             });
@@ -80,8 +84,12 @@ export class TimelineManager {
         const ruler = document.getElementById('timeline-ruler-container');
         if (ruler) {
             ruler.onmousedown = (e) => {
+                if (e.button === 2) return; 
+                if (e.target.closest('.timeline-marker')) return; 
                 this._startScrubbingInteraction(e);
             };
+
+            ruler.oncontextmenu = (e) => this._handleRulerContextMenu(e);
         }
 
         // Atalhos de Teclado
@@ -98,6 +106,11 @@ export class TimelineManager {
                 this.studio.playbackManager.togglePlayback(); 
             }
 
+            if (e.code === 'KeyM') {
+                e.preventDefault();
+                this.addMarker(this.studio.project.currentTime);
+            }
+
             // Navegação Frame a Frame (Setas)
             if (e.code === 'ArrowLeft') { e.preventDefault(); this._stepPlayhead(-1); }
             if (e.code === 'ArrowRight') { e.preventDefault(); this._stepPlayhead(1); }
@@ -108,6 +121,29 @@ export class TimelineManager {
             if (e.code === 'KeyG') this.groupClips();
             if (e.code === 'KeyU') this.ungroupClips();
         });
+    }
+
+    _ensureMarkerLayer() {
+        let layer = document.getElementById('timeline-markers-layer');
+        if (!layer) {
+            const wrapper = document.getElementById('timeline-content-wrapper');
+            const playhead = document.getElementById('timeline-playhead-overlay');
+            
+            if (wrapper && playhead) {
+                layer = document.createElement('div');
+                layer.id = 'timeline-markers-layer';
+                
+                layer.style.cssText = `
+                    position: absolute;
+                    top: 0; left: 0; width: 100%; height: 100%;
+                    pointer-events: none; 
+                    z-index: 90;
+                `;
+
+                wrapper.insertBefore(layer, playhead);
+            }
+        }
+        return layer;
     }
 
     _startAutoScroll() {
@@ -171,11 +207,46 @@ export class TimelineManager {
         if (!ticks) return;
         
         const rect = ticks.getBoundingClientRect();
-        
         const mx = clientX - rect.left;
+        const zoom = this.studio.project.zoom;
         
-        const rawTime = Math.max(0, mx / this.studio.project.zoom);
-        this._seekToTime(this._snapToFrame(rawTime));
+        // Tempo bruto baseado no mouse
+        let rawTime = Math.max(0, mx / zoom);
+        
+        // --- LÓGICA DE SNAP MAGNÉTICO (MARCADORES) ---
+        const markers = this.studio.project.markers || [];
+        const SNAP_THRESHOLD_PX = 15; // Distância em pixels para o ímã ativar
+        const thresholdSec = SNAP_THRESHOLD_PX / zoom;
+        
+        let snapped = false;
+        let finalTime = rawTime;
+
+        // Procura o marcador mais próximo
+        let bestDist = Infinity;
+        let bestMarker = null;
+
+        for (const m of markers) {
+            const dist = Math.abs(m.time - rawTime);
+            if (dist < thresholdSec && dist < bestDist) {
+                bestDist = dist;
+                bestMarker = m;
+            }
+        }
+
+        if (bestMarker) {
+            finalTime = bestMarker.time;
+            snapped = true;
+            // Mostra a linha azul de snap para feedback visual
+            const tracksContainer = document.getElementById('studio-tracks');
+            const h = tracksContainer ? tracksContainer.scrollHeight : 500;
+            this._updateSnapLine(finalTime, true, 0, h);
+        } else {
+            // Se não grudou em marcador, arredonda pro frame
+            finalTime = this._snapToFrame(rawTime);
+            this._updateSnapLine(0, false); // Esconde linha guia
+        }
+
+        this._seekToTime(finalTime);
     }
 
     // =========================================================================
@@ -376,48 +447,73 @@ export class TimelineManager {
 
     groupClips() {
         if (this.selectedClips.length < 2) return;
+        
         const newGroupId = "group_" + Date.now();
+
+        this.studio.historyManager.recordState();
+
         this.selectedClips.forEach(selection => selection.clip.groupId = newGroupId);
+        
         console.log("Clips vinculados:", newGroupId);
+
         this.studio.markUnsavedChanges();
+        
+        this.renderTracks(); 
     }
 
     ungroupClips() {
         if (this.selectedClips.length === 0) return;
-        this.selectedClips.forEach(selection => selection.clip.groupId = null);
         
-        if (this.lastFocusedClipId) {
-            const toDeselect = this.selectedClips.filter(s => s.clip.id !== this.lastFocusedClipId);
-            toDeselect.forEach(item => {
-                const domEl = this._findDomElement(item.clip.id);
-                if(domEl) {
-                    domEl.classList.remove('selected');
-                    domEl.style.borderColor = 'transparent'; 
-                }
-            });
-            this.selectedClips = this.selectedClips.filter(s => s.clip.id === this.lastFocusedClipId);
+        const clipToSelect = this.selectedClips[0]; 
+        
+        this.selectedClips.forEach(selection => selection.clip.groupId = null);
+
+        this.studio.historyManager.recordState();
+        
+        this._clearSelection();
+        if (clipToSelect) {
+            this._addToSelection(clipToSelect.clip, clipToSelect.trackId);
         }
+
         this.studio.markUnsavedChanges();
+        
+        this.renderTracks();
     }
 
     _handleSelection(e, clip, trackId, el) {
         this.lastFocusedClipId = clip.id;
         const alreadySelected = this.selectedClips.some(s => s.clip.id === clip.id);
         
+        let hasChanged = false;
+
         if (e.ctrlKey) {
             if (alreadySelected) {
                 this._removeFromSelection(clip.id);
                 if (clip.groupId) this._deselectGroup(clip.groupId);
+                hasChanged = true;
             } else {
                 this._addToSelection(clip, trackId, el);
                 if (clip.groupId) this._selectGroup(clip.groupId);
+                hasChanged = true;
             }
         } else {
-            if (!alreadySelected) {
-                this._clearSelection();
-                this._addToSelection(clip, trackId, el);
-                if (clip.groupId) this._selectGroup(clip.groupId);
+            if (!alreadySelected || this.selectedClips.length > 1) {
+                if (!alreadySelected) {
+                    this._clearSelection();
+                    this._addToSelection(clip, trackId, el);
+                    if (clip.groupId) this._selectGroup(clip.groupId);
+                    hasChanged = true;
+                } else if (this.selectedClips.length > 1 && !e.shiftKey && !e.ctrlKey) {
+                    this._clearSelection();
+                    this._addToSelection(clip, trackId, el);
+                    if (clip.groupId) this._selectGroup(clip.groupId);
+                    hasChanged = true;
+                }
             }
+        }
+
+        if (hasChanged) {
+            this.studio.historyManager.recordState();
         }
     }
 
@@ -483,6 +579,7 @@ export class TimelineManager {
         
         this.renderRuler();
         this.renderTracks();
+        this.renderMarkers(); 
         this.studio.playbackManager.updatePlayhead();
     }
 
@@ -505,7 +602,39 @@ export class TimelineManager {
                 ticks.style.transform = `translateX(-${scrollLeft}px)`;
                 this._renderVisibleTicks(scrollLeft, rulerContainer.clientWidth);
             }
+            
+            // Sincroniza a camada de conectores dentro da régua
+            const rulerConnectors = document.getElementById('timeline-ruler-marker-layer');
+            if (rulerConnectors) {
+                rulerConnectors.style.transform = `translateX(-${scrollLeft}px)`;
+            }
         }
+
+        // Sincroniza a faixa de cabeças superior
+        const markerTrack = document.getElementById('timeline-marker-track');
+        if (markerTrack) {
+            markerTrack.style.transform = `translateX(-${scrollLeft}px)`;
+        }
+    }
+
+    _ensureRulerMarkerLayer() {
+        let layer = document.getElementById('timeline-ruler-marker-layer');
+        if (!layer) {
+            const container = document.getElementById('timeline-ruler-container');
+            if (container) {
+                layer = document.createElement('div');
+                layer.id = 'timeline-ruler-marker-layer';
+                layer.style.cssText = `
+                    position: absolute;
+                    top: 0; left: 0; height: 100%; width: 100%;
+                    pointer-events: none;
+                    z-index: 5; /* Atrás dos números da régua, mas visível */
+                `;
+                // Insere como primeiro filho para ficar no fundo
+                container.insertBefore(layer, container.firstChild);
+            }
+        }
+        return layer;
     }
 
     renderRuler() {
@@ -587,7 +716,376 @@ export class TimelineManager {
             if (tick.label) el.innerText = tick.label;
             fragment.appendChild(el);
         });
+        
         container.appendChild(fragment);
+    }
+
+    addMarker(time) {
+        if (!this.studio.project.markers) this.studio.project.markers = [];
+        
+        const marker = {
+            id: 'marker_' + Date.now(),
+            time: time,
+            name: 'Marcador',
+            color: '#ff9800'
+        };
+
+        this.studio.project.markers.push(marker);
+        this.studio.project.markers.sort((a, b) => a.time - b.time);
+
+        this.studio.markUnsavedChanges();
+        this.renderMarkers();
+        this.studio.historyManager.recordState();
+    }
+
+    deleteMarker(markerId) {
+        if (!this.studio.project.markers) return;
+        this.studio.project.markers = this.studio.project.markers.filter(m => m.id !== markerId);
+        
+        this.studio.markUnsavedChanges();
+        this.renderMarkers(); 
+        this.studio.historyManager.recordState();
+    }
+
+    updateMarkerName(markerId, newName) {
+        if (!this.studio.project.markers) return;
+        
+        const marker = this.studio.project.markers.find(m => m.id === markerId);
+        if (marker && marker.name !== newName) {
+            marker.name = newName;
+            this.studio.markUnsavedChanges();
+            
+            this.renderMarkers(); 
+            this.studio.historyManager.recordState();
+        }
+    }
+
+    renderMarkers() {
+        // Layers: Linha (Fundo), Conector (Régua), Cabeça (Topo)
+        const lineLayer = this._ensureMarkerLayer(); 
+        const connectorLayer = this._ensureRulerMarkerLayer();
+        const headLayer = document.getElementById('timeline-marker-track');
+
+        if (!lineLayer || !headLayer || !this.studio.project.markers) return;
+
+        lineLayer.innerHTML = ''; 
+        headLayer.innerHTML = '';
+        if (connectorLayer) connectorLayer.innerHTML = '';
+        
+        const zoom = this.studio.project.zoom;
+        
+        this.studio.project.markers.sort((a, b) => a.time - b.time);
+
+        this.studio.project.markers.forEach((marker, index) => {
+            const pos = marker.time * zoom;
+
+            // --- LINHA PRINCIPAL ---
+            const lineEl = document.createElement('div');
+            lineEl.className = 'timeline-marker-line';
+            lineEl.style.cssText = `
+                position: absolute; left: ${pos}px; top: 0; bottom: 0; width: 1px;
+                z-index: 100; pointer-events: none;
+                background-color: ${marker.color}; opacity: 0.5;
+            `;
+            lineLayer.appendChild(lineEl);
+
+            // --- CONECTOR ---
+            if (connectorLayer) {
+                const connEl = document.createElement('div');
+                connEl.style.cssText = `
+                    position: absolute; left: ${pos}px; top: 0; bottom: 0; width: 1px;
+                    background-color: ${marker.color}; opacity: 0.5;
+                `;
+                connectorLayer.appendChild(connEl);
+            }
+
+            // --- CABEÇA ---
+            const headEl = document.createElement('div');
+            headEl.className = 'timeline-marker-head';
+            headEl.dataset.markerId = marker.id; 
+            
+            headEl.style.cssText = `
+                position: absolute;
+                left: ${pos}px; 
+                bottom: 0;      
+                background-color: ${marker.color};
+                padding: 2px 6px;
+                border-radius: 0 4px 4px 0; 
+                font-size: 10px;
+                color: #fff;
+                font-weight: 700;
+                min-width: 16px;
+                height: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                box-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+                border: 1px solid rgba(255,255,255,0.2);
+                border-left: none; 
+                user-select: none;
+                pointer-events: auto; 
+                z-index: 110;
+                white-space: nowrap;
+                transform: translateX(120px);
+            `;
+            
+            headEl.title = `${marker.name} (Botão Dir. para opções)`;
+            
+            // Label
+            const span = document.createElement('span');
+            if (marker.name === 'Marcador') {
+                span.innerText = index + 1;
+            } else {
+                span.innerText = marker.name;
+            }
+            span.style.pointerEvents = 'none';
+            headEl.appendChild(span);
+
+            // Input Inline
+            const input = document.createElement('input');
+            input.type = "text";
+            input.value = marker.name; 
+            input.style.cssText = `
+                display: none;
+                width: 100px;
+                background: #333;
+                color: #fff;
+                border: 1px solid ${marker.color};
+                border-radius: 2px;
+                font-size: 10px;
+                padding: 0 4px;
+                margin-left: 2px;
+                outline: none;
+                pointer-events: auto;
+            `;
+            
+            const saveName = () => {
+                const newName = input.value.trim();
+                input.style.display = 'none';
+                span.style.display = 'inline';
+                headEl.style.minWidth = '16px';
+                headEl.style.zIndex = '110';
+
+                if (newName && newName !== marker.name) {
+                    this.updateMarkerName(marker.id, newName);
+                } else {
+                    input.value = marker.name; 
+                }
+            };
+
+            input.onblur = saveName;
+            input.onkeydown = (ev) => {
+                if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+                ev.stopPropagation(); 
+            };
+            input.onmousedown = (ev) => ev.stopPropagation(); 
+
+            headEl.appendChild(input);
+
+            // --- EVENTOS ---
+
+            headEl.oncontextmenu = (e) => {
+                e.preventDefault(); 
+                e.stopPropagation();
+                this._handleMarkerContextMenu(e, marker, input, span, headEl);
+                return false;
+            };
+
+            headEl.onmousedown = (e) => {
+                if (e.button !== 0 || input.style.display === 'block') { 
+                    e.stopPropagation(); return; 
+                }
+                
+                e.preventDefault();
+                e.stopPropagation();
+
+                this._seekToTime(marker.time);
+
+                const startX = e.clientX;
+                const initialTime = marker.time;
+                let isDragging = false;
+
+                const onMove = (ev) => {
+                    const deltaX = ev.clientX - startX;
+                    if (Math.abs(deltaX) > 2) isDragging = true;
+
+                    const deltaSec = deltaX / zoom;
+                    
+                    // Calcula o tempo bruto e aplica a função de snap
+                    const rawTime = Math.max(0, initialTime + deltaSec);
+                    const snappedTime = this._snapToFrame(rawTime);
+                    
+                    marker.time = snappedTime;
+                    
+                    // Atualiza Visualmente (Agora "pulando" de frame em frame)
+                    const newPos = snappedTime * zoom;
+                    headEl.style.left = `${newPos}px`;
+                    lineEl.style.left = `${newPos}px`;
+                    if (connectorLayer && connectorLayer.lastChild) {
+                        const conn = connectorLayer.children[index];
+                        if(conn) conn.style.left = `${newPos}px`;
+                    }
+                    
+                    // Formata com frames (;FF)
+                    headEl.title = `${this._fmtSMPTE(snappedTime)}`;
+                };
+
+                const onUp = () => {
+                    window.removeEventListener('mousemove', onMove);
+                    window.removeEventListener('mouseup', onUp);
+                    
+                    if (isDragging) {
+                        this.studio.project.markers.sort((a, b) => a.time - b.time);
+                        this.renderMarkers(); 
+                        this.studio.markUnsavedChanges();
+                        this.studio.historyManager.recordState();
+                    }
+                };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+            };
+
+            headLayer.appendChild(headEl);
+        });
+    }
+
+    _handleMarkerContextMenu(e, marker, inputElement, spanElement, headElement) {
+        this._closeContextMenu();
+
+        const menu = document.createElement('div');
+        menu.className = 'studio-context-menu dropdown-content-header show'; 
+        
+        const rect = headElement.getBoundingClientRect();
+        
+        menu.style.cssText = `
+            position: fixed;
+            left: ${rect.left}px;
+            top: ${rect.bottom + 5}px;
+            background: rgb(42, 42, 42);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            border-radius: 4px;
+            padding: 5px 0;
+            min-width: 140px;
+            z-index: 99999;
+            display: flex;
+            flex-direction: column;
+            animation: fadeIn 0.1s ease-out;
+        `;
+
+        const titleItem = document.createElement('div');
+        titleItem.style.cssText = "padding: 5px 15px; font-size: 10px; color: #888; border-bottom: 1px solid rgba(255,255,255,0.05); margin-bottom: 2px;";
+        titleItem.innerText = `Marcador: ${marker.name}`;
+        menu.appendChild(titleItem);
+
+        const btnRename = document.createElement('a');
+        btnRename.href = "#";
+        btnRename.innerHTML = `<i class="fa-solid fa-pen" style="width:20px; color:#aaa;"></i> Renomear`;
+        btnRename.style.cssText = `display: flex; align-items: center; padding: 8px 15px; color: #e0e0e0; text-decoration: none; font-size: 12px; font-family: 'Segoe UI', sans-serif; cursor: pointer;`;
+        btnRename.onmouseenter = () => btnRename.style.background = "#555";
+        btnRename.onmouseleave = () => btnRename.style.background = "transparent";
+        
+        btnRename.onclick = (ev) => {
+            ev.preventDefault();
+            this._closeContextMenu();
+            
+            // Prepara UI para edição
+            spanElement.style.display = 'none';
+            inputElement.style.display = 'block';
+            inputElement.value = marker.name; 
+            
+            headElement.style.minWidth = '110px';
+            headElement.style.zIndex = '1000';
+            
+            inputElement.focus();
+            inputElement.select();
+        };
+
+        const btnDelete = document.createElement('a');
+        btnDelete.href = "#";
+        btnDelete.innerHTML = `<i class="fa-solid fa-trash" style="width:20px; color:#ff5252;"></i> Excluir`;
+        btnDelete.style.cssText = `display: flex; align-items: center; padding: 8px 15px; color: #ff9e9e; text-decoration: none; font-size: 12px; font-family: 'Segoe UI', sans-serif; cursor: pointer;`;
+        btnDelete.onmouseenter = () => btnDelete.style.background = "#555";
+        btnDelete.onmouseleave = () => btnDelete.style.background = "transparent";
+        
+        btnDelete.onclick = (ev) => {
+            ev.preventDefault();
+            this.deleteMarker(marker.id);
+            this._closeContextMenu();
+        };
+
+        menu.appendChild(btnRename);
+        menu.appendChild(btnDelete);
+        document.body.appendChild(menu);
+
+        setTimeout(() => {
+            document.addEventListener('click', this._closeContextMenuBind);
+            document.addEventListener('contextmenu', this._closeContextMenuBind); 
+        }, 0);
+    }
+
+    _handleRulerContextMenu(e) {
+        e.preventDefault();
+        
+        // Calcula o tempo baseado na posição do mouse
+        const rulerRect = e.currentTarget.getBoundingClientRect();
+        const clickX = e.clientX - rulerRect.left + e.currentTarget.parentElement.scrollLeft;
+        const time = Math.max(0, clickX / this.studio.project.zoom);
+
+        this._closeContextMenu();
+
+        // Cria o menu flutuante
+        const menu = document.createElement('div');
+        menu.className = 'studio-context-menu dropdown-content-header show'; 
+        
+        menu.style.cssText = `
+            position: fixed;
+            left: ${e.clientX}px;
+            top: ${e.clientY}px;
+            background: rgb(42, 42, 42);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            border-radius: 4px;
+            padding: 5px 0;
+            min-width: 150px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            animation: fadeIn 0.1s ease-out;
+        `;
+
+        // Item "Adicionar Marcador"
+        const btnAdd = document.createElement('a');
+        btnAdd.href = "#";
+        btnAdd.innerHTML = `<i class="fa-solid fa-location-dot" style="color:#ff9800; width:20px;"></i> Adicionar Marcador`;
+        btnAdd.style.cssText = `
+            display: flex; align-items: center; 
+            padding: 8px 15px; 
+            color: #e0e0e0; 
+            text-decoration: none; 
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+            transition: background 0.2s;
+        `;
+        
+        btnAdd.onmouseenter = () => btnAdd.style.background = "#555";
+        btnAdd.onmouseleave = () => btnAdd.style.background = "transparent";
+        
+        btnAdd.onclick = (ev) => {
+            ev.preventDefault();
+            this.addMarker(time);
+            this._closeContextMenu();
+        };
+
+        menu.appendChild(btnAdd);
+        document.body.appendChild(menu);
+
+        // Fecha ao clicar fora
+        setTimeout(() => {
+            document.addEventListener('click', this._closeContextMenuBind);
+            document.addEventListener('contextmenu', this._closeContextMenuBind); 
+        }, 0);
     }
 
     /**
@@ -629,9 +1127,12 @@ export class TimelineManager {
             sidebarTop.id = "studio-sidebar-top";
             sidebarTop.style.cssText = `
                 height: 24px; 
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
                 background: rgb(42, 42, 42);
                 flex-shrink: 0;
+                transform: translateY(24px);
+                z-index: 104;
             `;
             
             // Sub-container para a Lista de Headers (Scrollável, mas sem barra visível)
@@ -642,6 +1143,7 @@ export class TimelineManager {
                 overflow: hidden; 
                 position: relative;
                 background: rgb(42, 42, 42);
+                padding-top: 25px;
             `;
 
             sidebar.appendChild(sidebarTop);
@@ -2053,7 +2555,7 @@ export class TimelineManager {
             el.style.opacity = '0.5'; 
         }
 
-        // 1. Prepara dados iniciais e detecta "Auto-Crossfades" existentes
+        // Prepara dados 
         const draggingItems = this.selectedClips.map(item => {
             const domEl = item.clip.id === clickedClip.id ? el : this._findDomElement(item.clip.id);
             let top = 0;
@@ -2062,7 +2564,6 @@ export class TimelineManager {
                 top = (r.top - containerRect.top) + tracksContainer.scrollTop;
             }
             
-            // Estado inicial padrão (assume o que está lá)
             const originalState = { 
                 fadeIn: item.clip.fadeIn || 0, 
                 fadeOut: item.clip.fadeOut || 0 
@@ -2160,37 +2661,113 @@ export class TimelineManager {
             let targetTrackId = null;
             if (trackEl && trackEl.dataset.trackId) targetTrackId = trackEl.dataset.trackId;
 
-            const SNAP_THRESHOLD_PX = 15; // Pixels de resistência antes de permitir o crossfade
+            // --- PREPARAÇÃO DOS PONTOS DE SNAP ---
+            const snapPoints = [];
+            const tracksHeight = tracksContainer.scrollHeight;
+
+            // A. Pontos das Tracks (Clipes existentes)
+            this.studio.project.tracks.forEach(track => {
+                track.clips.forEach(c => {
+                    // Não dar snap em mim mesmo
+                    if (draggingItems.some(t => t.clip.id === c.id)) return; 
+                    
+                    const cEl = this._findDomElement(c.id);
+                    let top = 0, bottom = 0;
+                    if (cEl) {
+                        const r = cEl.getBoundingClientRect();
+                        top = (r.top - containerRect.top) + tracksContainer.scrollTop;
+                        bottom = (r.bottom - containerRect.top) + tracksContainer.scrollTop;
+                    } else {
+                        top = 0; bottom = tracksHeight; 
+                    }
+
+                    snapPoints.push({ time: c.start, top, bottom });
+                    snapPoints.push({ time: c.start + c.duration, top, bottom });
+                });
+            });
+            
+            // Agulha
+            snapPoints.push({ time: this.studio.project.currentTime, top: 0, bottom: tracksHeight });
+
+            // Marcadores (Magnetismo Global)
+            if (this.studio.project.markers) {
+                this.studio.project.markers.forEach(m => {
+                    snapPoints.push({ 
+                        time: m.time, 
+                        top: 0, 
+                        bottom: tracksHeight, // Linha de snap cobre toda altura
+                        isMarker: true // Flag opcional se quiser estilizar diferente
+                    });
+                });
+            }
+
+            const SNAP_THRESHOLD_PX = 15;
             const snapThresholdSec = SNAP_THRESHOLD_PX / this.studio.project.zoom;
 
-            draggingItems.forEach(item => {
-                let rawNewStart = Math.max(0, item.startStart + deltaTime);
+            // --- CÁLCULO DE MOVIMENTO COM SNAP ---
+            // (Calcula o delta efetivo baseado no snap do CLIPE PRINCIPAL que está sendo arrastado)
+            
+            // Item principal (o que foi clicado) guia o snap do grupo
+            const mainItem = draggingItems.find(i => i.clip.id === clickedClip.id) || draggingItems[0];
+            let rawMainStart = Math.max(0, mainItem.startStart + deltaTime);
+            let rawMainEnd = rawMainStart + mainItem.clip.duration;
 
+            let bestSnap = null;
+            let minDist = Infinity;
+
+            // Verifica Snap para o Início do Clipe
+            for (const pt of snapPoints) {
+                const dist = Math.abs(pt.time - rawMainStart);
+                if (dist < snapThresholdSec && dist < minDist) {
+                    minDist = dist;
+                    bestSnap = { target: pt.time, type: 'start', ptObj: pt };
+                }
+            }
+            // Verifica Snap para o Fim do Clipe
+            for (const pt of snapPoints) {
+                const dist = Math.abs(pt.time - rawMainEnd);
+                if (dist < snapThresholdSec && dist < minDist) {
+                    minDist = dist;
+                    bestSnap = { target: pt.time - mainItem.clip.duration, type: 'end', ptObj: pt };
+                }
+            }
+
+            let effectiveDelta = deltaTime; // Default sem snap
+
+            if (bestSnap) {
+                // Recalcula o delta exato para grudar no snap
+                const snappedStart = bestSnap.target;
+                effectiveDelta = snappedStart - mainItem.startStart;
+                
+                // Feedback Visual
+                const lineTop = Math.min(mainItem.top, bestSnap.ptObj.top);
+                const lineH = Math.max(mainItem.top + mainItem.height, bestSnap.ptObj.bottom) - lineTop;
+                // Se for marcador ou agulha, desenha tela cheia
+                const finalTop = (bestSnap.ptObj.bottom >= tracksHeight) ? 0 : lineTop;
+                const finalH = (bestSnap.ptObj.bottom >= tracksHeight) ? tracksHeight : lineH;
+
+                this._updateSnapLine(
+                    (bestSnap.type === 'start' ? snappedStart : snappedStart + mainItem.clip.duration), 
+                    true, finalTop, finalH
+                );
+            } else {
+                this._updateSnapLine(0, false);
+                // Se não tem snap magnético, aplica snap de frame no delta
+                const desiredStart = mainItem.startStart + deltaTime;
+                const snappedFrameStart = this._snapToFrame(desiredStart);
+                effectiveDelta = snappedFrameStart - mainItem.startStart;
+            }
+
+            // --- APLICAÇÃO ---
+            draggingItems.forEach(item => {
                 const currentTrackId = targetTrackId && targetTrackId !== item.trackId ? targetTrackId : item.trackId;
                 const trackRef = this.studio.project.tracks.find(t => t.id === currentTrackId);
+                
+                let newStart = Math.max(0, item.startStart + effectiveDelta);
+                
+                newStart = this._snapToFrame(newStart);
 
-                if (trackRef) {
-                    const otherClips = trackRef.clips.filter(c => c.id !== item.clip.id);
-                    
-                    // 1. Checa colisão à Esquerda (Inicio do meu clipe x Fim do vizinho)
-                    const leftNeighbor = otherClips.find(c => Math.abs((c.start + c.duration) - rawNewStart) < snapThresholdSec);
-                    if (leftNeighbor) {
-                        // "Gruda" no final do vizinho, evitando o crossfade imediato
-                        rawNewStart = leftNeighbor.start + leftNeighbor.duration;
-                    }
-
-                    // 2. Checa colisão à Direita (Fim do meu clipe x Inicio do vizinho)
-                    const myEstimatedEnd = rawNewStart + item.clip.duration;
-                    const rightNeighbor = otherClips.find(c => Math.abs(c.start - myEstimatedEnd) < snapThresholdSec);
-                    if (rightNeighbor) {
-                        // "Gruda" no inicio do vizinho
-                        rawNewStart = rightNeighbor.start - item.clip.duration;
-                    }
-                }
-
-                let newStart = this._snapToFrame(rawNewStart); 
-
-                // Lógica de Troca de Trilha
+                // Troca de Trilha
                 if (targetTrackId && targetTrackId !== item.trackId) {
                      const currentTrack = this.studio.project.tracks.find(t => t.id === item.trackId);
                      const targetTrack = this.studio.project.tracks.find(t => t.id === targetTrackId);
@@ -2200,15 +2777,12 @@ export class TimelineManager {
                          const newLane = trackEl.querySelector('.track-lane');
                          if (newLane && item.el) newLane.appendChild(item.el);
                          item.trackId = targetTrackId;
-                         const rect = newLane.getBoundingClientRect();
-                         item.top = (rect.top - containerRect.top) + tracksContainer.scrollTop;
                      }
                 }
                 
                 item.clip.start = newStart;
                 if (item.el) item.el.style.left = (newStart * this.studio.project.zoom) + "px";
 
-                // --- 1. RESET: Aplica os valores originais (sem crossfade) ---
                 item.clip.fadeIn = item.originalFades.fadeIn;
                 item.clip.fadeOut = item.originalFades.fadeOut;
 
@@ -2269,6 +2843,7 @@ export class TimelineManager {
             this._renderCrossfadeGuides(); 
             window.removeEventListener("mousemove", onMove); 
             window.removeEventListener("mouseup", onUp); 
+            this._updateSnapLine(0, false);
             if (didActuallyChange) this.studio.historyManager.pushManualState(preMoveState);
             this.studio.markUnsavedChanges();
         };
@@ -2376,15 +2951,14 @@ export class TimelineManager {
         // Estado Inicial
         const initialStart = clip.start;
         const initialDuration = clip.duration;
+        const initialEnd = initialStart + initialDuration;
         const initialOffset = clip.offset || 0;
         const isLeft = (actionStr === 'resize-left');
 
         const tracksContainer = document.getElementById('studio-tracks');
         const containerRect = tracksContainer.getBoundingClientRect();
-        
         const zoom = this.studio.project.zoom; 
 
-        // Dados para o Snap
         const activeRect = el.getBoundingClientRect();
         const activeTop = (activeRect.top - containerRect.top) + tracksContainer.scrollTop;
         const activeBottom = (activeRect.bottom - containerRect.top) + tracksContainer.scrollTop;
@@ -2394,15 +2968,41 @@ export class TimelineManager {
         
         const addTarget = (c, element, t) => {
             if (!targets.some(existing => existing.clip.id === c.id)) {
-                targets.push({ clip: c, el: element, track: t });
+                targets.push({ 
+                    clip: c, 
+                    el: element, 
+                    track: t,
+                    // Guarda o estado inicial individual de cada clipe do grupo
+                    initStart: c.start,
+                    initDur: c.duration,
+                    initOffset: c.offset || 0
+                });
             }
         };
 
+        // Lógica de Grupo Inteligente
         if (clip.groupId) {
             this.studio.project.tracks.forEach(track => {
                 track.clips.forEach(c => {
                     if (c.groupId === clip.groupId) {
-                        if (Math.abs(c.start - initialStart) < 0.01 && Math.abs(c.duration - initialDuration) < 0.01) {
+                        const EPSILON = 0.05; // Tolerância de 50ms
+                        
+                        // Verifica alinhamento das bordas
+                        const sameStart = Math.abs(c.start - initialStart) < EPSILON;
+                        const cEnd = c.start + c.duration;
+                        const sameEnd = Math.abs(cEnd - initialEnd) < EPSILON;
+
+                        let shouldResize = false;
+
+                        if (isLeft) {
+                            // Se estou mexendo na Esquerda, puxa quem começa junto
+                            if (sameStart) shouldResize = true;
+                        } else {
+                            // Se estou mexendo na Direita, puxa quem termina junto
+                            if (sameEnd) shouldResize = true;
+                        }
+
+                        if (shouldResize) {
                             const domEl = c.id === clip.id ? el : this._findDomElement(c.id);
                             addTarget(c, domEl, track);
                         }
@@ -2411,16 +3011,20 @@ export class TimelineManager {
             });
         }
         
+        // Se não achou ninguém (ou não tem grupo), adiciona a si mesmo
         if (!targets.some(t => t.clip.id === clip.id)) {
             const track = this.studio.project.tracks.find(t => t.clips.some(c => c.id === clip.id));
             addTarget(clip, el, track);
         }
 
-        // 2. Mapeamento de Pontos Magnéticos
+        // Mapeamento de Pontos Magnéticos (SNAP POINTS)
         const snapPoints = [];
+        const tracksHeight = tracksContainer.scrollHeight;
         
+        // Outros Clips
         this.studio.project.tracks.forEach(track => {
             track.clips.forEach(c => {
+                // Não dar snap nos clipes que estão sendo redimensionados
                 if (targets.some(t => t.clip.id === c.id)) return; 
                 
                 const cEl = this._findDomElement(c.id);
@@ -2430,14 +3034,27 @@ export class TimelineManager {
                     top = (r.top - containerRect.top) + tracksContainer.scrollTop;
                     bottom = (r.bottom - containerRect.top) + tracksContainer.scrollTop;
                 } else {
-                    top = (track.index || 0) * 100; bottom = top + 80; 
+                    top = 0; bottom = tracksHeight; 
                 }
 
                 snapPoints.push({ time: c.start, top, bottom });
                 snapPoints.push({ time: c.start + c.duration, top, bottom });
             });
         });
-        snapPoints.push({ time: this.studio.project.currentTime, top: 0, bottom: tracksContainer.scrollHeight });
+        
+        // Agulha
+        snapPoints.push({ time: this.studio.project.currentTime, top: 0, bottom: tracksHeight });
+
+        // Marcadores
+        if (this.studio.project.markers) {
+            this.studio.project.markers.forEach(m => {
+                snapPoints.push({ 
+                    time: m.time, 
+                    top: 0, 
+                    bottom: tracksHeight 
+                });
+            });
+        }
         
         const preResizeState = this.studio.historyManager._createSnapshot();
         let didResize = false;
@@ -2449,143 +3066,145 @@ export class TimelineManager {
             didResize = true;
             
             const deltaSec = deltaPx / zoom;
-            let finalStart = initialStart;
-            let finalDuration = initialDuration;
-            let finalOffset = initialOffset;
+            
+            // Variáveis de controle mestre
+            let masterNewStart = initialStart;
+            let masterNewDur = initialDuration;
 
-            if (isLeft) {
-                // --- LÓGICA ESQUERDA ---
-                let rawNewStart = initialStart + deltaSec;
-                
-                let bestSnap = null;
+            // Função helper para achar melhor snap
+            const findBestSnap = (targetTime) => {
+                let best = null;
                 let minDist = Infinity;
-                
                 for (const pt of snapPoints) {
-                    const distPx = Math.abs(pt.time - rawNewStart) * zoom;
+                    const distPx = Math.abs(pt.time - targetTime) * zoom;
                     if (distPx < SNAP_THRESHOLD_PX && distPx < minDist) {
                         minDist = distPx;
-                        bestSnap = pt;
+                        best = pt;
                     }
                 }
+                return best;
+            };
+
+            if (isLeft) {
+                // --- RESIZE ESQUERDA (Start) ---
+                let rawNewStart = initialStart + deltaSec;
+                let bestSnap = findBestSnap(rawNewStart);
                 
                 if (bestSnap) {
                     rawNewStart = bestSnap.time;
-                    this._updateSnapLine(bestSnap.time, true, Math.min(activeTop, bestSnap.top), Math.max(activeBottom, bestSnap.bottom) - Math.min(activeTop, bestSnap.top));
+                    const guideTop = (bestSnap.bottom > tracksHeight - 10) ? 0 : Math.min(activeTop, bestSnap.top);
+                    const guideH = (bestSnap.bottom > tracksHeight - 10) ? tracksHeight : Math.max(activeBottom, bestSnap.bottom) - guideTop;
+                    this._updateSnapLine(bestSnap.time, true, guideTop, guideH);
                 } else {
                     rawNewStart = this._snapToFrame(rawNewStart);
                     this._updateSnapLine(0, false);
                 }
 
+                // Cálculo do Delta Efetivo (quanto mudou em relação ao inicio original)
                 const effectiveDelta = rawNewStart - initialStart;
-
+                
+                // Aplica limite mínimo de duração no mestre para não inverter
                 if ((initialDuration - effectiveDelta) < (1/30)) {
                     rawNewStart = initialStart + initialDuration - (1/30);
+                } else {
+                    masterNewStart = rawNewStart;
                 }
 
-                let proposedOffset = initialOffset + (rawNewStart - initialStart);
-                if (proposedOffset < 0) {
-                    proposedOffset = 0;
-                    rawNewStart = initialStart - initialOffset; 
-                }
+                // Aplica a TODOS os targets baseado no delta efetivo
+                targets.forEach(target => {
+                    let newS = target.initStart + effectiveDelta;
+                    let newD = target.initDur - effectiveDelta;
+                    let newO = target.initOffset + effectiveDelta;
 
-                finalStart = rawNewStart;
-                finalOffset = proposedOffset;
-                finalDuration = initialDuration - (finalStart - initialStart);
+                    if (newO < 0) { // Proteção de offset negativo
+                        newS = target.initStart - target.initOffset;
+                        newD = target.initDur + target.initOffset; // Compensa
+                        newO = 0;
+                    }
+                    
+                    if (newD < (1/30)) return; // Proteção mínima
+
+                    target.clip.start = newS;
+                    target.clip.duration = newD;
+                    target.clip.offset = newO;
+                });
 
             } else {
-                // --- LÓGICA DIREITA ---
+                // --- RESIZE DIREITA (Duration) ---
                 let rawWidth = Math.max(10, (initialDuration * zoom) + deltaPx);
                 let rawDur = rawWidth / zoom;
                 const projectedEnd = initialStart + rawDur;
                 
-                let bestSnap = null;
-                let minDist = Infinity;
-                for (const pt of snapPoints) {
-                    const distPx = Math.abs(pt.time - projectedEnd) * zoom;
-                    if (distPx < SNAP_THRESHOLD_PX && distPx < minDist) {
-                        minDist = distPx;
-                        bestSnap = pt;
-                    }
-                }
+                let bestSnap = findBestSnap(projectedEnd);
                 
                 if (bestSnap) {
-                    finalDuration = bestSnap.time - initialStart;
-                    this._updateSnapLine(bestSnap.time, true, Math.min(activeTop, bestSnap.top), Math.max(activeBottom, bestSnap.bottom) - Math.min(activeTop, bestSnap.top));
+                    // Recalcula duração baseada no snap point final
+                    masterNewDur = bestSnap.time - initialStart;
+                    const guideTop = (bestSnap.bottom > tracksHeight - 10) ? 0 : Math.min(activeTop, bestSnap.top);
+                    const guideH = (bestSnap.bottom > tracksHeight - 10) ? tracksHeight : Math.max(activeBottom, bestSnap.bottom) - guideTop;
+                    this._updateSnapLine(bestSnap.time, true, guideTop, guideH);
                 } else {
-                    finalDuration = this._snapToFrame(rawDur);
+                    masterNewDur = this._snapToFrame(rawDur);
                     this._updateSnapLine(0, false);
                 }
-                if (finalDuration < (1/30)) finalDuration = (1/30);
+                
+                if (masterNewDur < (1/30)) masterNewDur = (1/30);
+
+                // Delta de duração em relação ao original
+                const durationDelta = masterNewDur - initialDuration;
+
+                // Aplica a TODOS os targets
+                targets.forEach(target => {
+                    const newD = Math.max(1/30, target.initDur + durationDelta);
+                    target.clip.duration = newD;
+                });
             }
 
-            // --- APLICAÇÃO EM LOTE ---
+            // --- ATUALIZAÇÃO VISUAL EM LOTE ---
             targets.forEach(target => {
                 const tClip = target.clip;
                 const tEl = target.el;
                 const tTrack = target.track;
 
-                tClip.start = finalStart;
-                tClip.duration = finalDuration;
-                tClip.offset = finalOffset;
-
-                if ((tClip.fadeIn + tClip.fadeOut) > finalDuration) {
-                     if (tClip.fadeIn > finalDuration) tClip.fadeIn = finalDuration;
-                     tClip.fadeOut = Math.max(0, finalDuration - tClip.fadeIn);
+                if ((tClip.fadeIn + tClip.fadeOut) > tClip.duration) {
+                     if (tClip.fadeIn > tClip.duration) tClip.fadeIn = tClip.duration;
+                     tClip.fadeOut = Math.max(0, tClip.duration - tClip.fadeIn);
                 }
 
-                // Estica o tempo do último segmento de texto para acompanhar o clipe
                 if (tClip.type === 'subtitle' && tClip.transcriptionData && tClip.transcriptionData.length > 0) {
                     const lastWord = tClip.transcriptionData[tClip.transcriptionData.length - 1];
-                    // O fim "lógico" dos dados atuais (levando em conta que o offset pode ter mudado se for resize-left)
-                    // Mas focando no resize-right pedido:
                     const contentEndTime = lastWord.end; 
-                    const clipEndTime = tClip.offset + tClip.duration; // Tempo relativo ao asset (offset + duration)
-
-                    // Se a duração do clipe excede o último dado de texto por mais de 0.5s
-                    if (clipEndTime > (contentEndTime + 0.5)) {
-                        tClip.needsTranscription = true;
-                    } else {
-                        // Se encolheu de volta, remove o aviso (opcional)
-                        if(tClip.needsTranscription) tClip.needsTranscription = false;
-                    }
+                    const clipEndTime = tClip.offset + tClip.duration; 
+                    tClip.needsTranscription = (clipEndTime > (contentEndTime + 0.5));
                 }
 
                 if (tEl) {
-                    tEl.style.left = (finalStart * zoom) + "px";
-                    tEl.style.width = (finalDuration * zoom) + "px";
+                    tEl.style.left = (tClip.start * zoom) + "px";
+                    tEl.style.width = (tClip.duration * zoom) + "px";
                     this._updateFadeVisuals(tClip, tEl);
 
-                    // Busca o asset real
+                    // Redesenha conteúdo (Thumbnails/Waveform/LoopMarkers)
                     let tAsset = this.studio.project.assets.find(a => a.id === tClip.assetId);
                     
                     if (!tAsset && tClip.type === 'subtitle') {
-                        tAsset = { 
-                            id: 'virtual_subtitle_asset',
-                            type: 'subtitle',
-                            // Define duração base igual à duração atual para evitar loop markers
-                            baseDuration: tClip.duration + tClip.offset 
-                        };
+                        tAsset = { id: 'virtual_subtitle', type: 'subtitle', baseDuration: tClip.duration + tClip.offset };
                     }
 
                     if (tAsset) {
                         const isAudioTrack = tTrack && tTrack.type === 'audio';
 
-                        // 1. Loop Markers (Só desenha se o clipe for maior que o asset original)
+                        // 1. Loop Markers
                         if (tAsset.baseDuration > 0) {
                             const baseDur = tAsset.baseDuration;
-                            
                             const oldMarkers = tEl.querySelectorAll('.loop-marker');
                             for(let m of oldMarkers) m.remove();
                             
-                            // Tolerância pequena para float
                             if (baseDur < (tClip.duration + tClip.offset - 0.01)) {
                                 const totalTime = tClip.duration + tClip.offset;
                                 const loops = Math.floor(totalTime / baseDur);
-                                
                                 for(let i=1; i<=loops; i++) {
                                     const timePoint = i * baseDur;
                                     const relativePixel = (timePoint - tClip.offset) * zoom;
-
                                     if (relativePixel > 0 && relativePixel < (tClip.duration * zoom)) {
                                         const m = document.createElement("div");
                                         m.className = "loop-marker loop-vinco";
@@ -2691,14 +3310,14 @@ export class TimelineManager {
     }
 
     splitClip() {
-        // 1. Validação Inicial
+        // Validação Inicial
         if (this.selectedClips.length === 0) return;
         
         // Usa o primeiro clipe selecionado como referência para o tempo (cursor)
         const primarySelection = this.selectedClips[0];
         const cursorTime = this.studio.project.currentTime;
         
-        // 2. Identificação do Escopo (Grupo ou Individual)
+        // Identificação do Escopo (Grupo ou Individual)
         let clipsToSplit = [];
         const groupId = primarySelection.clip.groupId;
 
@@ -2722,7 +3341,7 @@ export class TimelineManager {
         let didSplit = false;
         const newlyCreatedClips = [];
 
-        // 3. Processamento do Corte
+        // Processamento do Corte
         clipsToSplit.forEach(({ clip, track }) => {
             // Verifica se o cursor está DENTRO do clipe (margem 10ms)
             if (cursorTime > (clip.start + 0.01) && cursorTime < (clip.start + clip.duration - 0.01)) {
@@ -2730,10 +3349,10 @@ export class TimelineManager {
                 const relativeSplitPoint = cursorTime - clip.start;
                 const oldDuration = clip.duration;
                 
-                // --- A: Ajusta o Clipe Original (Lado Esquerdo) ---
+                // --- Ajusta o Clipe Original (Lado Esquerdo) ---
                 clip.duration = relativeSplitPoint;
                 
-                // --- B: Cria o Novo Clipe (Lado Direito) ---
+                // --- Cria o Novo Clipe (Lado Direito) ---
                 // Deep clone para preservar configs (Style, Transform, etc)
                 const newClip = JSON.parse(JSON.stringify(clip));
                 
@@ -2743,14 +3362,13 @@ export class TimelineManager {
                 newClip.offset = clip.offset + relativeSplitPoint;
                 newClip.groupId = newRightGroupId;
 
-                // --- C: Lógica Especial para Legendas (Word-Level Split) ---
+                // --- Lógica Especial para Legendas (Word-Level Split) ---
                 if (clip.type === 'subtitle' && Array.isArray(clip.transcriptionData)) {
                     const absoluteSplitPointAsset = clip.offset + relativeSplitPoint;
                     const allWords = clip.transcriptionData;
                     
                     let leftWords, rightWords;
 
-                    // [INTELIGÊNCIA NOVA] Se houver apenas 1 chunk, copia para ambos os lados.
                     // Isso evita que um lado fique "zumbi" (sem dados) se o usuário cortar no silêncio.
                     if (allWords.length === 1) {
                         leftWords = [...allWords];

@@ -3,7 +3,6 @@ import { AssetManager } from './managers/AssetManager.js';
 import { TimelineManager } from './managers/TimelineManager.js';
 import { PlaybackManager } from './managers/PlaybackManager.js';
 import { RenderManager } from './managers/RenderManager.js';
-import { updateHeaderWidth } from './utils.js';
 import { ProjectStorage } from '../../services/ProjectStorage.js';
 import { VideoStorage } from '../../services/VideoStorage.js';
 

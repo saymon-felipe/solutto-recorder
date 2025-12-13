@@ -11,7 +11,8 @@ export class HistoryManager {
         return JSON.stringify({
             tracks: this.studio.project.tracks,
             duration: this.studio.project.duration,
-            zoom: this.studio.project.zoom
+            zoom: this.studio.project.zoom,
+            selection: this.studio.timelineManager.selectedClips
         });
     }
 
@@ -90,8 +91,7 @@ export class HistoryManager {
             this.studio.timelineManager.renderTracks();
             this.studio.timelineManager.renderRuler();
             this.studio.playbackManager.syncPreview();
-
-            this.studio.timelineManager.selectedClips = [];
+            this.studio.timelineManager.selectedClips = state.selection;
             
             if (selectedIds.length > 0) {
                 this.studio.project.tracks.forEach(track => {

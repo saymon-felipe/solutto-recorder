@@ -14,9 +14,24 @@ export class RenderManager {
         if(btnRender) btnRender.onclick = () => this._openRenderModal();
     }
 
+    verifyIfTheProjectIsEmpty() {
+        let empty = true;
+
+        this.studio.project.tracks.forEach(track => {
+            if (track.clips.length > 0) {
+                empty = false;
+            }
+        })
+
+        return empty;
+    }
+
     _openRenderModal() {
         const modal = document.getElementById("render-modal");
         if (!modal) return;
+
+        const empty = this.verifyIfTheProjectIsEmpty();
+        if (empty) return;
         
         const resInput = document.getElementById("render-resolution");
         const projectW = this.studio.project.settings.width;
@@ -69,6 +84,7 @@ export class RenderManager {
 
     async renderProject(options) {
         if (this.isRendering) return;
+
         this.isRendering = true;
         this.abortController = new AbortController();
 
