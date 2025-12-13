@@ -435,29 +435,31 @@ export class UIManager {
                 <div class="modal-content">
                     <h3>Opções de Renderização</h3>
                     <div class="modal-body">
+                        
                         <div class="input-group">
-                            <label for="render-resolution">Resolução:</label>
-                            <select id="render-resolution">
-                                <option value="low">480p</option>
-                                <option value="medium" selected>720p (HD)</option>
-                                <option value="high">1080p (Full HD)</option>
+                            <label for="render-resolution">Resolução (Projeto):</label>
+                            <select id="render-resolution" disabled style="background: #222; color: #aaa; cursor: not-allowed;">
+                                <option value="project">Carregando...</option>
                             </select>
                         </div>
-                        <div class="input-group" style="opacity: 0; position: absolute; left: -99999px; top: -99999px;">
-                            <label for="render-quality">Qualidade (Preset):</label>
+
+                        <div class="input-group">
+                            <label for="render-quality">Qualidade:</label>
                             <select id="render-quality">
-                                <option value="veryfast">Baixa (Mais Rápido)</option>
+                                <option value="low">Baixa (Rápido)</option>
                                 <option value="medium" selected>Média (Equilíbrio)</option>
-                                <option value="veryslow">Alta (Melhor Qualidade)</option>
+                                <option value="high">Alta (Melhor Qualidade)</option>
                             </select>
                         </div>
+
                         <div class="input-group">
                             <label for="render-format">Formato de Saída:</label>
                             <select id="render-format">
-                                <option value="webm" selected>WebM (Original)</option>
-                                <option value="mp4">MP4 (Lento)</option>
+                                <option value="webm" selected>WebM</option>
+                                <option value="mp4">MP4</option>
                             </select>
                         </div>
+
                     </div>
                     <div class="modal-actions">
                         <button class="studio-btn" id="btn-render-cancel">Cancelar</button>
@@ -891,21 +893,22 @@ export class UIManager {
         const btnConfirm = document.getElementById('btn-ps-confirm'); 
         const buttons = document.querySelectorAll('.ps-orientation-btn');
         
-        // Popula valores atuais
-        if (this.studio.project.settings) {
-            const { width, height } = this.studio.project.settings;
-            inpW.value = width;
-            inpH.value = height;
+        let width = 1920; 
+        let height = 1080;
 
-            buttons.forEach(btn => btn.classList.remove('selected'));
-            const mode = width >= height ? 'landscape' : 'portrait';
-            const targetBtn = document.querySelector(`.ps-orientation-btn[data-mode="${mode}"]`);
-            if (targetBtn) targetBtn.classList.add('selected');
-        } else {
-             document.querySelector('.ps-orientation-btn[data-mode="landscape"]')?.classList.add('selected');
+        if (this.studio.project.settings && !this.studio.isFreshInit) {
+            width = this.studio.project.settings.width;
+            height = this.studio.project.settings.height;
         }
 
-        // Texto do Botão (Criar vs Salvar)
+        inpW.value = width;
+        inpH.value = height;
+
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        const mode = width >= height ? 'landscape' : 'portrait';
+        const targetBtn = document.querySelector(`.ps-orientation-btn[data-mode="${mode}"]`);
+        if (targetBtn) targetBtn.classList.add('selected');
+
         if (this.studio.project.id) {
             btnConfirm.innerHTML = `Salvar Alterações <i class="fa-solid fa-check" style="margin-left:5px"></i>`;
         } else {
@@ -922,11 +925,8 @@ export class UIManager {
         const inpW = document.getElementById('ps-width');
         const inpH = document.getElementById('ps-height');
         
-        if (btnClose) {
-            btnClose.onclick = () => modal.classList.add('hidden');
-        }
+        if (btnClose) btnClose.onclick = () => modal.classList.add('hidden');
         
-        // Lógica dos Botões Seletores (Cards)
         const buttons = document.querySelectorAll('.ps-orientation-btn');
         buttons.forEach(btn => {
             btn.onclick = () => {
@@ -935,31 +935,24 @@ export class UIManager {
 
                 const mode = btn.dataset.mode;
                 if (mode === 'landscape') {
-                    inpW.value = 1920;
+                    inpW.value = 1920; // 1080p
                     inpH.value = 1080;
                 } else if (mode === 'portrait') {
                     inpW.value = 1080;
-                    inpH.value = 1920;
+                    inpH.value = 1920; // 1080p Vertical
                 }
             };
         });
 
-        // Toggle Avançado
         const toggleBtn = document.getElementById('btn-toggle-advanced');
         const advContainer = document.getElementById('ps-advanced-container');
         
-        toggleBtn.onclick = () => {
+        if(toggleBtn) toggleBtn.onclick = () => {
             const isHidden = !advContainer.classList.contains('show');
-            if (isHidden) {
-                advContainer.classList.add('show');
-                toggleBtn.classList.add('open');
-            } else {
-                advContainer.classList.remove('show');
-                toggleBtn.classList.remove('open');
-            }
+            if (isHidden) { advContainer.classList.add('show'); toggleBtn.classList.add('open'); } 
+            else { advContainer.classList.remove('show'); toggleBtn.classList.remove('open'); }
         };
 
-        // Confirmação
         btnConfirm.onclick = async () => {
             const w = parseInt(inpW.value);
             const h = parseInt(inpH.value);
@@ -1677,10 +1670,7 @@ export class UIManager {
 
                 if (existingClip && lines.length > 0) {
                     
-                    // --- MODO SPLIT (Quebra de Linha) ---
                     if (lines.length > 1) {
-                        console.log("[UIManager] Quebra de linha detectada. Dividindo clipe...");
-                        
                         let parentTrack = this.studio.project.tracks.find(t => t.clips.find(c => c.id === existingClip.id));
                         
                         if (parentTrack) {
@@ -1731,9 +1721,7 @@ export class UIManager {
                                 cursorOffset += lineDuration;
                             });
                         }
-                    } 
-                    // --- MODO EDIÇÃO SIMPLES ---
-                    else {
+                    } else {
                         existingClip.subtitleConfig = newConfig;
                         const newSingleText = lines[0];
                         const originalText = (existingClip.transcriptionData || []).map(w => w.text).join(' ');

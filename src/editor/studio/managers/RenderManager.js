@@ -17,6 +17,17 @@ export class RenderManager {
     _openRenderModal() {
         const modal = document.getElementById("render-modal");
         if (!modal) return;
+        
+        const resInput = document.getElementById("render-resolution");
+        const projectW = this.studio.project.settings.width;
+        const projectH = this.studio.project.settings.height;
+        
+        if (resInput) {
+            resInput.innerHTML = `<option value="project" selected>${projectW}x${projectH}px</option>`;
+            
+            resInput.disabled = true; 
+        }
+
         modal.classList.remove('hidden');
         
         const btnCancel = document.getElementById("btn-render-cancel");
@@ -31,16 +42,14 @@ export class RenderManager {
         
         newConfirm.onclick = () => {
             modal.classList.add('hidden');
-            const resInput = document.getElementById("render-resolution");
             const fmtInput = document.getElementById("render-format");
             const qualInput = document.getElementById("render-quality");
 
-            const defaultRes = `${this.studio.project.settings.width}x${this.studio.project.settings.height}`;
-            
             const options = {
-                resolution: (resInput && resInput.value) ? resInput.value : defaultRes,
-                format: (fmtInput && fmtInput.value) ? fmtInput.value : 'mp4',
-                quality: (qualInput && qualInput.value) ? qualInput.value : 'high'
+                width: projectW,
+                height: projectH,
+                format: (fmtInput && fmtInput.value) ? fmtInput.value : 'webm',
+                quality: (qualInput && qualInput.value) ? qualInput.value : 'medium'
             };
             
             this.renderProject(options);
@@ -93,12 +102,8 @@ export class RenderManager {
             }
             const ffmpeg = transcoder.ffmpeg;
 
-            let [width, height] = options.resolution.split('x').map(Number);
-            if (!width || !height || isNaN(width) || isNaN(height)) {
-                width = this.studio.project.settings.width || 1280;
-                height = this.studio.project.settings.height || 720;
-            }
-
+            const width = options.width;
+            const height = options.height;
             const fps = 30;
             const duration = this._getProjectEndTime();
             const totalFrames = Math.ceil(duration * fps);
@@ -108,27 +113,24 @@ export class RenderManager {
             canvas.height = height;
             const ctx = canvas.getContext('2d', { alpha: false });
 
-            console.log(`[Render] Início: ${width}x${height} @ ${fps}fps. Dur: ${duration.toFixed(2)}s. Frames: ${totalFrames}`);
+            console.log(`[Render] Início: ${width}x${height} @ ${fps}fps. Qualidade: ${options.quality}`);
 
-            // 1. Áudio (Rápido - conta como parte do inicio)
+            // 1. Áudio
             this._updateProgress(1, "Renderizando Áudio Master...");
             const audioBlob = await this._renderMasterAudio(duration);
             const audioFilename = "master.wav";
             await ffmpeg.writeFile(audioFilename, await this._fetchFile(audioBlob));
 
-            // 2. Loop de Vídeo (0% -> 80% do progresso total)
+            // 2. Loop de Vídeo
             let videoChunks = [];
             let frameBuffer = [];
             const BATCH_SIZE = 30; 
-            
             const originalTime = this.studio.project.currentTime;
 
             for (let i = 0; i < totalFrames; i++) {
                 if (this.abortController.signal.aborted) throw new Error("Renderização cancelada pelo usuário.");
 
                 const time = i / fps;
-                
-                // Pausa para GC a cada 15 frames
                 if (i % 15 === 0) await new Promise(r => setTimeout(r, 0));
 
                 let blob = await this.studio.playbackManager.renderFrameOffline(time, ctx, width, height);
@@ -139,24 +141,20 @@ export class RenderManager {
                 
                 let buf = await blob.arrayBuffer();
                 await ffmpeg.writeFile(frameName, new Uint8Array(buf));
-                
-                // Limpeza JS
-                blob = null;
-                buf = null;
+                blob = null; buf = null;
                 
                 frameBuffer.push(frameName);
                 this.framesProcessed++;
 
-                // ATUALIZAÇÃO FASE 1 (0% a 80%)
                 const framePct = (this.framesProcessed / totalFrames) * 80;
-                this._updateProgress(framePct, `Processando frame ${i}/${totalFrames}`, null); // null = calcula auto
+                this._updateProgress(framePct, `Processando frame ${i}/${totalFrames}`, null);
 
-                // Processa Batch
                 if (frameBuffer.length >= BATCH_SIZE || i === totalFrames - 1) {
                     if (frameBuffer.length === 0) continue;
 
                     const chunkName = `chunk_${videoChunks.length}.mp4`;
                     
+                    // Gera chunk intermediário rápido (sempre ultrafast para agilidade nesta etapa)
                     await ffmpeg.exec([
                         "-framerate", `${fps}`,
                         "-start_number", "0",
@@ -170,63 +168,62 @@ export class RenderManager {
 
                     videoChunks.push(chunkName);
 
-                    for (const f of frameBuffer) {
-                        try { await ffmpeg.deleteFile(f); } catch(e){}
-                    }
+                    for (const f of frameBuffer) { try { await ffmpeg.deleteFile(f); } catch(e){} }
                     frameBuffer = [];
                 }
             }
 
-            // 3. Concatenação (80% fixo)
-            this._updateProgress(80, "Unindo segmentos de vídeo...");
-            
+            this._updateProgress(80, "Unindo segmentos...");
             const listName = "chunks.txt";
             const listContent = videoChunks.map(c => `file '${c}'`).join('\n');
             await ffmpeg.writeFile(listName, new TextEncoder().encode(listContent));
 
             const videoOnlyName = "video_silent.mp4";
-            
-            await ffmpeg.exec([
-                "-f", "concat", "-safe", "0", "-i", listName, "-c", "copy", videoOnlyName
-            ]);
+            await ffmpeg.exec(["-f", "concat", "-safe", "0", "-i", listName, "-c", "copy", videoOnlyName]);
 
             await this._cleanupFS(ffmpeg, [...videoChunks, listName]);
             videoChunks = [];
 
-            // 4. Mixagem Final (80% -> 100%)
-            // Configura listener de log para progresso real do FFmpeg
             logHandler = ({ message }) => {
-                // Parse do tempo: time=00:00:05.20
                 const timeMatch = typeof message === 'string' ? message.match(/time=\s*(\d{2}:\d{2}:\d{2}\.\d{2})/) : null;
-                // Parse da velocidade: speed=1.5x
-                const speedMatch = typeof message === 'string' ? message.match(/speed=\s*([\d.]+)x/) : null;
-
                 if (timeMatch) {
                     const tStr = timeMatch[1];
                     const [h, m, s] = tStr.split(':');
                     const processedSeconds = (parseInt(h) * 3600) + (parseInt(m) * 60) + parseFloat(s);
-                    
-                    // Progresso dentro dos 20% finais
                     const encodePct = Math.min(1, processedSeconds / duration);
                     const globalPct = 80 + (encodePct * 20);
-                    
-                    let speedText = speedMatch ? `${speedMatch[1]}x (Encoding)` : "Encoding...";
-                    
-                    this._updateProgress(globalPct, "Finalizando (Encoding)...", speedText);
+                    this._updateProgress(globalPct, "Finalizando (Encoding)...");
                 }
             };
-            
             ffmpeg.on("log", logHandler);
 
             const outputName = `final.${options.format}`;
-            const outputArgs = [];
-            
+            const outputArgs = []; 
+
             if (options.format === 'webm') {
-                // VP8 para WebM
-                outputArgs.push("-c:v", "libvpx", "-b:v", "1M", "-crf", "10", "-c:a", "libvorbis");
-            } else { 
-                // MP4 Copy
-                outputArgs.push("-c:v", "copy", "-c:a", "aac");
+                // Codec VP8/VP9
+                outputArgs.push("-c:v", "libvpx", "-c:a", "libvorbis");
+                
+                if (options.quality === 'low') {
+                    outputArgs.push("-b:v", "500k", "-crf", "35"); // Rápido, leve, baixa qualidade
+                } else if (options.quality === 'high') {
+                    outputArgs.push("-b:v", "3M", "-crf", "4");    // Alta qualidade, pesado
+                } else {
+                    outputArgs.push("-b:v", "1M", "-crf", "10");   // Médio (Padrão)
+                }
+            } else {                 
+                outputArgs.push("-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p");
+
+                if (options.quality === 'low') {
+                    // Baixa qualidade, muito rápido
+                    outputArgs.push("-preset", "ultrafast", "-crf", "28"); 
+                } else if (options.quality === 'high') {
+                    // Alta qualidade, mais lento
+                    outputArgs.push("-preset", "medium", "-crf", "18"); 
+                } else {
+                    // Média (Equilíbrio)
+                    outputArgs.push("-preset", "veryfast", "-crf", "23"); 
+                }
             }
 
             await ffmpeg.exec([
@@ -239,7 +236,6 @@ export class RenderManager {
                 outputName
             ]);
 
-            // Remove listener
             ffmpeg.off("log", logHandler);
             logHandler = null;
 
@@ -265,6 +261,7 @@ export class RenderManager {
             }
 
             this.studio.editor.currentExtension = options.format; 
+            
             const url = URL.createObjectURL(finalBlob);
             await this.studio.editor._loadVideo(url);
             
@@ -282,12 +279,10 @@ export class RenderManager {
                 this.studio.playbackManager.toggleMonitorMute(false);
             }
 
-            this.isRendering = false; // Libera flag global
-
+            this.isRendering = false;
             this.studio.editor._enableButtons();
             this.studio.toggleMode();
             
-            const overlay = document.getElementById('render-progress-overlay');
             if(overlay) overlay.classList.add('hidden');
             const btn = document.getElementById("btn-studio-render");
             if(btn) btn.disabled = false;
@@ -295,13 +290,11 @@ export class RenderManager {
         } catch (error) {
             console.error("Render Error:", error);
             if (logHandler) {
-                // Tenta limpar se der erro no meio
                 try { 
                     const transcoder = this.studio.editor.transcoder;
                     if(transcoder && transcoder.ffmpeg) transcoder.ffmpeg.off("log", logHandler);
                 } catch(e){}
             }
-            
             if (error.message !== "Renderização cancelada pelo usuário.") {
                 alert("Erro: " + error.message);
             }
@@ -382,7 +375,7 @@ export class RenderManager {
             if (pct > 1 && pct < 100) {
                 const totalEstimatedSeconds = (elapsedSeconds / pct) * 100;
                 const remainingSeconds = Math.max(0, totalEstimatedSeconds - elapsedSeconds);
-                if (elRemaining) elRemaining.innerText = `Faltam: ${this._fmt(remainingSeconds)}`;
+                if (elRemaining) elRemaining.innerText = `${this._fmt(remainingSeconds)}`;
             } else if (pct >= 100) {
                 if (elRemaining) elRemaining.innerText = "Finalizado";
             } else {
