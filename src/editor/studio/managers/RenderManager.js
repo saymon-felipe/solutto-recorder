@@ -298,13 +298,10 @@ export class RenderManager {
             this.isRendering = false;
             this.studio.editor._enableButtons();
             this.studio.toggleMode();
-            
-            if(overlay) overlay.classList.add('hidden');
-            const btn = document.getElementById("btn-studio-render");
-            if(btn) btn.disabled = false;
 
         } catch (error) {
             console.error("Render Error:", error);
+
             if (logHandler) {
                 try { 
                     const transcoder = this.studio.editor.transcoder;
@@ -317,6 +314,10 @@ export class RenderManager {
         } finally {
             this.isRendering = false;
             if (btnAbort) btnAbort.onclick = null;
+
+            if(overlay) overlay.classList.add('hidden');
+            const btn = document.getElementById("btn-studio-render");
+            if(btn) btn.disabled = false;
         }
     }
 

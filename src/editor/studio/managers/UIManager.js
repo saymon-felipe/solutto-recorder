@@ -683,7 +683,7 @@ export class UIManager {
                         <textarea id="sub-text-edit" rows="3" style="width:100%; padding:8px; background:#111; border:1px solid #444; color:white; resize:vertical; font-family:sans-serif; border-radius:4px;"></textarea>
                     </div>
 
-                    <div class="subtitle-preview-box" style="margin-bottom: 20px; background: #111; border: 1px solid #333; padding: 20px; text-align: center; border-radius:4px; min-height:60px; display:flex; align-items:center; justify-content:center;">
+                    <div class="subtitle-preview-box" style="overflow-y: auto; margin-bottom: 20px; background: #111; border: 1px solid #333; padding: 20px; text-align: center; border-radius:4px; min-height:60px; display:flex; align-items:center; justify-content:center;">
                         <span id="sub-preview-target" class="subtitle-preview-text">Preview</span>
                     </div>
                     
@@ -1542,15 +1542,131 @@ export class UIManager {
 
         const btnGenSub = document.getElementById('btn-gen-subtitles');
         if (btnGenSub) {
-            btnGenSub.onclick = () => this.studio.createSubtitleAsset();
+            btnGenSub.onclick = () => {
+                const assetId = "asset_sub_" + Date.now();
+                const newAsset = {
+                    id: assetId,
+                    name: "Legenda Automática",
+                    type: 'subtitle',
+                    status: 'ready',
+                    url: '' 
+                };
+                if(this.studio.project.assets) this.studio.project.assets.push(newAsset);
+
+                let subTrack = this.studio.project.tracks.find(t => 
+                    t.type === 'subtitle' || 
+                    (t.name && t.name.toLowerCase().includes('legenda'))
+                );
+
+                let startTime = this.studio.project.currentTime;
+
+                if (subTrack) {
+                    if(subTrack.type !== 'subtitle') subTrack.type = 'subtitle';
+
+                    if (subTrack.clips && subTrack.clips.length > 0) {
+                        const maxEnd = subTrack.clips.reduce((max, c) => {
+                            const end = c.start + c.duration;
+                            return end > max ? end : max;
+                        }, 0);
+
+                        if (startTime < maxEnd) {
+                            startTime = maxEnd + 0.1; 
+                        }
+                    }
+                } else {
+                    subTrack = {
+                        id: "track_subs_" + Date.now(),
+                        type: 'subtitle',
+                        name: "Legendas",
+                        clips: [],
+                        muted: false,
+                        solo: false
+                    };
+                    this.studio.project.tracks.push(subTrack);
+                }
+
+                const newClip = {
+                    id: "clip_sub_" + Date.now(),
+                    assetId: assetId,
+                    start: startTime,
+                    duration: 5,
+                    offset: 0,
+                    type: 'subtitle',
+                    name: "Nova Legenda",
+                    transcriptionData: [],
+                    subtitleConfig: {
+                        font: 'Arial', size: 30, color: '#ffffff', 
+                        highlightColor: '#ffff00', bgColor: '#000000', 
+                        bold: true, italic: false, styleMode: 'karaoke'
+                    },
+                    transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, maintainAspect: true }
+                };
+
+                subTrack.clips.push(newClip);
+
+                this.studio.timelineManager.renderTracks();
+                this.studio.playbackManager.syncPreview();
+                this.openSubtitleModal(newClip);
+                this.studio.historyManager.recordState();
+            };
+        }
+    }
+
+    updateSubtitleInPreview({iText, iFont, iSize, iBold, iItalic, iColor, iHighlight, iBg, currentStyle}) {
+        const preview = document.getElementById('sub-preview-target');
+        
+        if(!preview) return;
+        
+        const textVal = iText ? iText.value : "Preview";
+        const fontVal = iFont ? iFont.value : "Arial";
+        const sizeVal = iSize ? iSize.value : 30;
+        const colorVal = iColor ? iColor.value : "#ffffff";
+        const hlVal = iHighlight ? iHighlight.value : "#ffff00";
+        const bgVal = iBg ? iBg.value : "#000000";
+        
+        preview.innerText = textVal || "Preview";
+        preview.style.fontFamily = fontVal;
+        preview.style.fontSize = Math.min(parseInt(sizeVal), 40) + "px"; 
+        preview.style.fontWeight = (iBold && iBold.checked) ? 'bold' : 'normal';
+        preview.style.fontStyle = (iItalic && iItalic.checked) ? 'italic' : 'normal';
+        preview.style.color = colorVal;
+        
+        // Reseta estilos específicos
+        preview.style.background = 'transparent';
+        preview.style.padding = '0';
+        preview.style.textShadow = 'none';
+        preview.style.borderRadius = '0';
+        preview.innerHTML = preview.innerText; // Limpa HTML anterior
+        
+        if (currentStyle === 'word-pill') {
+            const txt = textVal.split(' ')[0] || "Texto"; 
+            const rest = textVal.substring(txt.length);
+            preview.innerHTML = `<span style="background:${hlVal}; color:black; padding:0 4px; border-radius:6px;">${txt}</span>${rest}`;
+        } 
+        else if (currentStyle === 'karaoke') {
+            preview.style.textShadow = `0 0 10px ${hlVal}`;
+        }
+        else if (currentStyle === 'box') {
+            preview.style.background = bgVal;
+            preview.style.padding = '5px 10px';
+            preview.style.borderRadius = '6px';
         }
     }
 
     openSubtitleModal(existingClip = null) {
         const modal = document.getElementById('modal-subtitle-settings');
-        const preview = document.getElementById('sub-preview-target');
+        const btnTranscribe = document.getElementById('btn-sub-transcribe');
+        const progressBox = document.getElementById('sub-transcribe-progress');
+        const progressBar = document.getElementById('sub-transcribe-bar');
         
         if (!modal) return;
+
+        if (btnTranscribe) {
+            btnTranscribe.disabled = false;
+            btnTranscribe.innerHTML = '<i class="fa-solid fa-rotate"></i>&nbsp; Re-Transcrever Áudio';
+        }
+        if (progressBox) progressBox.style.display = 'none';
+        if (progressBar) progressBar.style.width = '0%';
 
         if (modal.classList.contains('hidden')) {
             modal.style.top = '50%';
@@ -1560,6 +1676,7 @@ export class UIManager {
 
         this._makeDraggable(modal, "sub-header");
 
+        // Seleção dos Inputs do DOM
         const iText = document.getElementById('sub-text-edit');
         const iFont = document.getElementById('sub-font-family');
         const iSize = document.getElementById('sub-font-size');
@@ -1594,85 +1711,94 @@ export class UIManager {
 
         let currentStyle = config.styleMode || 'karaoke';
 
-        const updateStyleUI = () => {
-            styleBtns.forEach(btn => {
-                if(btn.dataset.style === currentStyle) btn.classList.add('selected');
-                else btn.classList.remove('selected');
+        const triggerUpdate = () => {
+            this.updateSubtitleInPreview({
+                iText, iFont, iSize, iBold, iItalic, 
+                iColor, iHighlight, iBg, 
+                currentStyle 
             });
-            updatePreview();
         };
 
         styleBtns.forEach(btn => {
+            if(btn.dataset.style === currentStyle) btn.classList.add('selected');
+            else btn.classList.remove('selected');
+
             btn.onclick = () => {
                 currentStyle = btn.dataset.style;
-                updateStyleUI();
+                
+                styleBtns.forEach(b => {
+                    if(b.dataset.style === currentStyle) b.classList.add('selected');
+                    else b.classList.remove('selected');
+                });
+                
+                triggerUpdate();
             };
         });
-
-        const updatePreview = () => {
-            if(!preview) return;
-            preview.innerText = iText.value || "Preview";
-            preview.style.fontFamily = iFont.value;
-            preview.style.fontSize = Math.min(parseInt(iSize.value), 28) + "px"; 
-            preview.style.fontWeight = iBold.checked ? 'bold' : 'normal';
-            preview.style.fontStyle = iItalic.checked ? 'italic' : 'normal';
-            preview.style.color = iColor.value;
-            preview.style.background = 'transparent';
-            preview.style.padding = '0';
-            preview.style.textShadow = 'none';
-            preview.style.borderRadius = '0';
-            
-            if (currentStyle === 'word-pill') {
-                const txt = iText.value.split(' ')[0] || "Texto"; 
-                const rest = iText.value.substring(txt.length);
-                preview.innerHTML = `<span style="background:${iHighlight.value}; color:black; padding:0 4px; border-radius:6px;">${txt}</span>${rest}`;
-                return;
-            } 
-            
-            preview.innerHTML = preview.innerText; 
-
-            if (currentStyle === 'karaoke') {
-                preview.style.textShadow = `0 0 5px ${iHighlight.value}`;
-            }
-            else if (currentStyle === 'box') {
-                preview.style.background = iBg.value;
-                preview.style.padding = '5px 10px';
-                preview.style.borderRadius = '8px';
-            }
-        };
         
         const inputs = [iText, iFont, iSize, iColor, iHighlight, iBg, iBold, iItalic];
-        inputs.forEach(el => { if(el) { el.oninput = updatePreview; el.onchange = updatePreview; } });
+        inputs.forEach(el => { 
+            if(el) { 
+                el.oninput = triggerUpdate; 
+                el.onchange = triggerUpdate; 
+            } 
+        });
         
-        updateStyleUI(); 
+        triggerUpdate();
+        
         modal.classList.remove('hidden');
 
+        // Botões de Fechar
         const close = () => modal.classList.add('hidden');
         document.getElementById('btn-sub-close').onclick = close;
         document.getElementById('btn-sub-cancel').onclick = close;
 
-        const btnTranscribe = document.getElementById('btn-sub-transcribe');
-        const progressBox = document.getElementById('sub-transcribe-progress');
-        const progressBar = document.getElementById('sub-transcribe-bar');
-
         if(btnTranscribe) {
             btnTranscribe.onclick = async () => {
                 if (!existingClip) return alert("Erro: O clipe precisa ser criado antes.");
+                
+                existingClip.subtitleConfig = {
+                    font: iFont.value,
+                    size: parseInt(iSize.value) || 30,
+                    color: iColor.value,
+                    highlightColor: iHighlight.value,
+                    bgColor: iBg.value,
+                    bold: iBold.checked,
+                    italic: iItalic.checked,
+                    styleMode: currentStyle 
+                };
+
+                if (existingClip.offset !== 0) {
+                    console.log(`[Studio] Normalizando offset de legenda (de ${existingClip.offset}s para 0s) para re-transcrição.`);
+                    existingClip.offset = 0;
+                }
+
                 btnTranscribe.disabled = true;
                 const oldText = btnTranscribe.innerHTML;
-                btnTranscribe.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>&nbsp; Processando...';
+                btnTranscribe.innerHTML = '<i class="fa-solid fa-microchip"></i>&nbsp; Iniciando IA...';
                 if(progressBox) progressBox.style.display = 'block';
+                if(progressBar) progressBar.style.width = '5%';
 
                 try {
                     await this.studio.runSubtitleTranscription(existingClip, (progress) => {
                         if(progressBar) progressBar.style.width = `${progress}%`;
+                        
+                        if (progress < 20) btnTranscribe.innerHTML = '<i class="fa-solid fa-file-audio"></i>&nbsp; Extraindo...';
+                        else if (progress < 60) btnTranscribe.innerHTML = '<i class="fa-solid fa-download"></i>&nbsp; Carregando Modelo...';
+                        else if (progress < 99) btnTranscribe.innerHTML = '<i class="fa-solid fa-brain"></i>&nbsp; Transcrevendo...';
+                        else btnTranscribe.innerHTML = '<i class="fa-solid fa-check"></i>&nbsp; Finalizando...';
                     });
-                    close();
+                    
+                    if(this.studio.timelineManager) this.studio.timelineManager.renderTracks();
+                    if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+                    
+                    close(); 
                 } catch (error) {
                     console.error(error);
                     alert("Erro na transcrição: " + error.message);
+                    // Restaura botão em caso de erro
                     btnTranscribe.disabled = false;
                     btnTranscribe.innerHTML = oldText; 
+                    if(progressBar) progressBar.style.width = '0%';
                 }
             };
         }
@@ -1681,7 +1807,6 @@ export class UIManager {
         if(btnConfirm) {
             btnConfirm.onclick = () => {
                 const rawText = iText.value;
-                
                 const newConfig = {
                     font: iFont.value,
                     size: parseInt(iSize.value),
@@ -1707,7 +1832,6 @@ export class UIManager {
                             const originalOffset = existingClip.offset;
                             const timePerChar = totalDuration / (totalChars || 1);
 
-                            // CRUCIAL: Salva o transform (Pan/Crop) original antes de remover
                             const originalTransform = existingClip.transform ? JSON.parse(JSON.stringify(existingClip.transform)) : null;
 
                             parentTrack.clips = parentTrack.clips.filter(c => c.id !== existingClip.id);
@@ -1748,7 +1872,8 @@ export class UIManager {
                                 cursorOffset += lineDuration;
                             });
                         }
-                    } else {
+                    } 
+                    else {
                         existingClip.subtitleConfig = newConfig;
                         const newSingleText = lines[0];
                         const originalText = (existingClip.transcriptionData || []).map(w => w.text).join(' ');

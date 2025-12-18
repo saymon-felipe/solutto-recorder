@@ -31,6 +31,8 @@ export class TimelineManager {
         if (!this.studio.project.markers) {
             this.studio.project.markers = [];
         }
+
+        this.clipboard = null;
     }
 
     init() {
@@ -98,7 +100,20 @@ export class TimelineManager {
             if (this.studio.renderManager && this.studio.renderManager.isRendering) {
                 e.preventDefault(); e.stopPropagation(); return;
             }
-            if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+            if (['INPUT', 'TEXTAREA'].includes(document.target?.tagName)) return;
+            if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+            const isCtrl = e.ctrlKey || e.metaKey;
+            
+            if (isCtrl && !e.shiftKey && !e.altKey) {
+                if (e.key.toLowerCase() === 'c') {
+                    this.copySelection();
+                }
+                if (e.key.toLowerCase() === 'v') {
+                    e.preventDefault(); 
+                    this.pasteSelection();
+                }
+            }
             
             // Playback (Espaço)
             if (e.code === 'Space') { 
@@ -121,6 +136,99 @@ export class TimelineManager {
             if (e.code === 'KeyG') this.groupClips();
             if (e.code === 'KeyU') this.ungroupClips();
         });
+    }
+
+    copySelection() {
+        if (!this.selectedClips || this.selectedClips.length === 0) return;
+
+        const selectionData = this.selectedClips.map(wrapper => {
+            const realClip = wrapper.clip || wrapper; 
+            const trackIndex = this.studio.project.tracks.findIndex(t => t.clips.some(c => c.id === realClip.id));
+            
+            return {
+                clipData: JSON.parse(JSON.stringify(realClip)),
+                trackIndex: trackIndex
+            };
+        });
+
+        const validItems = selectionData.filter(i => i.trackIndex !== -1);
+
+        if (validItems.length > 0) {
+            const minStart = Math.min(...validItems.map(d => d.clipData.start));
+            
+            this.clipboard = {
+                items: validItems,
+                anchorTime: minStart
+            };
+            
+            this.studio.uiManager.showToast(`${validItems.length} item(s) copiado(s)`);
+            console.log("[DEBUG] Clipboard salvo com sucesso. Anchor:", minStart);
+        } else {
+            console.warn("[DEBUG] Falha ao copiar: Clipes não encontrados nas trilhas.");
+        }
+    }
+
+    pasteSelection() {
+        if (!this.clipboard || !this.clipboard.items || this.clipboard.items.length === 0) return;
+
+        const playhead = this.studio.project.currentTime;
+        const anchor = this.clipboard.anchorTime;
+        
+        if (isNaN(anchor)) {
+            console.error("[DEBUG] Erro: AnchorTime é NaN. Abortando colar.");
+            return;
+        }
+
+        const newSelection = [];
+        this._clearSelection();
+
+        const groupMapping = {};
+
+        this.clipboard.items.forEach(item => {
+            const gid = item.clipData.groupId;
+            if (gid && !groupMapping[gid]) {
+                groupMapping[gid] = "group_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6);
+            }
+        });
+
+        this.clipboard.items.forEach(item => {
+            const originalData = item.clipData;
+            
+            const offsetFromAnchor = originalData.start - anchor;
+            const newStart = Math.max(0, playhead + offsetFromAnchor);
+
+            let targetTrack = this.studio.project.tracks[item.trackIndex];
+            
+            if (!targetTrack) {
+                targetTrack = this.studio.project.tracks.find(t => t.type === originalData.type) || this.studio.project.tracks[0];
+            }
+
+            if (targetTrack) {
+                const newClip = JSON.parse(JSON.stringify(originalData));
+                
+                newClip.id = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 7)}`;
+                newClip.start = newStart;
+                
+                if(newClip.selected) delete newClip.selected;
+
+                if (originalData.groupId) {
+                    newClip.groupId = groupMapping[originalData.groupId];
+                }
+
+                targetTrack.clips.push(newClip);
+                newSelection.push({ clip: newClip, trackId: targetTrack.id });
+            }
+        });
+
+        this.renderTracks(); 
+        if(this.studio.playbackManager) this.studio.playbackManager.syncPreview();
+
+        newSelection.forEach(entry => {
+            this._addToSelection(entry.clip, entry.trackId);
+        });
+
+        this.studio.historyManager.recordState();
+        console.log(`[Studio] Colado em ${playhead.toFixed(2)}s com novos grupos.`);
     }
 
     _ensureMarkerLayer() {

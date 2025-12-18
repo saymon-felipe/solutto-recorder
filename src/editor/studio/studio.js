@@ -453,32 +453,41 @@ export class StudioManager {
         const worker = new Worker(workerUrl, { type: 'module' });
 
         return new Promise(async (resolve, reject) => {
+            let inferenceInterval = null;
+
+            const cleanup = () => {
+                if (inferenceInterval) clearInterval(inferenceInterval);
+                worker.terminate();
+            };
+
+            worker.onerror = (err) => {
+                console.error("[StudioManager] Erro fatal no Worker:", err);
+                cleanup();
+                reject(new Error("Falha ao iniciar o processador de áudio."));
+            };
+
             onProgress(5);
 
             try {
-                console.log(`[StudioManager] Iniciando transcrição para clip de ${clip.duration}s`);
+                console.log(`[StudioManager] Iniciando transcrição. Duração: ${clip.duration.toFixed(2)}s`);
                 
-                // 1. Extração Acelerada de Áudio
+                // Fase 2: Extração de Áudio (5% -> 20%)
                 const audioData = await this.extractAudioBuffer(clip.start, clip.duration);
                 
                 let maxAmplitude = 0;
-                for (let i = 0; i < audioData.length; i += 100) { // Amostragem
+                for (let i = 0; i < audioData.length; i += 100) { 
                     const val = Math.abs(audioData[i]);
                     if (val > maxAmplitude) maxAmplitude = val;
                 }
                 
-                console.log(`[StudioManager] Diagnóstico de Áudio: Max Amplitude = ${maxAmplitude.toFixed(4)}`);
-
                 if (maxAmplitude < 0.001) {
-                    console.warn("[StudioManager] CRÍTICO: O áudio extraído é SILÊNCIO. O Whisper vai alucinar.");
-                    this.uiManager.showToast("Erro: O trecho selecionado está mudo.");
-                    worker.terminate();
-                    return resolve();
+                    this.uiManager.showToast("Aviso: O trecho selecionado está mudo.");
+                    cleanup();
+                    return resolve(); 
                 }
 
-                onProgress(20);
+                onProgress(20); 
 
-                // 2. Envia para o Worker
                 worker.postMessage({
                     type: 'transcribe',
                     audio: audioData,
@@ -490,14 +499,29 @@ export class StudioManager {
 
                     if (status === 'loading') {
                         if (data.status === 'progress' && data.total) {
-                            const percent = (data.loaded / data.total) * 100;
-                            // Calcula progresso visual
-                            const uiProgress = 20 + (percent * 0.4);
+                            const percent = (data.loaded / data.total);
+                            const uiProgress = 20 + (percent * 40); // Mapeia para 20-60%
                             onProgress(uiProgress);
+                        }
+                        else if (data.status === 'done' || data.status === 'ready') {
+                            onProgress(60);
+                            
+                            if (!inferenceInterval) {
+                                let fakeProgress = 60;
+                                const step = 0.5; 
+                                inferenceInterval = setInterval(() => {
+                                    fakeProgress += step;
+                                    if (fakeProgress > 95) fakeProgress = 95; 
+                                    onProgress(fakeProgress);
+                                }, 100);
+                            }
                         }
                     } 
                     else if (status === 'complete') {
-                        console.log("[StudioManager] Transcrição recebida:", output);
+                        if (inferenceInterval) clearInterval(inferenceInterval);
+                        onProgress(100);
+
+                        console.log("[StudioManager] Transcrição concluída.");
                         
                         const segments = output.chunks.map(chunk => ({
                             start: chunk.start,
@@ -506,23 +530,24 @@ export class StudioManager {
                         }));
 
                         clip.transcriptionData = segments;
-                        onProgress(100);
                         this.timelineManager.renderTracks();
                         this.uiManager.showToast("Transcrição concluída!");
+                        
                         this.playbackManager.seekAndRender(clip.start);
-                        worker.terminate();
+                        
+                        cleanup();
                         resolve();
                     } 
                     else if (status === 'error') {
                         console.error("[StudioManager] Erro no Worker:", error);
-                        worker.terminate();
+                        cleanup();
                         reject(new Error(error));
                     }
                 };
 
             } catch (err) {
-                console.error("[StudioManager] Erro fatal:", err);
-                worker.terminate();
+                console.error("[StudioManager] Erro no fluxo principal:", err);
+                cleanup();
                 reject(err);
             }
         });
@@ -760,6 +785,34 @@ export class StudioManager {
                 };
             }
         }
+    }
+
+    /**
+     * Gerencia o estado de carregamento manual na barra de status.
+     * @param {boolean} isActive - Se deve mostrar ou esconder o loading.
+     * @param {string} message - Mensagem a ser exibida.
+     */
+    setLoading(isActive, message = "Processando...") {
+        const loadingId = 'manual_loading_state';
+        
+        if (isActive) {
+            this.tasks = this.tasks.filter(t => t.id !== loadingId);
+            this.tasks.push({ id: loadingId, label: message });
+        } else {
+            this.tasks = this.tasks.filter(t => t.id !== loadingId);
+        }
+        
+        if (this.uiManager) {
+            this.uiManager.updateStatusBar(this.tasks);
+        }
+    }
+
+    /**
+     * Atualiza a porcentagem de progresso na barra de status.
+     * @param {number} percent - Valor de 0 a 100.
+     */
+    setLoadingProgress(percent) {
+        this.setLoading(true, `Processando... ${Math.floor(percent)}%`);
     }
 
     /**
