@@ -2156,7 +2156,7 @@ export class TimelineManager {
             ctx.fillStyle = "#4fc3f7"; 
             
         } else {
-            drawChannel(data, 0, height);
+            drawChannel(cache.left, 0, height);
         }
     }
 

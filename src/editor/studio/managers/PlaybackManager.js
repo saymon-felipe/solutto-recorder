@@ -50,7 +50,6 @@ export class PlaybackManager {
     }
 
     togglePlayback() { 
-        // Proteção extra caso seja chamado via atalho ou console
         if (this.studio.renderManager && this.studio.renderManager.isRendering) return;
         
         if (this.isPlaying) {
@@ -61,10 +60,8 @@ export class PlaybackManager {
     }
 
     play() {
-        // Garante que o contexto de áudio e os GainNodes existam para o Preview
         this.prepareForRendering();
 
-        // Salva o ponto onde o play começou
         this.lastPlayStartTime = this.studio.project.currentTime;
         this.playedSinceLastSeek = true;
 
@@ -98,15 +95,11 @@ export class PlaybackManager {
         const btn = document.getElementById('btn-play-pause');
         if (btn) btn.innerHTML = '<i class="fa-solid fa-play"></i>';
         
-        // Pausa elementos DOM
         this.trackLayers.forEach(layer => {
             if (layer.videoEl) layer.videoEl.pause();
             if (layer.audioEl) layer.audioEl.pause();
         });
 
-        // LÓGICA DE RETORNO DA AGULHA:
-        // Se o usuário deu Play e depois Pause, volta para onde começou.
-        // Se ele arrastou a agulha (seek) enquanto tocava, essa flag seria false (controlado pelo TimelineManager/Playhead).
         if (this.playedSinceLastSeek) {
              this.studio.project.currentTime = this.lastPlayStartTime;
              this.playedSinceLastSeek = false;
@@ -170,22 +163,21 @@ export class PlaybackManager {
         if (!this.audioCtx) {
             this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
-        if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
-
+        
         // 1. Cria Nó de Monitoramento (se não existir)
         if (!this.monitorGain) {
             this.monitorGain = this.audioCtx.createGain();
-            this.monitorGain.gain.value = 1; 
+            this.monitorGain.gain.value = 1.0; 
             this.monitorGain.connect(this.audioCtx.destination);
         }
 
-        // 2. Cria Destino de Gravação
+        // 2. Cria Destino de Gravação (Render)
         if (!this.renderDestination) {
             this.renderDestination = this.audioCtx.createMediaStreamDestination();
         }
 
         // 3. Conecta cada track usando GainNodes individuais
-        this.trackLayers.forEach((layer, trackId) => {
+        this.trackLayers.forEach((layer) => {
             // Processa tanto áudio quanto vídeo
             const mediaElements = [layer.audioEl, layer.audioEl2, layer.videoEl, layer.videoEl2];
             
@@ -199,22 +191,25 @@ export class PlaybackManager {
                     try { mediaEl._sourceNode = this.audioCtx.createMediaElementSource(mediaEl); } catch(e){}
                 }
 
-                // Inicializa GainNode (NOVO: Controle de Volume Individual)
-                if (!mediaEl._gainNode && mediaEl._sourceNode) {
-                    mediaEl._gainNode = this.audioCtx.createGain();
-                    
-                    try { mediaEl._sourceNode.disconnect(); } catch(e){}
-                    
-                    // Rota: Elemento -> Gain -> Destinos
-                    mediaEl._sourceNode.connect(mediaEl._gainNode);
-                    mediaEl._gainNode.connect(this.renderDestination); // Para o arquivo
-                    mediaEl._gainNode.connect(this.monitorGain);       // Para o ouvido
+                // Inicializa GainNode e conecta
+                if (mediaEl._sourceNode) {
+                    if (!mediaEl._gainNode) {
+                        mediaEl._gainNode = this.audioCtx.createGain();
+                        
+                        // Tenta desconectar de destinos anteriores para evitar duplicação
+                        try { mediaEl._sourceNode.disconnect(); } catch(e){}
+                        
+                        mediaEl._sourceNode.connect(mediaEl._gainNode);
+                        mediaEl._gainNode.connect(this.renderDestination); // Para o arquivo
+                        mediaEl._gainNode.connect(this.monitorGain);       // Para o ouvido
+                    }
                 }
             });
         });
 
         return this.renderDestination.stream;
     }
+
     // =========================================================
     // RENDERIZAÇÃO DE VÍDEO (CANVAS)
     // =========================================================
@@ -263,9 +258,6 @@ export class PlaybackManager {
         requestAnimationFrame(loop);
     }
 
-    /**
-     * Desenha o frame composto no Canvas.
-     */
     _drawCompositeFrame(ctx, cvWidth, cvHeight) {
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, cvWidth, cvHeight);
@@ -292,13 +284,11 @@ export class PlaybackManager {
                 let domEl = null;
                 const slotId = clip._assignedSlotId;
 
-                // Tenta recuperar pelo Slot ID da memória
                 if (slotId === 1) {
                     domEl = (clip.type === 'image') ? layer.imgEl : layer.videoEl;
                 } else if (slotId === 2) {
                     domEl = (clip.type === 'image') ? layer.imgEl2 : layer.videoEl2;
                 } else {
-                    // Fallback de segurança
                     if (layer.videoEl && (layer.videoEl.dataset.curId === clip.id || layer.imgEl.dataset.curId === clip.id)) {
                         domEl = (clip.type === 'image') ? layer.imgEl : layer.videoEl;
                     } else if (layer.videoEl2 && (layer.videoEl2.dataset.curId === clip.id || layer.imgEl2.dataset.curId === clip.id)) {
@@ -306,7 +296,6 @@ export class PlaybackManager {
                     }
                 }
 
-                // Se o elemento não estiver pronto (ex: buffering), não desenha mas não trava
                 if (!domEl) return;
                 if (domEl.tagName === 'VIDEO' && domEl.readyState < 2) return;
                 if (domEl.tagName === 'IMG' && domEl.naturalWidth === 0) return;
@@ -339,14 +328,11 @@ export class PlaybackManager {
                         
                         ctx.drawImage(domEl, -dw/2, -dh/2, dw, dh); 
                     }
-                } catch(e) {
-                    // Ignora erro de desenho isolado para não piscar a tela inteira
-                }
+                } catch(e) {}
                 ctx.restore();
             });
         });
 
-        // Isolado em try-catch para que erro na legenda não apague o vídeo
         try {
             this.studio.project.tracks.forEach(track => {
                 if (track.muted) return;
@@ -368,11 +354,9 @@ export class PlaybackManager {
 
     _startOverlayRenderLoop() {
         const ctx = this.overlayCanvas.getContext('2d');
-        
         const loop = () => {
             if (!this.overlayCanvas) return;
 
-            // Sincroniza tamanho
             if (this.overlayCanvas.width !== this.overlayCanvas.offsetWidth || 
                 this.overlayCanvas.height !== this.overlayCanvas.offsetHeight) {
                 this.overlayCanvas.width = this.overlayCanvas.offsetWidth;
@@ -384,38 +368,22 @@ export class PlaybackManager {
             const currentTime = this.studio.project.currentTime;
             this.studio.project.tracks.forEach(track => {
                 if (track.muted) return;
-                
                 const activeSubClips = track.clips.filter(c => 
-                    c.type === 'subtitle' && 
-                    currentTime >= c.start && 
-                    currentTime < (c.start + c.duration)
+                    c.type === 'subtitle' && currentTime >= c.start && currentTime < (c.start + c.duration)
                 );
-
                 activeSubClips.forEach(clip => {
                     this._renderSubtitleOverlay(ctx, clip, currentTime, this.overlayCanvas.width, this.overlayCanvas.height);
                 });
             });
-
             requestAnimationFrame(loop);
         };
         requestAnimationFrame(loop);
     }
 
-    /**
-     * Aguarda até que todos os elementos de mídia visíveis no momento atual
-     * estejam carregados e prontos para reprodução (buffer suficiente).
-     * Essencial para evitar frames pretos no início do render.
-     */
     async waitForReady(timeoutMs = 5000) {
         const promises = [];
-        
         this.trackLayers.forEach(layer => {
-            const elements = [
-                layer.videoEl, layer.videoEl2, 
-                layer.imgEl, layer.imgEl2,
-                layer.audioEl, layer.audioEl2
-            ];
-
+            const elements = [layer.videoEl, layer.videoEl2, layer.imgEl, layer.imgEl2, layer.audioEl, layer.audioEl2];
             elements.forEach(el => {
                 if (!el || el.style.display === 'none') return;
                 if (el.tagName === 'AUDIO' && (!el.src || el.src === window.location.href)) return;
@@ -425,29 +393,17 @@ export class PlaybackManager {
                         if (el.complete && el.naturalWidth > 0) return resolve();
                         el.onload = () => resolve();
                         el.onerror = () => resolve(); 
-                    } 
-                    else if (el.tagName === 'VIDEO' || el.tagName === 'AUDIO') {
-                        const isReady = () => {
-                            return el.readyState >= 3 && !el.seeking;
-                        };
-
+                    } else if (el.tagName === 'VIDEO' || el.tagName === 'AUDIO') {
+                        const isReady = () => el.readyState >= 3 && !el.seeking;
                         if (isReady()) return resolve();
-
                         
-                        const onCheck = () => {
-                            if (isReady()) {
-                                cleanUp();
-                                resolve();
-                            }
-                        };
-
+                        const onCheck = () => { if (isReady()) { cleanUp(); resolve(); } };
                         const cleanUp = () => {
                             el.removeEventListener('canplay', onCheck);
                             el.removeEventListener('seeked', onCheck); 
                             el.removeEventListener('playing', onCheck);
                             el.removeEventListener('error', resolve); 
                         };
-
                         el.addEventListener('canplay', onCheck);
                         el.addEventListener('seeked', onCheck);
                         el.addEventListener('playing', onCheck);
@@ -458,17 +414,11 @@ export class PlaybackManager {
                 }));
             });
         });
-
         if (promises.length === 0) return Promise.resolve();
-
         const timeout = new Promise(resolve => setTimeout(resolve, timeoutMs));
         return Promise.race([Promise.all(promises), timeout]);
     }
 
-    /**
-     * Função de Easing para dar um efeito de "pulo" elástico na animação.
-     * x: progresso linear (0 a 1)
-     */
     _easeOutBack(x) {
         const c1 = 1.70158;
         const c3 = c1 + 1;
@@ -476,6 +426,8 @@ export class PlaybackManager {
     }
 
     _renderSubtitleOverlay(ctx, clip, time, w, h) {
+        // (Código de Legenda mantido igual ao anterior, omitido para brevidade pois não afeta áudio)
+        // ... (Mesmo código do arquivo original)
         if (!clip.transcriptionData || clip.transcriptionData.length === 0) return;
         if (!clip.subtitleConfig) return;
 
@@ -529,19 +481,16 @@ export class PlaybackManager {
         const inactiveColor = cfg.color || '#ffffff';
         const bgColor = cfg.bgColor || '#000000';
 
-        // ESTILO 3: BOX (Fundo estático)
         if (styleMode === 'box') {
             const paddingX = 20 * s;
             const paddingY = 15 * s;
             const bgHeight = (scaledFontSize * 1.4);
             const radius = 12 * s;
-
             ctx.fillStyle = bgColor;
             this._drawRoundedRect(ctx, -totalWidth / 2 - paddingX, -bgHeight / 2, totalWidth + (paddingX * 2), bgHeight, radius);
             ctx.fill();
         }
 
-        // RENDERIZAÇÃO PALAVRA POR PALAVRA
         wordMetrics.forEach((item, index) => {
             let fillStyle = inactiveColor;
             
@@ -551,15 +500,12 @@ export class PlaybackManager {
                 if (item.active) fillStyle = '#000000'; 
             }
 
-            // --- ESTILO 4: WORD PILL COM ANIMAÇÃO CUSTOMIZADA ---
             if (styleMode === 'word-pill' && item.active) {
                 const pillPaddingX = 6 * s;
                 const pillHeight = scaledFontSize * 1.2;
                 const pillY = -pillHeight / 2;
                 const radius = 8 * s;
-
-                // Animação
-                const animDuration = 0.15; // 150ms
+                const animDuration = 0.15; 
                 const timeIn = assetTime - item.obj.start;
                 const timeOut = item.obj.end - assetTime;
                 
@@ -567,46 +513,35 @@ export class PlaybackManager {
                 let opacityAnim = 1;
 
                 if (timeIn < animDuration) {
-                    // --- FASE DE ENTRADA ---
                     if (index === 0) {
-                        // Acelera a opacidade (dividir por 0.3 = 30% do tempo da animação)
                         opacityAnim = Math.min(1, timeIn / (animDuration * 0.3)); 
-                        scaleAnim = 1; // Mantém tamanho fixo
+                        scaleAnim = 1; 
                     } else {
-                        // Demais palavras: Efeito Pop Elástico (Normal)
                         scaleAnim = this._easeOutBack(timeIn / animDuration);
                         opacityAnim = Math.min(1, timeIn / (animDuration * 0.5));
                     }
                 } else if (timeOut < animDuration) {
-                    // --- FASE DE SAÍDA (Shrink) ---
                     const p = Math.max(0, timeOut / animDuration);
                     scaleAnim = p;
                     opacityAnim = p;
                 }
 
                 ctx.save();
-                
                 const wordCenterX = cursorX + (item.width / 2);
                 ctx.translate(wordCenterX, 0);
                 ctx.scale(scaleAnim, scaleAnim);
                 ctx.translate(-wordCenterX, 0);
-                
                 ctx.globalAlpha = finalAlpha * opacityAnim;
                 ctx.fillStyle = activeColor; 
-
                 const visualWordWidth = ctx.measureText(item.text).width;
                 this._drawRoundedRect(ctx, cursorX - pillPaddingX, pillY, visualWordWidth + (pillPaddingX*2), pillHeight, radius);
                 ctx.fill();
-                
                 ctx.shadowColor = 'rgba(0,0,0,0.3)';
                 ctx.shadowBlur = 4 * s;
-                
                 ctx.restore();
             }
 
-            // Texto
             ctx.fillStyle = fillStyle;
-            
             if (styleMode !== 'box' && !(styleMode === 'word-pill' && item.active)) {
                 ctx.shadowColor = 'rgba(0,0,0,0.5)';
                 ctx.shadowBlur = 2 * s;
@@ -625,10 +560,8 @@ export class PlaybackManager {
             } else {
                 ctx.fillText(item.text, cursorX, 0);
             }
-
             cursorX += item.width;
         });
-
         ctx.restore();
     }
 
@@ -646,10 +579,6 @@ export class PlaybackManager {
         ctx.closePath();
     }
 
-    // =========================================================
-    // PREVIEW SYNC DOM
-    // =========================================================
-
     seekAndRender(time) {
         this.studio.project.currentTime = time;
         if(this.studio.timelineManager) this.studio.timelineManager.updatePlayheadPosition();
@@ -661,16 +590,12 @@ export class PlaybackManager {
     }
 
     syncPreview() {
-        // Garante que temos o container principal
-        if (!this.container) {
-            this.container = document.getElementById('studio-preview-canvas');
-        }
+        if (!this.container) this.container = document.getElementById('studio-preview-canvas');
         if (!this.container) return;
 
         const time = this.studio.project.currentTime;
         const tracks = this.studio.project.tracks;
         
-        // 1. Limpeza de tracks removidas
         const validIds = new Set(tracks.map(t => t.id));
         for (const [id, layer] of this.trackLayers) {
             if (!validIds.has(id)) {
@@ -681,10 +606,8 @@ export class PlaybackManager {
             }
         }
 
-        // 2. Criação e Sincronização
         tracks.forEach((track, idx) => {
             let layer = this.trackLayers.get(track.id);
-            
             if (!layer) {
                 layer = this._createTrackLayer(track);
                 this.trackLayers.set(track.id, layer);
@@ -694,12 +617,9 @@ export class PlaybackManager {
                 this.container.appendChild(layer.container);
             }
 
-            if(layer.container) {
-                layer.container.style.zIndex = tracks.length - idx;
-            }
+            if(layer.container) layer.container.style.zIndex = tracks.length - idx;
 
             const clips = this._getClipsAtTime(track.id, time);
-            
             if(track.type === 'video') this._syncVideoTrack(layer, clips, time);
             else this._syncAudioTrack(layer, clips, time);
         });
@@ -712,7 +632,6 @@ export class PlaybackManager {
         } else {
             this.container.appendChild(this.overlayCanvas);
         }
-        
         this._forceSeek = false;
     }
 
@@ -738,15 +657,11 @@ export class PlaybackManager {
             if(!isImage) domEl.load(); 
         }
 
-        // 1. Cálculo do Alvo de Volume (Target)
         let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
         alpha *= this._calculateFadeFactor(clip, time);
         alpha = Math.max(0, Math.min(1, alpha));
-        
-        // Corte de ruído digital (Clean Silence)
         if (alpha < 0.001) alpha = 0;
 
-        // 2. Visuais
         const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
         const transform = `translate(-50%, -50%) translate(${t.x}px, ${t.y}px) rotate(${t.rotation}deg) scale(${t.width / 100}, ${t.height / 100})`;
         
@@ -759,22 +674,16 @@ export class PlaybackManager {
         domEl.style.opacity = alpha;
 
         if (!isImage) {
-            domEl.muted = clip.muted === true;
+            domEl.muted = false; 
 
             if (domEl._gainNode && this.audioCtx) {
                 const now = this.audioCtx.currentTime;
-                
+                // Aplica volume no GainNode
                 try {
-                    // Valor atual real do nó
                     const currentGain = domEl._gainNode.gain.value;
-                    
-                    // Só agenda se houver mudança perceptível (evita sobrecarga)
                     if (Math.abs(currentGain - alpha) > 0.0001) {
                         domEl._gainNode.gain.cancelScheduledValues(now);
                         domEl._gainNode.gain.setValueAtTime(currentGain, now);
-                        
-                        // Rampa suave de 30ms para o novo valor. 
-                        // Suaviza qualquer "degrau" entre frames (De-zippering).
                         domEl._gainNode.gain.linearRampToValueAtTime(alpha, now + 0.03);
                     }
                 } catch(e) {
@@ -787,22 +696,15 @@ export class PlaybackManager {
             let rawTime = (time - clip.start) + clip.offset;
             let localTime = rawTime;
             let DURATION = 0; 
-
             if (domEl.duration && Number.isFinite(domEl.duration) && domEl.duration > 0) {
                 DURATION = domEl.duration;
                 localTime = rawTime % DURATION;
             }
-            
             if (DURATION > 0) {
-                if (localTime > (DURATION - EPSILON) && localTime < DURATION) {
-                    localTime = DURATION - EPSILON;
-                }
+                if (localTime > (DURATION - EPSILON) && localTime < DURATION) localTime = DURATION - EPSILON;
             }
             
-            const needsSeek = this._forceSeek || 
-                            Math.abs(domEl.currentTime - localTime) > 0.3 || 
-                            domEl.ended;
-
+            const needsSeek = this._forceSeek || Math.abs(domEl.currentTime - localTime) > 0.3 || domEl.ended;
             if (needsSeek && Number.isFinite(localTime)) {
                 try { domEl.currentTime = localTime; } catch(e) {}
             }
@@ -818,20 +720,16 @@ export class PlaybackManager {
 
     _createTrackLayer(track) {
         const layer = { trackId: track.id };
-        
         if (track.type === 'video') {
             const div = document.createElement('div');
-            // Z-index inicial e pointer-events
             div.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden;";
             
-            // Slot 1
             const vid1 = document.createElement('video');
             vid1.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
             vid1.crossOrigin = "anonymous";
             const img1 = document.createElement('img');
             img1.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
             
-            // Slot 2 (Crossfade)
             const vid2 = document.createElement('video');
             vid2.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
             vid2.crossOrigin = "anonymous";
@@ -839,8 +737,6 @@ export class PlaybackManager {
             img2.style.cssText = "width:100%;height:100%;object-fit:contain;display:none;";
 
             div.append(vid1, img1, vid2, img2);
-            
-            // Tenta anexar imediatamente se o container já existir
             if(this.container) this.container.appendChild(div);
             
             layer.container = div;
@@ -849,11 +745,13 @@ export class PlaybackManager {
             layer.videoEl2 = vid2;
             layer.imgEl2 = img2;
         } else {
-            // Áudio (sem container visual)
             const aud1 = new Audio();
             aud1.crossOrigin = "anonymous";
+            aud1.volume = 1.0; 
+            
             const aud2 = new Audio();
             aud2.crossOrigin = "anonymous";
+            aud2.volume = 1.0;
             
             layer.audioEl = aud1;
             layer.audioEl2 = aud2;
@@ -862,16 +760,12 @@ export class PlaybackManager {
     }
 
     _syncVideoTrack(layer, clips, time) {
-        // Slots disponíveis (Máx 2 simultâneos para crossfade)
         const slots = [
             { id: 1, video: layer.videoEl, image: layer.imgEl },
             { id: 2, video: layer.videoEl2, image: layer.imgEl2 }
         ];
-        
         const usedSlotIds = new Set();
 
-        // 1. Limpeza de Referências de Outras Trilhas
-        // Se o clipe diz que tem um slot, mas o ID da trilha não bate com a atual, reseta.
         clips.forEach(clip => {
             if (clip._assignedSlotTrackId && clip._assignedSlotTrackId !== layer.trackId) {
                 clip._assignedSlotId = null;
@@ -879,30 +773,24 @@ export class PlaybackManager {
             }
         });
 
-        // 2. Persistência (Manter onde está)
         clips.forEach(clip => {
-            // Tenta achar onde o clipe JÁ está carregado no DOM desta trilha
             const domMatch = slots.find(s => 
                 (s.video.dataset.curId === clip.id) || (s.image.dataset.curId === clip.id)
             );
-
             if (domMatch) {
                 clip._assignedSlotId = domMatch.id;
                 clip._assignedSlotTrackId = layer.trackId;
                 usedSlotIds.add(domMatch.id);
-            } 
-            else if (clip._assignedSlotId) {
-                // Se o clipe lembra do seu slot e ele está livre, mantém
+            } else if (clip._assignedSlotId) {
                 if (!usedSlotIds.has(clip._assignedSlotId)) {
                     usedSlotIds.add(clip._assignedSlotId);
                     clip._assignedSlotTrackId = layer.trackId;
                 } else {
-                    clip._assignedSlotId = null; // Perdeu o lugar, vai para realocação
+                    clip._assignedSlotId = null;
                 }
             }
         });
 
-        // 3. Alocação (Preencher vagas)
         clips.forEach(clip => {
             if (!clip._assignedSlotId) {
                 const freeSlot = slots.find(s => !usedSlotIds.has(s.id));
@@ -914,44 +802,33 @@ export class PlaybackManager {
             }
         });
 
-        // 4. Renderização DOM (Aplica src, display, opacity)
         slots.forEach(slot => {
             const assignedClip = clips.find(c => c._assignedSlotId === slot.id);
-
             if (assignedClip) {
                 const isImage = assignedClip.type === 'image';
-                
                 if (isImage) {
                     this._updateSingleMediaElement(slot.image, assignedClip, time, true);
-                    this._updateSingleMediaElement(slot.video, null, time, false); // Limpa vídeo
+                    this._updateSingleMediaElement(slot.video, null, time, false);
                 } else {
                     this._updateSingleMediaElement(slot.video, assignedClip, time, false);
-                    this._updateSingleMediaElement(slot.image, null, time, true); // Limpa imagem
+                    this._updateSingleMediaElement(slot.image, null, time, true);
                 }
             } else {
-                // Slot vazio: Limpa tudo para evitar "fantasmas"
                 this._updateSingleMediaElement(slot.image, null, time, true);
                 this._updateSingleMediaElement(slot.video, null, time, false);
             }
         });
     }
 
-    /**
-     * Aplica transformações CSS no elemento DOM (Preview em tempo real).
-     */
     _applyClipTransform(element, clip) {
         if (!clip || !element) return;
-        
         const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
-
-        // Ordem: Center Origin -> Translate -> Rotate -> Scale
         const transform = `
             translate(-50%, -50%) 
             translate(${t.x}px, ${t.y}px) 
             rotate(${t.rotation}deg) 
             scale(${t.width / 100}, ${t.height / 100})
         `;
-
         element.style.transform = transform;
         element.style.position = 'absolute';
         element.style.left = '50%';
@@ -959,50 +836,38 @@ export class PlaybackManager {
         element.style.transformOrigin = 'center center';
     }
 
-    /**
-     * Calcula o fator de atenuação (0.0 a 1.0) baseado no Fade In/Out do clipe.
-     * Usa uma curva senoidal (Ease-In-Out) para suavidade igual ao visual da timeline.
-     */
     _calculateFadeFactor(clip, globalTime) {
         if (!clip) return 1;
-
         const timeInClip = globalTime - clip.start;
         const duration = clip.duration;
-        // Garante números válidos
         const fadeIn = Number(clip.fadeIn) || 0;
         const fadeOut = Number(clip.fadeOut) || 0;
 
         let factorIn = 1.0;
         let factorOut = 1.0;
 
-        // 1. Cálculo do Fade In (Curva Senoidal)
         if (fadeIn > 0) {
-            if (timeInClip < 0) factorIn = 0; // Antes do inicio
+            if (timeInClip < 0) factorIn = 0; 
             else if (timeInClip < fadeIn) {
                 const progress = timeInClip / fadeIn;
                 factorIn = 0.5 * (1 - Math.cos(progress * Math.PI));
             }
         }
 
-        // 2. Cálculo do Fade Out (Curva Senoidal)
         if (fadeOut > 0) {
             const timeStartFadeOut = duration - fadeOut;
-            if (timeInClip > duration) factorOut = 0; // Depois do fim
+            if (timeInClip > duration) factorOut = 0; 
             else if (timeInClip > timeStartFadeOut) {
                 const remaining = duration - timeInClip;
-                const progress = remaining / fadeOut; // Vai de 1 a 0
+                const progress = remaining / fadeOut; 
                 factorOut = 0.5 * (1 - Math.cos(progress * Math.PI));
             }
         }
-
-        // A combinação é multiplicativa (Se estiver a entrar e sair ao mesmo tempo, aplica ambos)
         return Math.max(0, Math.min(1, factorIn * factorOut));
     }
 
     _syncAudioTrack(layer, clips, time) {
         const trackId = layer.trackId;
-        
-        // PRÉ-ANÁLISE: Detecta se há clips adjacentes formando crossfade na timeline
         const track = this.studio.project.tracks.find(t => t.id === trackId);
         let allClipsOnTrack = track ? track.clips : [];
         
@@ -1011,17 +876,13 @@ export class PlaybackManager {
             
             if(!audioEl) return;
             if (!clip) { 
-                // Fade out suave antes de pausar
                 if (audioEl._gainNode && this.audioCtx && !audioEl.paused) {
                     const now = this.audioCtx.currentTime;
                     try {
                         audioEl._gainNode.gain.cancelScheduledValues(now);
                         audioEl._gainNode.gain.setValueAtTime(audioEl._gainNode.gain.value, now);
                         audioEl._gainNode.gain.linearRampToValueAtTime(0, now + 0.08);
-                        
-                        setTimeout(() => {
-                            if (!clip && !audioEl.paused) audioEl.pause();
-                        }, 100);
+                        setTimeout(() => { if (!clip && !audioEl.paused) audioEl.pause(); }, 100);
                     } catch(e) {
                         audioEl.pause();
                     }
@@ -1040,31 +901,22 @@ export class PlaybackManager {
                 audioEl.load(); 
             }
 
-            // Cálculo do Volume Base
             let vol = clip.level !== undefined ? clip.level : (clip.volume || 1);
             if(vol > 1) vol = vol/100;
             
             let fadeFactor = this._calculateFadeFactor(clip, time);
             
-            // Verifica se há um clip anterior que está fazendo fade out sobre este
+            // Lógica de Overlap (Crossfade automático entre clipes)
             const clipStart = clip.start;
             const clipEnd = clip.start + clip.duration;
-            
             let hasLeftOverlap = false;
             let leftOverlapFade = 0;
             
-            // Procura clip anterior que esteja sobreposto
             for (const otherClip of allClipsOnTrack) {
                 if (otherClip.id === clip.id) continue;
-                
                 const otherEnd = otherClip.start + otherClip.duration;
-                
-                // Verifica se o outro clip termina dentro deste
                 if (otherClip.start < clipStart && otherEnd > clipStart && otherEnd < clipEnd) {
-                    // Há overlap à esquerda
                     hasLeftOverlap = true;
-                    
-                    // Se o tempo atual está na zona de overlap
                     if (time >= clipStart && time < otherEnd) {
                         const otherFade = this._calculateFadeFactor(otherClip, time);
                         leftOverlapFade = otherFade;
@@ -1074,32 +926,26 @@ export class PlaybackManager {
             }
             
             let normalizedFadeFactor = fadeFactor;
-            
             if (hasLeftOverlap && leftOverlapFade > 0.01) {
-                // Durante overlap: normaliza
                 const totalFade = fadeFactor + leftOverlapFade;
-                if (totalFade > 0.01) {
-                    normalizedFadeFactor = fadeFactor / totalFade;
-                }
+                if (totalFade > 0.01) normalizedFadeFactor = fadeFactor / totalFade;
             }
-            
             vol *= normalizedFadeFactor;
             
             let finalVol = Math.max(0, Math.min(1, vol));
             if (finalVol < 0.0001) finalVol = 0;
 
-            audioEl.muted = layer.muted || false;
+            // [CORREÇÃO] Nunca "mutar" o elemento se a track não estiver mutada.
+            // O volume é controlado pelo GainNode. Mutar o elemento silencia o nó de origem.
+            audioEl.muted = false;
 
-            // Aplicação do Volume - Rampa MUITO suave
             if (audioEl._gainNode && this.audioCtx) {
                 const now = this.audioCtx.currentTime;
                 try {
                     const currentGain = audioEl._gainNode.gain.value;
-                    
                     if (Math.abs(currentGain - finalVol) > 0.00001) {
                         audioEl._gainNode.gain.cancelScheduledValues(now);
                         audioEl._gainNode.gain.setValueAtTime(currentGain, now);
-                        // Rampa de 100ms para máxima suavidade
                         audioEl._gainNode.gain.linearRampToValueAtTime(finalVol, now + 0.1);
                     }
                 } catch(e) {
@@ -1119,14 +965,10 @@ export class PlaybackManager {
             }
             
             if (DURATION > 0) {
-                if (localTime > (DURATION - EPSILON) && localTime < DURATION) {
-                    localTime = DURATION - EPSILON;
-                }
+                if (localTime > (DURATION - EPSILON) && localTime < DURATION) localTime = DURATION - EPSILON;
             }
 
-            const needsSeek = this._forceSeek || 
-                            Math.abs(audioEl.currentTime - localTime) > 0.3;
-            
+            const needsSeek = this._forceSeek || Math.abs(audioEl.currentTime - localTime) > 0.3;
             if (needsSeek && Number.isFinite(localTime)) {
                 try { audioEl.currentTime = localTime; } catch(e) {}
             }
@@ -1146,30 +988,17 @@ export class PlaybackManager {
     _getClipsAtTime(trackId, time) {
         const track = this.studio.project.tracks.find(t => t.id === trackId);
         if(!track || track.muted) return [];
-
         return track.clips.filter(c => c.type !== 'subtitle' && time >= c.start && time < (c.start + c.duration))
                           .sort((a, b) => a.start - b.start); 
     }
 
-    /**
-     * Renderiza o frame exato no canvas fornecido e retorna um Blob.
-     * Inclui vídeo, imagem e AGORA AS LEGENDAS.
-     * @param {number} time - Tempo do projeto
-     * @param {CanvasRenderingContext2D} ctx - Contexto onde desenhar
-     * @param {number} w - Largura
-     * @param {number} h - Altura
-     */
     async renderFrameOffline(time, ctx, w, h) {
         this.studio.project.currentTime = time;
-
-        // 2. Limpa o Canvas
         ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, w, h);
 
-        // 3. Obtém clips de VÍDEO visíveis
         const visibleClips = [];
-        // Tracks reversas para desenhar na ordem correta de empilhamento (Se track 0 for topo, inverta conforme sua lógica visual)
         const tracks = [...this.studio.project.tracks].reverse();
         
         tracks.forEach(track => {
@@ -1178,10 +1007,8 @@ export class PlaybackManager {
             if (clips.length > 0) visibleClips.push({ clip: clips[0], track });
         });
 
-        // 4. PREPARAÇÃO DA MÍDIA (Wait for Seek)
         await this._waitForMediaReady(visibleClips, time);
 
-        // 5. DESENHO DE VÍDEO/IMAGEM
         visibleClips.forEach(({ clip, track }) => {
             const asset = this.studio.assetManager.getAsset(clip.assetId);
             if (!asset) return;
@@ -1194,14 +1021,14 @@ export class PlaybackManager {
 
             const drawable = (asset.type === 'image') ? layer.imgEl : layer.videoEl;
 
-            // Opacidade
-            const alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
-            ctx.globalAlpha = alpha;
+            let alpha = clip.level !== undefined ? clip.level : (clip.opacity || 1);
+            const fadeFactor = this._calculateFadeFactor(clip, time);
+            alpha *= fadeFactor;
 
-            // Transformações (Pan/Crop/Zoom)
+            ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+
             ctx.save();
             const t = { x:0, y:0, width:100, height:100, rotation:0, ...clip.transform };
-            
             ctx.translate(w/2, h/2);
             ctx.translate(t.x, t.y);
             ctx.rotate(t.rotation * Math.PI / 180);
@@ -1214,41 +1041,24 @@ export class PlaybackManager {
                 const ratioSrc = dw / dh;
                 const ratioDest = w / h;
                 let renderW, renderH;
-
-                if (ratioSrc > ratioDest) {
-                    renderW = w; 
-                    renderH = w / ratioSrc;
-                } else {
-                    renderH = h;
-                    renderW = h * ratioSrc;
-                }
-                
+                if (ratioSrc > ratioDest) { renderW = w; renderH = w / ratioSrc; }
+                else { renderH = h; renderW = h * ratioSrc; }
                 ctx.drawImage(drawable, -renderW/2, -renderH/2, renderW, renderH);
             }
-
             ctx.restore();
         });
 
-        // Itera sobre as tracks originais (Track de cima desenha por último)
         this.studio.project.tracks.forEach(track => {
             if (track.muted) return;
-            
-            // Filtra apenas clips de legenda ativos neste tempo
             const activeSubClips = track.clips.filter(c => 
-                c.type === 'subtitle' && 
-                time >= c.start && 
-                time < (c.start + c.duration)
+                c.type === 'subtitle' && time >= c.start && time < (c.start + c.duration)
             );
-
             activeSubClips.forEach(clip => {
-                // Chama a função de desenho que já existe no PlaybackManager
                 this._renderSubtitleOverlay(ctx, clip, time, w, h);
             });
         });
 
         ctx.globalAlpha = 1;
-
-        // Retorna blob JPEG
         return new Promise(resolve => {
             ctx.canvas.toBlob(resolve, 'image/jpeg', 0.90);
         });
@@ -1256,58 +1066,32 @@ export class PlaybackManager {
 
     async _waitForMediaReady(visibleClips, globalTime) {
         const promises = [];
-
         visibleClips.forEach(({ clip, track }) => {
             const layer = this.trackLayers.get(track.id);
             if (!layer) return;
 
             const asset = this.studio.assetManager.getAsset(clip.assetId);
-            if (!asset || asset.type === 'image') return; // Imagens geralmente já estão carregadas
+            if (!asset || asset.type === 'image') return; 
 
             const video = layer.videoEl;
-            
-            // Garante source
-            if (video.src !== asset.url) {
-                video.src = asset.url;
-            }
+            if (video.src !== asset.url) video.src = asset.url;
 
             const videoTime = clip.offset + (globalTime - clip.start);
-            
-            // [CORREÇÃO CRÍTICA DE FPS]
-            // A tolerância anterior (0.05) era maior que um frame de 30fps (0.033).
-            // Isso fazia com que frames fossem pulados/duplicados.
-            // Reduzimos para 0.01 (10ms) para forçar o seek em cada frame novo.
             const needsSeek = Math.abs(video.currentTime - videoTime) > 0.01 || video.readyState < 2;
 
             if (needsSeek) {
                 video.currentTime = videoTime;
-                
                 const p = new Promise(resolve => {
-                    // Se já tiver dados suficientes para este frame exato
-                    // Nota: readyState 3 ou 4 é ideal, mas o seeked garante atualização visual
                     if (video.readyState >= 3 && Math.abs(video.currentTime - videoTime) < 0.01 && !video.seeking) { 
-                        resolve();
-                        return;
+                        resolve(); return;
                     }
-                    
-                    const onSeeked = () => {
-                        video.removeEventListener('seeked', onSeeked);
-                        resolve();
-                    };
-                    
-                    // Timeout de segurança reduzido para renderização mais ágil, 
-                    // mas suficiente para decodificar frames (500ms)
-                    setTimeout(() => {
-                        video.removeEventListener('seeked', onSeeked);
-                        resolve(); 
-                    }, 1000); 
-                    
+                    const onSeeked = () => { video.removeEventListener('seeked', onSeeked); resolve(); };
+                    setTimeout(() => { video.removeEventListener('seeked', onSeeked); resolve(); }, 1000); 
                     video.addEventListener('seeked', onSeeked);
                 });
                 promises.push(p);
             }
         });
-
         await Promise.all(promises);
     }
 }

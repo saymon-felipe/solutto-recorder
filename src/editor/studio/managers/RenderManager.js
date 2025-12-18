@@ -344,7 +344,31 @@ export class RenderManager {
                     const src = offlineCtx.createBufferSource();
                     src.buffer = buffer;
                     const gain = offlineCtx.createGain();
-                    gain.gain.value = (clip.volume || 1) * (clip.level !== undefined ? clip.level : 1);
+                    
+                    // Volume Base
+                    const baseVol = (clip.volume || 1) * (clip.level !== undefined ? clip.level : 1);
+                    
+                    const fadeIn = Number(clip.fadeIn) || 0;
+                    const fadeOut = Number(clip.fadeOut) || 0;
+                    const startTime = clip.start;
+                    const endTime = clip.start + clip.duration;
+
+                    // Lógica de Fade In
+                    if (fadeIn > 0) {
+                        gain.gain.setValueAtTime(0, startTime);
+                        gain.gain.linearRampToValueAtTime(baseVol, startTime + fadeIn);
+                    } else {
+                        gain.gain.setValueAtTime(baseVol, startTime);
+                    }
+
+                    // Lógica de Fade Out
+                    if (fadeOut > 0) {
+                        const fadeOutStart = Math.max(startTime + fadeIn, endTime - fadeOut);
+                        
+                        gain.gain.setValueAtTime(baseVol, fadeOutStart);
+                        gain.gain.linearRampToValueAtTime(0, endTime);
+                    }
+
                     src.connect(gain);
                     gain.connect(offlineCtx.destination);
                     try { src.start(clip.start, clip.offset, clip.duration); } catch(e){}
