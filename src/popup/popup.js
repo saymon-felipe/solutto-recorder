@@ -10,25 +10,25 @@ const ACTIONS = {
 };
 
 const STORAGE_KEYS = {
-    CAMERA: "cameraSelect", 
-    MIC: "microphoneSelect", 
+    CAMERA: "cameraSelect",
+    MIC: "microphoneSelect",
     SOURCE: "sourceSelect", // tab, screen, webcam
-    TIMER: "timerValue", 
+    TIMER: "timerValue",
     USE_TIMER: "useTimer"
 };
 
 // Elementos da Interface
 const ui = {
-    // NodeList com as opções de fonte (Aba, Tela, Câmera)
     sources: document.querySelectorAll('.source-option'),
-    // Container pai do slider (usado para aplicar data-attributes de posição)
     sliderContainer: document.querySelector('.select-source-container'),
-    
+
     cameraSelect: document.getElementById('camera-select'),
     micSelect: document.getElementById('mic-select'),
     timerSelect: document.getElementById('timer-select'),
     useTimerCheckbox: document.getElementById('use-timer'),
     startBtn: document.getElementById('start-btn'),
+    errorMsg: document.getElementById('device-error-msg'),
+
     shortcutsToggle: document.getElementById('shortcuts-toggle'),
     shortcutsContent: document.getElementById('shortcuts-content'),
     closeBtn: document.getElementById('close-btn')
@@ -36,67 +36,72 @@ const ui = {
 
 // Inicialização ao carregar o DOM
 document.addEventListener('DOMContentLoaded', async () => {
-    // 1. Carrega preferências salvas (última seleção)
+    ui.startBtn.disabled = true;
+
     await loadPreferences();
-    
-    // 2. Pede permissão e lista dispositivos locais
-    refreshDevicesLocal(); 
-    
-    // 3. Configura os eventos de clique e mudança
+
+    refreshDevicesLocal();
+
     setupListeners();
 });
 
 /**
- * Pede permissão de mídia (se necessário) e preenche os selects com câmeras e microfones.
- * Executa diretamente no contexto da extensão (iframe), garantindo acesso aos labels corretos.
+ * Pede permissão de mídia e preenche os selects.
+ * Executa diretamente no contexto do iframe.
  */
 async function refreshDevicesLocal() {
     try {
-        // Pede permissão rápida para desbloquear labels (Labels ficam vazios sem permissão)
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-        
-        // Para os tracks imediatamente, pois só queríamos a permissão
         stream.getTracks().forEach(t => t.stop());
 
-        // Lista dispositivos
         const devices = await navigator.mediaDevices.enumerateDevices();
         const cameras = devices.filter(d => d.kind === 'videoinput');
         const microphones = devices.filter(d => d.kind === 'audioinput');
 
-        // Popula os selects
         populateSelect(ui.cameraSelect, cameras, "Sem câmera");
         populateSelect(ui.micSelect, microphones, "Sem microfone");
 
-        // Restaura a seleção salva (se o dispositivo ainda existir)
         restoreDeviceSelection();
 
     } catch (error) {
         console.warn("Permissão negada no Popup:", error);
-        // Fallback visual em caso de erro
         ui.cameraSelect.innerHTML = '<option value="">Permissão negada</option>';
         ui.micSelect.innerHTML = '<option value="">Permissão negada</option>';
+    } finally {
+        ui.startBtn.disabled = false;
     }
 }
 
 /**
  * Handler do botão "Iniciar Gravação".
- * Coleta as opções selecionadas e envia mensagem para o Content Script iniciar o processo.
  */
 async function handleStart() {
     const tab = await getActiveTab();
     if (!tab) return;
 
+    if (ui.errorMsg) ui.errorMsg.style.display = 'none';
+
     const selectedElement = document.querySelector('.source-option.selected');
-    
-    if (!selectedElement) {
-        console.error("Nenhuma fonte selecionada.");
-        return;
-    }
+    if (!selectedElement) return;
 
     const selectedSource = selectedElement.dataset.source;
+
+    const hasCamera = !!ui.cameraSelect.value;
+    const hasMic = !!ui.micSelect.value;
+
+    const isWebcamMode = selectedSource === 'webcam';
+
+    if ((isWebcamMode && !hasCamera) || (!hasCamera && !hasMic)) {
+        if (ui.errorMsg) {
+            ui.errorMsg.style.display = 'block';
+            ui.errorMsg.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> ' +
+                (isWebcamMode ? "Câmera é obrigatória neste modo." : "Nenhum dispositivo selecionado.");
+        }
+        return; 
+    }
+
     const useTimer = ui.useTimerCheckbox.checked;
-    
-    // Recupera Labels além dos IDs para garantir pareamento correto no content script
+
     const selectedMicOption = ui.micSelect.options[ui.micSelect.selectedIndex];
     const micLabel = selectedMicOption.value ? selectedMicOption.text : null;
 
@@ -114,40 +119,27 @@ async function handleStart() {
         tabId: tab.id
     };
 
-    // Validação básica para modo Câmera
-    if (selectedSource === 'webcam' && !ui.cameraSelect.value) {
-        alert("Por favor, selecione uma câmera para gravar neste modo.");
-        return;
-    }
-
-    // Feedback visual de carregamento
     ui.startBtn.disabled = true;
     ui.startBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Iniciando...';
 
-    // Envia comando para a aba ativa
     chrome.tabs.sendMessage(tab.id, payload, (response) => {
-        ui.startBtn.disabled = false;
-        ui.startBtn.innerHTML = '<i class="fa-solid fa-circle-dot"></i> Iniciar gravação';
-
         if (chrome.runtime.lastError) {
-            alert("Erro de comunicação com a página. Tente recarregar a aba.");
-            console.error(chrome.runtime.lastError);
+            ui.startBtn.disabled = false;
+            ui.startBtn.innerHTML = '<i class="fa-solid fa-circle-dot"></i> Iniciar gravação';
+            alert("Erro: Recarregue a página para gravar.");
             return;
         }
 
-        // Se tudo certo, fecha o popup
         if (response && response.allow) {
             closePopup();
-        } else if (response && response.error) {
-            alert("Erro ao iniciar: " + response.error);
+        } else {
+            ui.startBtn.disabled = false;
+            ui.startBtn.innerHTML = '<i class="fa-solid fa-circle-dot"></i> Iniciar gravação';
+            if (response && response.error) alert("Erro: " + response.error);
         }
     });
 }
 
-/**
- * Fecha o iframe do popup injetado na página.
- * Envia um script para a página remover o elemento DOM.
- */
 function closePopup() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
@@ -155,9 +147,9 @@ function closePopup() {
                 target: { tabId: tabs[0].id },
                 func: () => {
                     const el = document.getElementById("solutto-recorder-iframe");
-                    if (el) { 
-                        el.style.opacity = "0"; 
-                        setTimeout(() => el.remove(), 300); 
+                    if (el) {
+                        el.style.opacity = "0";
+                        setTimeout(() => el.remove(), 300);
                     }
                 }
             });
@@ -165,37 +157,32 @@ function closePopup() {
     });
 }
 
-/**
- * Configura todos os listeners de eventos da interface.
- */
 function setupListeners() {
-    // Lógica do Slider de Fontes
     ui.sources.forEach((src, index) => {
         src.addEventListener('click', () => {
             ui.sources.forEach(s => s.classList.remove('selected'));
             src.classList.add('selected');
             ui.sliderContainer.setAttribute('data-selected-index', index);
             savePreference(STORAGE_KEYS.SOURCE, src.dataset.source);
-            
+
+            if (ui.errorMsg) ui.errorMsg.style.display = 'none';
+
             if (src.dataset.source === 'webcam') {
                 ensureCameraSelected();
             }
         });
     });
 
-    // [CORREÇÃO] Salva o LABEL (texto) em vez do ID, pois o ID muda
     ui.cameraSelect.addEventListener('change', (e) => {
+        if (ui.errorMsg) ui.errorMsg.style.display = 'none'; 
         const selectedOption = e.target.options[e.target.selectedIndex];
-        if (selectedOption) {
-            savePreference(STORAGE_KEYS.CAMERA, selectedOption.text);
-        }
+        if (selectedOption) savePreference(STORAGE_KEYS.CAMERA, selectedOption.text);
     });
 
     ui.micSelect.addEventListener('change', (e) => {
+        if (ui.errorMsg) ui.errorMsg.style.display = 'none'; 
         const selectedOption = e.target.options[e.target.selectedIndex];
-        if (selectedOption) {
-            savePreference(STORAGE_KEYS.MIC, selectedOption.text);
-        }
+        if (selectedOption) savePreference(STORAGE_KEYS.MIC, selectedOption.text);
     });
 
     ui.timerSelect.addEventListener('change', (e) => savePreference(STORAGE_KEYS.TIMER, e.target.value));
@@ -225,28 +212,21 @@ function populateSelect(select, devices, defaultLabel) {
     devices.forEach(d => {
         const option = document.createElement('option');
         option.value = d.deviceId;
-        // Trunca nomes longos para não quebrar o layout
         option.text = d.label || `Dispositivo ${d.deviceId.substring(0, 5)}`;
         select.appendChild(option);
     });
 }
 
-/**
- * Carrega as preferências salvas no Chrome Storage e aplica na UI.
- */
 async function loadPreferences() {
     const data = await chrome.storage.local.get([STORAGE_KEYS.SOURCE, STORAGE_KEYS.TIMER, STORAGE_KEYS.USE_TIMER]);
-    
+
     if (data[STORAGE_KEYS.SOURCE]) {
-        // Encontra o índice baseado no valor salvo (tab, screen, webcam) para posicionar o slider
         const sourcesArray = Array.from(ui.sources);
         const targetIndex = sourcesArray.findIndex(s => s.dataset.source === data[STORAGE_KEYS.SOURCE]);
-        
+
         if (targetIndex !== -1) {
             ui.sources.forEach(s => s.classList.remove('selected'));
             ui.sources[targetIndex].classList.add('selected');
-            
-            // Aplica a posição inicial sem animação
             ui.sliderContainer.setAttribute('data-selected-index', targetIndex);
         }
     }
@@ -256,30 +236,21 @@ async function loadPreferences() {
 
 async function restoreDeviceSelection() {
     const data = await chrome.storage.local.get([STORAGE_KEYS.CAMERA, STORAGE_KEYS.MIC]);
-    
-    if (data[STORAGE_KEYS.CAMERA]) {
-        setSelectByLabel(ui.cameraSelect, data[STORAGE_KEYS.CAMERA]);
-    }
-    
-    if (data[STORAGE_KEYS.MIC]) {
-        setSelectByLabel(ui.micSelect, data[STORAGE_KEYS.MIC]);
-    }
+    if (data[STORAGE_KEYS.CAMERA]) setSelectByLabel(ui.cameraSelect, data[STORAGE_KEYS.CAMERA]);
+    if (data[STORAGE_KEYS.MIC]) setSelectByLabel(ui.micSelect, data[STORAGE_KEYS.MIC]);
 }
 
 function setSelectByLabel(select, label) {
     const options = Array.from(select.options);
     const matchingOption = options.find(opt => opt.text === label);
-    
-    if (matchingOption) {
-        select.value = matchingOption.value; // Define o valor para o ID atual do dispositivo
-    }
+    if (matchingOption) select.value = matchingOption.value;
 }
 
 function savePreference(key, value) { chrome.storage.local.set({ [key]: value }); }
 
 function ensureCameraSelected() {
     if (!ui.cameraSelect.value && ui.cameraSelect.options.length > 1) {
-        ui.cameraSelect.selectedIndex = 1; // Seleciona a primeira câmera disponível
+        ui.cameraSelect.selectedIndex = 1;
         savePreference(STORAGE_KEYS.CAMERA, ui.cameraSelect.value);
     }
 }

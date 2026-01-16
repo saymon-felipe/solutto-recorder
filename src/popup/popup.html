@@ -48,12 +48,16 @@
         <div class="form-group">
           <label class="fontsize-md">Configurações</label>
 
-          <span class="fontsize-sm">Câmera</span>
+          <label for="camera-select" class="fontsize-sm">
+            <i class="fa-solid fa-video"></i> Câmera
+          </label>
           <select id="camera-select">
             <option value="">Carregando...</option>
           </select>
 
-          <span class="fontsize-sm">Microfone</span>
+          <label for="mic-select" class="fontsize-sm">
+            <i class="fa-solid fa-microphone"></i> Microfone
+          </label>
           <select id="mic-select">
             <option value="">Carregando...</option>
           </select>
@@ -76,6 +80,10 @@
           <i class="fa-solid fa-circle-dot"></i>
           Iniciar gravação
         </button>
+        <p id="device-error-msg"
+          style="color: #ff4444; font-size: 11px; margin-top: 8px; text-align: center; display: none;">
+          <i class="fa-solid fa-circle-exclamation"></i> Nenhum dispositivo selecionado ou encontrado.
+        </p>
       </div>
 
       <div class="shortcuts-wrapper">
