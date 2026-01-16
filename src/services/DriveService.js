@@ -19,40 +19,71 @@ export class DriveService {
      * @param {string} fileName - Nome original do arquivo.
      * @returns {Promise<{fileId: string, fileViewLink: string}>} Links e ID do arquivo criado.
      */
-    async uploadVideoWithToken(token, fileBlob, fileName) {
+    async uploadVideoWithToken(token, fileBlob, fileName, onProgress) {
         try {
             console.log("DriveService (Editor): Iniciando upload direto...");
 
             let folderId = await this._findFolder(token);
-            
             if (!folderId) {
                 folderId = await this._createFolder(token);
             }
 
-            const finalFileName = this._generateUniqueName(fileName);
+            const metadata = {
+                name: fileName,
+                parents: [folderId]
+            };
 
-            const fileId = await this._performMultipartUpload(token, folderId, fileBlob, finalFileName);
+            const formData = new FormData();
+            formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+            formData.append("file", fileBlob);
+
+            const fileId = await this._uploadFileXHR(token, formData, onProgress);
 
             await this._makeFilePublic(token, fileId);
 
-            const publicLink = `https://drive.google.com/file/d/${fileId}/view`;
-
-            try {
-                await navigator.clipboard.writeText(publicLink);
-                console.log("[DriveService] Link copiado para a área de transferência.");
-            } catch (clipboardErr) {
-                console.warn("[DriveService] Falha ao copiar link (possível timeout de interação):", clipboardErr);
-            }
-
             return {
                 fileId: fileId,
-                fileViewLink: publicLink
+                fileViewLink: `https://drive.google.com/file/d/${fileId}/view?usp=sharing`
             };
 
         } catch (error) {
-            console.error("DriveService: Erro no upload:", error);
+            console.error("Drive API Error:", error);
             throw error;
         }
+    }
+
+    _uploadFileXHR(token, formData, onProgress) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", this.UPLOAD_API_URL);
+            xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+            
+            if (xhr.upload && onProgress) {
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        const percent = e.loaded / e.total;
+                        onProgress({ percent: percent });
+                    }
+                };
+            }
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        resolve(data.id);
+                    } catch (e) {
+                        reject(new Error("Resposta inválida do Google Drive."));
+                    }
+                } else {
+                    reject(new Error(`Erro no upload: ${xhr.status} - ${xhr.responseText}`));
+                }
+            };
+
+            xhr.onerror = () => reject(new Error("Erro de rede durante o upload."));
+            
+            xhr.send(formData);
+        });
     }
 
     // ==========================================

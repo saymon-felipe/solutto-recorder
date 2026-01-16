@@ -34,16 +34,16 @@ class EditorManager {
         // Mapeamento de Elementos da UI
         this.ui = {
             video: document.getElementById("video-player"),
-            
+
             // Slider de Timeline
             rangeMin: document.getElementById("range-min"),
             rangeMax: document.getElementById("range-max"),
             rangeFill: document.getElementById("range-fill"),
-            
+
             // Inputs de Tempo
             startTimeInput: document.getElementById("start-time"),
             endTimeInput: document.getElementById("end-time"),
-            
+
             // Botões de Ação
             btnCut: document.getElementById("btn-cut"),
             btnDownload: document.getElementById("btn-download"),
@@ -51,7 +51,7 @@ class EditorManager {
             btnDownloadGif: document.getElementById("btn-download-gif"),
             btnDrive: document.getElementById("btn-drive"),
             btnOpenStudio: document.getElementById("btn-open-studio"),
-            
+
             // Overlay de Carregamento
             loader: document.getElementById("processing-overlay"),
             loadingText: document.getElementById("loading-text")
@@ -96,18 +96,18 @@ class EditorManager {
         try {
             await this.transcoder.init();
             const storage = new VideoStorage();
-            
+
             // --- LÓGICA DE RETRY (Evita Race Condition no Save) ---
             // Tenta buscar o vídeo 5 vezes (total 2.5s) antes de desistir
             let videoBlob = null;
-            
+
             for (let i = 0; i < 5; i++) {
                 // Tenta pegar segmentos unificados ou blob único
                 const segments = await storage.getVideoSegments(targetVideoId);
-                
+
                 if (segments && segments.length > 0) {
-                    console.log(`[Editor] Vídeo encontrado na tentativa ${i+1}.`);
-                    
+                    console.log(`[Editor] Vídeo encontrado na tentativa ${i + 1}.`);
+
                     if (segments.length > 1) {
                         this._setLoading(true, "Unindo segmentos...");
                         const mergedUrl = await this.transcoder.mergeSegments(segments, "merged_video");
@@ -118,8 +118,8 @@ class EditorManager {
                     }
                     break;
                 }
-                
-                console.log(`[Editor] Aguardando vídeo (Tentativa ${i+1})...`);
+
+                console.log(`[Editor] Aguardando vídeo (Tentativa ${i + 1})...`);
                 await new Promise(r => setTimeout(r, 500));
             }
 
@@ -129,7 +129,7 @@ class EditorManager {
 
             this.videoBlob = videoBlob;
             const url = URL.createObjectURL(this.videoBlob);
-            
+
             await this._loadVideo(url);
             this._setupListeners();
 
@@ -145,48 +145,48 @@ class EditorManager {
      * Configura todos os Event Listeners da UI.
      */
     _setupListeners() {
-        if(this.ui.rangeMin) {
+        if (this.ui.rangeMin) {
             const newMin = this.ui.rangeMin.cloneNode(true);
             this.ui.rangeMin.parentNode.replaceChild(newMin, this.ui.rangeMin);
             this.ui.rangeMin = newMin;
-            
+
             this.ui.rangeMin.addEventListener("input", () => this._updateSlider("min"));
         }
-        
-        if(this.ui.rangeMax) {
+
+        if (this.ui.rangeMax) {
             const newMax = this.ui.rangeMax.cloneNode(true);
             this.ui.rangeMax.parentNode.replaceChild(newMax, this.ui.rangeMax);
             this.ui.rangeMax = newMax;
-            
+
             this.ui.rangeMax.addEventListener("input", () => this._updateSlider("max"));
         }
-        
+
         // Ações Principais
-        if(this.ui.btnCut) this.ui.btnCut.addEventListener("click", () => this._handleCut());
-        
-        if(this.ui.btnDownload) {
+        if (this.ui.btnCut) this.ui.btnCut.addEventListener("click", () => this._handleCut());
+
+        if (this.ui.btnDownload) {
             this.ui.btnDownload.addEventListener("click", () => {
                 // Baixa no formato atual (geralmente WebM)
-                if(this.videoBlob) this._triggerDownload(this.videoBlob, this.currentExtension); 
+                if (this.videoBlob) this._triggerDownload(this.videoBlob, this.currentExtension);
             });
         }
 
         // Lógica Inteligente de MP4 (Cache/Conversão)
-        if(this.ui.btnDownloadMp4) {
+        if (this.ui.btnDownloadMp4) {
             // Remove listeners antigos (cloneNode hack) para garantir limpeza
             const newBtn = this.ui.btnDownloadMp4.cloneNode(true);
             this.ui.btnDownloadMp4.parentNode.replaceChild(newBtn, this.ui.btnDownloadMp4);
             this.ui.btnDownloadMp4 = newBtn;
-            
+
             this.ui.btnDownloadMp4.addEventListener("click", () => this._handleConvertAndDownloadMP4());
         }
 
-        if(this.ui.btnDownloadGif) this.ui.btnDownloadGif.addEventListener("click", () => this._handleConvertAndDownloadGif());
-        
-        if(this.ui.btnDrive) this.ui.btnDrive.addEventListener("click", () => this._handleDriveUpload());
-        
+        if (this.ui.btnDownloadGif) this.ui.btnDownloadGif.addEventListener("click", () => this._handleConvertAndDownloadGif());
+
+        if (this.ui.btnDrive) this.ui.btnDrive.addEventListener("click", () => this._handleDriveUpload());
+
         // Alternar para Studio
-        if(this.ui.btnOpenStudio) this.ui.btnOpenStudio.addEventListener("click", () => this.studio.toggleMode());
+        if (this.ui.btnOpenStudio) this.ui.btnOpenStudio.addEventListener("click", () => this.studio.toggleMode());
     }
 
     /**
@@ -195,7 +195,7 @@ class EditorManager {
     async _loadVideo(url) {
         if (this.videoUrl) URL.revokeObjectURL(this.videoUrl);
         this.videoUrl = url;
-        
+
         // Limpa cache MP4 pois o vídeo base mudou
         this.resetCache();
 
@@ -208,16 +208,16 @@ class EditorManager {
                     } else {
                         this.duration = this.ui.video.duration;
                     }
-                    
+
                     // Reseta controles de tempo
                     this._updateRangeUI(0, this.duration);
                     this._enableButtons();
                     resolve();
                 };
-                
-                this.ui.video.onerror = (e) => { 
-                    console.error("[Editor] Erro no Player:", this.ui.video.error); 
-                    resolve(); 
+
+                this.ui.video.onerror = (e) => {
+                    console.error("[Editor] Erro no Player:", this.ui.video.error);
+                    resolve();
                 };
             });
         }
@@ -234,40 +234,49 @@ class EditorManager {
 
     async _handleCut() {
         if (this.isProcessing) return;
-        this._setLoading(true, "Cortando vídeo...");
-        
+        this._setLoading(true, "Iniciando corte...");
+
         try {
             const startSec = this._timeToSeconds(this.ui.startTimeInput.value);
             const endSec = this._timeToSeconds(this.ui.endTimeInput.value);
             const duration = endSec - startSec;
 
-            // Usa Transcoder para cortar (Trim) sem re-encodar (se possível) ou com alta qualidade
+            if (duration <= 0) throw new Error("Duração inválida.");
+
             const newVideoUrl = await this.transcoder.processVideo(
-                this.videoBlob, 
-                this.fileName, 
-                startSec, 
-                duration, 
-                "webm"
+                this.videoBlob,
+                this.fileName,
+                startSec,
+                duration,
+                "webm",
+                {}, 
+                (prog) => {
+                    const pct = Math.floor(prog.percent * 100);
+                    this._setLoading(true, `Cortando vídeo... ${pct}%`);
+                }
             );
-            
+
             const resp = await fetch(newVideoUrl);
             this.videoBlob = await resp.blob();
-            
-            // Recarrega o vídeo cortado no player
+            this.currentExtension = "webm";
+
             await this._loadVideo(newVideoUrl);
             
-        } catch (e) { 
-            alert("Erro ao cortar: " + e.message); 
-        } finally { 
-            this._setLoading(false); 
+            this._resetSlider();
+
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao cortar: " + error.message);
+        } finally {
+            this._setLoading(false, "");
         }
     }
 
     async _handleConvertAndDownloadMP4() {
-        if (!this.videoBlob) return;
+        if (this.isProcessing || !this.videoBlob) return;
 
-        const start = parseFloat(this.ui.startTimeInput.value) || 0;
-        const end = parseFloat(this.ui.endTimeInput.value) || this.duration;
+        const start = this._timeToSeconds(this.ui.startTimeInput.value) || 0;
+        const end = this._timeToSeconds(this.ui.endTimeInput.value) || this.duration;
         const duration = end - start;
 
         // Verifica se o usuário quer o vídeo inteiro (sem cortes na UI)
@@ -292,17 +301,23 @@ class EditorManager {
 
         // CASO 3: Precisa converter (Fallback Transcoder)
         try {
-            this._setLoading(true, "Convertendo para MP4 (Alta Qualidade)...");
+            this._setLoading(true, "Convertendo para MP4 (Isso pode demorar)...");
             
-            const url = await this.transcoder.processVideo(
+            // Chama o transcoder com o callback de progresso
+            const mp4Url = await this.transcoder.processVideo(
                 this.videoBlob, 
-                "convert", 
+                this.fileName, 
                 start, 
                 duration, 
-                'mp4'
+                'mp4',
+                {}, // options
+                (prog) => {
+                    const pct = Math.floor(prog.percent * 100);
+                    this._setLoading(true, `Convertendo para MP4... ${pct}%`);
+                }
             );
 
-            const res = await fetch(url);
+            const res = await fetch(mp4Url);
             const mp4Blob = await res.blob();
 
             // Salva no Cache para o próximo clique
@@ -311,48 +326,77 @@ class EditorManager {
                 signature: currentSignature
             };
 
-            this._triggerDownload(mp4Blob, 'mp4');
+            this._triggerDownload(mp4Url, "mp4");
 
-        } catch (e) {
-            console.error(e);
-            alert("Erro ao converter: " + e.message);
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao converter MP4: " + error.message);
         } finally {
-            this._setLoading(false);
+            this._setLoading(false, "");
         }
     }
 
     async _handleConvertAndDownloadGif() {
         if (this.isProcessing) return;
         this._setLoading(true, "Gerando GIF...");
+
         try {
-            const url = await this.transcoder.processVideo(this.videoBlob, this.fileName, 0, this.duration, "gif");
-            this._triggerDownload(url, "gif");
-        } catch(e){ 
-            alert(e.message); 
-        } finally { 
-            this._setLoading(false); 
+            const startSec = this._timeToSeconds(this.ui.startTimeInput.value);
+            const endSec = this._timeToSeconds(this.ui.endTimeInput.value);
+            const duration = endSec - startSec;
+
+            const gifUrl = await this.transcoder.processVideo(
+                this.videoBlob,
+                this.fileName,
+                startSec, 
+                duration, 
+                "gif",
+                {},
+                (prog) => {
+                    const pct = Math.floor(prog.percent * 100);
+                    const extraText = duration > 10 ? "(Timelapse)" : "";
+                    this._setLoading(true, `Gerando GIF ${extraText}... ${pct}%`);
+                }
+            );
+
+            this._triggerDownload(gifUrl, "gif");
+
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao criar GIF: " + error.message);
+        } finally {
+            this._setLoading(false, "");
         }
     }
 
     async _handleDriveUpload() {
-         if (this.isProcessing) return;
-         this._setLoading(true, "Enviando...");
-         try {
-             const auth = await chrome.runtime.sendMessage({ action: "get_auth_token" });
-             if(!auth || !auth.token) throw new Error("Falha na autenticação do Google.");
-             
-             // Envia com a extensão correta
-             const filename = `${this.fileName}.${this.currentExtension}`;
-             const res = await this.driveService.uploadVideoWithToken(auth.token, this.videoBlob, filename);
-             
-             if(res.fileViewLink) window.open(res.fileViewLink);
-             else alert("Upload concluído!");
-             
-         } catch(e) { 
-             alert("Erro no upload: " + e.message); 
-         } finally { 
-             this._setLoading(false); 
-         }
+        if (this.isProcessing) return;
+        this._setLoading(true, "Iniciando upload...");
+        
+        try {
+            const auth = await chrome.runtime.sendMessage({ action: "get_auth_token" });
+            if (!auth || !auth.token) throw new Error("Falha na autenticação do Google.");
+
+            const filename = `${this.fileName}.${this.currentExtension}`;
+            
+            const res = await this.driveService.uploadVideoWithToken(
+                auth.token, 
+                this.videoBlob, 
+                filename,
+                (prog) => {
+                    const pct = Math.floor(prog.percent * 100);
+                    this._setLoading(true, `Enviando para o Drive... ${pct}%`);
+                }
+            );
+
+            if (res.fileViewLink) window.open(res.fileViewLink);
+            else alert("Upload concluído!");
+
+        } catch (e) {
+            alert("Erro no upload: " + e.message);
+        } finally {
+            this._setLoading(false);
+        }
     }
 
     // --- HELPERS DE UI E UTILITÁRIOS ---
@@ -371,13 +415,13 @@ class EditorManager {
         }
 
         const a = document.createElement("a");
-        a.href = url; 
+        a.href = url;
         a.download = `${this.fileName}.${ext}`;
         a.style.display = "none";
-        
-        document.body.appendChild(a); 
-        a.click(); 
-        
+
+        document.body.appendChild(a);
+        a.click();
+
         setTimeout(() => {
             a.remove();
             if (content instanceof Blob) URL.revokeObjectURL(url);
@@ -410,6 +454,17 @@ class EditorManager {
         // Atualiza inputs de texto e barra visual
         this._updateTimeInputs(startSec, endSec);
         this._renderSliderFill();
+    }
+
+    /**
+     * Reseta explicitamente o slider para 0-100%.
+     * Útil após um corte para indicar que agora o vídeo inteiro (novo) está selecionado.
+     */
+    _resetSlider() {
+        if (this.ui.rangeMin) this.ui.rangeMin.value = 0;
+        if (this.ui.rangeMax) this.ui.rangeMax.value = 100;
+        this._renderSliderFill();
+        this._updateTimeInputs(0, this.duration);
     }
 
     _updateTimeInputs(startSec, endSec) {
@@ -445,18 +500,18 @@ class EditorManager {
                 this.ui.rangeMax.value = minVal + gap;
             }
         }
-        
+
         this._renderSliderFill();
-        
+
         // Calcula tempo real para mostrar nos inputs
         const currentStartPct = parseFloat(this.ui.rangeMin.value);
         const currentEndPct = parseFloat(this.ui.rangeMax.value);
-        
+
         const startSec = (currentStartPct / 100) * this.duration;
         const endSec = (currentEndPct / 100) * this.duration;
-        
+
         this._updateTimeInputs(startSec, endSec);
-        
+
         // Seek no vídeo para feedback visual
         if (source === "min") {
             this.ui.video.currentTime = startSec;
@@ -494,15 +549,15 @@ class EditorManager {
         this.isProcessing = active;
         if (this.ui.loadingText) this.ui.loadingText.innerText = text || "Carregando...";
         if (this.ui.loader) this.ui.loader.style.display = active ? "flex" : "none";
-        
-        [this.ui.btnCut, this.ui.btnDownload, this.ui.btnDownloadMp4, this.ui.btnDownloadGif, this.ui.btnDrive].forEach(b => { 
-            if(b) b.disabled = active; 
+
+        [this.ui.btnCut, this.ui.btnDownload, this.ui.btnDownloadMp4, this.ui.btnDownloadGif, this.ui.btnDrive].forEach(b => {
+            if (b) b.disabled = active;
         });
     }
 
     _enableButtons() {
-        [this.ui.btnCut, this.ui.btnDownload, this.ui.btnDownloadMp4, this.ui.btnDownloadGif, this.ui.btnDrive].forEach(b => { 
-            if(b) b.disabled = false; 
+        [this.ui.btnCut, this.ui.btnDownload, this.ui.btnDownloadMp4, this.ui.btnDownloadGif, this.ui.btnDrive].forEach(b => {
+            if (b) b.disabled = false;
         });
     }
 
@@ -519,19 +574,19 @@ class EditorManager {
      */
     _formatTime(s) {
         if (!Number.isFinite(s)) return "00:00:00;00";
-        
+
         const fps = 30; // Fixo conforme solicitado
-        
+
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);
         const sec = Math.floor(s % 60);
-        
+
         // Pega a parte decimal dos segundos e converte para frames
         // Ex: 0.5s * 30fps = 15 frames
         const frames = Math.floor((s % 1) * fps);
 
         const pad = (n) => n.toString().padStart(2, '0');
-        
+
         // Retorna formato com ponto e vírgula para frames (padrão SMPTE drop-frame-ish)
         return `${pad(h)}:${pad(m)}:${pad(sec)};${pad(frames)}`;
     }
@@ -542,7 +597,7 @@ class EditorManager {
     _timeToSeconds(str) {
         // Aceita separadores : ou ; (ex: 00:00:05;15)
         const parts = str.split(/[:;]/).map(Number);
-        
+
         let h = 0, m = 0, s = 0, f = 0;
         const fps = 30;
 
@@ -552,14 +607,14 @@ class EditorManager {
             // Fallback para formato antigo (sem frames)
             [h, m, s] = parts;
         }
-        
+
         // Reconstrói o tempo total somando a fração dos frames
         return (h * 3600) + (m * 60) + s + (f / fps);
     }
 }
 
 // Inicializa quando o DOM estiver pronto
-document.addEventListener("DOMContentLoaded", () => { 
-    const e = new EditorManager(); 
-    e.init(); 
+document.addEventListener("DOMContentLoaded", () => {
+    const e = new EditorManager();
+    e.init();
 });
