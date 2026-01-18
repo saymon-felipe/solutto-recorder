@@ -1,80 +1,149 @@
 /**
  * Popup Logic - Solutto Recorder
- * Gerencia a interface de seleção de opções (Aba, Tela, Webcam) e inicia a solicitação de gravação.
- * Roda dentro do iframe injetado na página do usuário.
+ * Gerencia a interface de seleção de opções e inicia a solicitação de gravação.
  */
 
 const ACTIONS = {
     REQUEST_RECORDING: "request_recording",
-    REQUEST_DEVICES: "request_devices"
+    REQUEST_DEVICES: "request_devices",
+    GET_STATUS: "GET_RECORDING_STATUS"
 };
 
+/**
+ * Sincronizado com SoluttoConstants.STORAGE para garantir 
+ * que o Timer e o Checkbox persistam corretamente em toda a extensão.
+ */
 const STORAGE_KEYS = {
     CAMERA: "cameraSelect",
     MIC: "microphoneSelect",
-    SOURCE: "sourceSelect", // tab, screen, webcam
-    TIMER: "timerValue",
-    USE_TIMER: "useTimer"
+    SOURCE: "sourceSelect",
+    TIMER: "waitSeconds",      
+    USE_TIMER: "timeoutCheckbox" 
 };
 
-// Elementos da Interface
 const ui = {
     sources: document.querySelectorAll('.source-option'),
     sliderContainer: document.querySelector('.select-source-container'),
-
     cameraSelect: document.getElementById('camera-select'),
     micSelect: document.getElementById('mic-select'),
     timerSelect: document.getElementById('timer-select'),
     useTimerCheckbox: document.getElementById('use-timer'),
     startBtn: document.getElementById('start-btn'),
     errorMsg: document.getElementById('device-error-msg'),
-
+    closeBtn: document.getElementById('close-btn'),
     shortcutsToggle: document.getElementById('shortcuts-toggle'),
-    shortcutsContent: document.getElementById('shortcuts-content'),
-    closeBtn: document.getElementById('close-btn')
+    shortcutsContent: document.getElementById('shortcuts-content')
 };
 
-// Inicialização ao carregar o DOM
 document.addEventListener('DOMContentLoaded', async () => {
     ui.startBtn.disabled = true;
 
+    const status = await checkGlobalStatus();
+
     await loadPreferences();
 
-    refreshDevicesLocal();
-
-    setupListeners();
+    if (!status.isBusy) {
+        await refreshDevicesLocal();
+        setupListeners();
+    }
 });
 
 /**
- * Pede permissão de mídia e preenche os selects.
- * Executa diretamente no contexto do iframe.
+ * Consulta o estado do Service Worker para evitar conflitos de gravação.
  */
-async function refreshDevicesLocal() {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-        stream.getTracks().forEach(t => t.stop());
-
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const cameras = devices.filter(d => d.kind === 'videoinput');
-        const microphones = devices.filter(d => d.kind === 'audioinput');
-
-        populateSelect(ui.cameraSelect, cameras, "Sem câmera");
-        populateSelect(ui.micSelect, microphones, "Sem microfone");
-
-        restoreDeviceSelection();
-
-    } catch (error) {
-        console.warn("Permissão negada no Popup:", error);
-        ui.cameraSelect.innerHTML = '<option value="">Permissão negada</option>';
-        ui.micSelect.innerHTML = '<option value="">Permissão negada</option>';
-    } finally {
-        ui.startBtn.disabled = false;
-    }
+async function checkGlobalStatus() {
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: ACTIONS.GET_STATUS }, (response) => {
+            if (response && response.isBusy) {
+                ui.startBtn.disabled = true;
+                ui.startBtn.innerHTML = '<i class="fa-solid fa-ban"></i> Indisponível';
+                if (ui.errorMsg) {
+                    ui.errorMsg.style.display = 'block';
+                    ui.errorMsg.innerHTML = `<i class="fa-solid fa-lock"></i> ${response.reason === "processing" ? "Processando vídeo..." : "Já gravando em outra aba."
+                        }`;
+                }
+                resolve({ isBusy: true });
+            } else {
+                resolve({ isBusy: false });
+            }
+        });
+    });
 }
 
 /**
- * Handler do botão "Iniciar Gravação".
+ * Carrega e APLICA as configurações salvas no Chrome Storage.
  */
+async function loadPreferences() {
+    const data = await chrome.storage.local.get([
+        STORAGE_KEYS.SOURCE,
+        STORAGE_KEYS.TIMER,
+        STORAGE_KEYS.USE_TIMER
+    ]);
+
+    if (data[STORAGE_KEYS.SOURCE]) {
+        const sourcesArray = Array.from(ui.sources);
+        const targetIndex = sourcesArray.findIndex(s => s.dataset.source === data[STORAGE_KEYS.SOURCE]);
+        if (targetIndex !== -1) {
+            ui.sources.forEach(s => s.classList.remove('selected'));
+            ui.sources[targetIndex].classList.add('selected');
+            ui.sliderContainer.setAttribute('data-selected-index', targetIndex);
+        }
+    }
+
+    if (data[STORAGE_KEYS.TIMER]) {
+        ui.timerSelect.value = data[STORAGE_KEYS.TIMER];
+    }
+
+    if (data[STORAGE_KEYS.USE_TIMER] !== undefined) {
+        ui.useTimerCheckbox.checked = data[STORAGE_KEYS.USE_TIMER];
+    }
+}
+
+function setupListeners() {
+    // Slider de Fontes
+    ui.sources.forEach((src, index) => {
+        src.addEventListener('click', () => {
+            ui.sources.forEach(s => s.classList.remove('selected'));
+            src.classList.add('selected');
+            ui.sliderContainer.setAttribute('data-selected-index', index);
+            savePreference(STORAGE_KEYS.SOURCE, src.dataset.source);
+            if (ui.errorMsg) ui.errorMsg.style.display = 'none';
+        });
+    });
+
+    ui.timerSelect.addEventListener('change', (e) => savePreference(STORAGE_KEYS.TIMER, e.target.value));
+    ui.useTimerCheckbox.addEventListener('change', (e) => savePreference(STORAGE_KEYS.USE_TIMER, e.target.checked));
+
+    ui.cameraSelect.addEventListener('change', (e) => {
+        const label = e.target.options[e.target.selectedIndex]?.text;
+        if (label) savePreference(STORAGE_KEYS.CAMERA, label);
+    });
+
+    ui.micSelect.addEventListener('change', (e) => {
+        const label = e.target.options[e.target.selectedIndex]?.text;
+        if (label) savePreference(STORAGE_KEYS.MIC, label);
+    });
+
+    ui.startBtn.addEventListener('click', handleStart);
+    ui.closeBtn.addEventListener('click', closePopup);
+
+    // Atalhos
+    if (ui.shortcutsToggle) {
+        ui.shortcutsToggle.addEventListener('click', () => {
+            ui.shortcutsContent.classList.toggle('open');
+            ui.shortcutsToggle.classList.toggle('active');
+        });
+    }
+
+    // Estúdio
+    const btnStudio = document.getElementById('btn-open-studio');
+    if (btnStudio) {
+        btnStudio.addEventListener('click', () => {
+            chrome.tabs.create({ url: chrome.runtime.getURL('src/editor/editor.html?mode=studio') });
+        });
+    }
+}
+
 async function handleStart() {
     const tab = await getActiveTab();
     if (!tab) return;
@@ -123,115 +192,48 @@ async function handleStart() {
     ui.startBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Iniciando...';
 
     chrome.tabs.sendMessage(tab.id, payload, (response) => {
-        if (chrome.runtime.lastError) {
+        if (chrome.runtime.lastError || (response && response.error)) {
             ui.startBtn.disabled = false;
             ui.startBtn.innerHTML = '<i class="fa-solid fa-circle-dot"></i> Iniciar gravação';
-            alert("Erro: Recarregue a página para gravar.");
-            return;
-        }
-
-        if (response && response.allow) {
+            alert("Erro: " + (chrome.runtime.lastError?.message || response?.error));
+        } else if (response && response.allow) {
             closePopup();
-        } else {
-            ui.startBtn.disabled = false;
-            ui.startBtn.innerHTML = '<i class="fa-solid fa-circle-dot"></i> Iniciar gravação';
-            if (response && response.error) alert("Erro: " + response.error);
         }
     });
 }
 
-function closePopup() {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]) {
-            chrome.scripting.executeScript({
-                target: { tabId: tabs[0].id },
-                func: () => {
-                    const el = document.getElementById("solutto-recorder-iframe");
-                    if (el) {
-                        el.style.opacity = "0";
-                        setTimeout(() => el.remove(), 300);
-                    }
-                }
-            });
-        }
-    });
-}
+/**
+ * Pede permissão e lista dispositivos locais.
+ */
+async function refreshDevicesLocal() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        stream.getTracks().forEach(t => t.stop());
 
-function setupListeners() {
-    ui.sources.forEach((src, index) => {
-        src.addEventListener('click', () => {
-            ui.sources.forEach(s => s.classList.remove('selected'));
-            src.classList.add('selected');
-            ui.sliderContainer.setAttribute('data-selected-index', index);
-            savePreference(STORAGE_KEYS.SOURCE, src.dataset.source);
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        populateSelect(ui.cameraSelect, devices.filter(d => d.kind === 'videoinput'), "Sem câmera");
+        populateSelect(ui.micSelect, devices.filter(d => d.kind === 'audioinput'), "Sem microfone");
 
-            if (ui.errorMsg) ui.errorMsg.style.display = 'none';
-
-            if (src.dataset.source === 'webcam') {
-                ensureCameraSelected();
-            }
-        });
-    });
-
-    ui.cameraSelect.addEventListener('change', (e) => {
-        if (ui.errorMsg) ui.errorMsg.style.display = 'none'; 
-        const selectedOption = e.target.options[e.target.selectedIndex];
-        if (selectedOption) savePreference(STORAGE_KEYS.CAMERA, selectedOption.text);
-    });
-
-    ui.micSelect.addEventListener('change', (e) => {
-        if (ui.errorMsg) ui.errorMsg.style.display = 'none'; 
-        const selectedOption = e.target.options[e.target.selectedIndex];
-        if (selectedOption) savePreference(STORAGE_KEYS.MIC, selectedOption.text);
-    });
-
-    ui.timerSelect.addEventListener('change', (e) => savePreference(STORAGE_KEYS.TIMER, e.target.value));
-    ui.useTimerCheckbox.addEventListener('change', (e) => savePreference(STORAGE_KEYS.USE_TIMER, e.target.checked));
-
-    ui.startBtn.addEventListener('click', handleStart);
-    ui.closeBtn.addEventListener('click', closePopup);
-
-    ui.shortcutsToggle.addEventListener('click', () => {
-        ui.shortcutsContent.classList.toggle('open');
-        ui.shortcutsToggle.classList.toggle('active');
-    });
-
-    document.getElementById('btn-open-studio').addEventListener('click', () => {
-        chrome.tabs.create({ url: chrome.runtime.getURL('src/editor/editor.html?mode=studio') });
-    });
+        await restoreDeviceSelection();
+        ui.startBtn.disabled = false;
+    } catch (error) {
+        console.warn("Permissão negada no Popup:", error);
+        ui.cameraSelect.innerHTML = '<option value="">Permissão negada</option>';
+        ui.micSelect.innerHTML = '<option value="">Permissão negada</option>';
+        ui.startBtn.disabled = false;
+    }
 }
 
 function populateSelect(select, devices, defaultLabel) {
     select.innerHTML = '';
-    const defaultOption = document.createElement('option');
-    defaultOption.value = ""; defaultOption.text = defaultLabel;
-    select.appendChild(defaultOption);
-
-    if (!devices || devices.length === 0) return;
-
+    const def = document.createElement('option');
+    def.value = ""; def.text = defaultLabel;
+    select.appendChild(def);
     devices.forEach(d => {
-        const option = document.createElement('option');
-        option.value = d.deviceId;
-        option.text = d.label || `Dispositivo ${d.deviceId.substring(0, 5)}`;
-        select.appendChild(option);
+        const opt = document.createElement('option');
+        opt.value = d.deviceId; opt.text = d.label || `Disp. ${d.deviceId.substring(0, 5)}`;
+        select.appendChild(opt);
     });
-}
-
-async function loadPreferences() {
-    const data = await chrome.storage.local.get([STORAGE_KEYS.SOURCE, STORAGE_KEYS.TIMER, STORAGE_KEYS.USE_TIMER]);
-
-    if (data[STORAGE_KEYS.SOURCE]) {
-        const sourcesArray = Array.from(ui.sources);
-        const targetIndex = sourcesArray.findIndex(s => s.dataset.source === data[STORAGE_KEYS.SOURCE]);
-
-        if (targetIndex !== -1) {
-            ui.sources.forEach(s => s.classList.remove('selected'));
-            ui.sources[targetIndex].classList.add('selected');
-            ui.sliderContainer.setAttribute('data-selected-index', targetIndex);
-        }
-    }
-    if (data[STORAGE_KEYS.TIMER]) ui.timerSelect.value = data[STORAGE_KEYS.TIMER];
-    if (data[STORAGE_KEYS.USE_TIMER] !== undefined) ui.useTimerCheckbox.checked = data[STORAGE_KEYS.USE_TIMER];
 }
 
 async function restoreDeviceSelection() {
@@ -241,21 +243,27 @@ async function restoreDeviceSelection() {
 }
 
 function setSelectByLabel(select, label) {
-    const options = Array.from(select.options);
-    const matchingOption = options.find(opt => opt.text === label);
-    if (matchingOption) select.value = matchingOption.value;
+    const opt = Array.from(select.options).find(o => o.text === label);
+    if (opt) select.value = opt.value;
 }
 
 function savePreference(key, value) { chrome.storage.local.set({ [key]: value }); }
 
-function ensureCameraSelected() {
-    if (!ui.cameraSelect.value && ui.cameraSelect.options.length > 1) {
-        ui.cameraSelect.selectedIndex = 1;
-        savePreference(STORAGE_KEYS.CAMERA, ui.cameraSelect.value);
-    }
-}
-
 async function getActiveTab() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     return tabs[0];
+}
+
+function closePopup() {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]) {
+            chrome.scripting.executeScript({
+                target: { tabId: tabs[0].id },
+                func: () => {
+                    const el = document.getElementById("solutto-recorder-iframe");
+                    if (el) { el.style.opacity = "0"; setTimeout(() => el.remove(), 300); }
+                }
+            });
+        }
+    });
 }

@@ -12,7 +12,7 @@ export class VideoStorage {
     async init() {
         if (this.db) return;
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, 3); 
+            const request = indexedDB.open(this.dbName, 3);
 
             request.onupgradeneeded = (event) => {
                 this.db = event.target.result;
@@ -38,30 +38,28 @@ export class VideoStorage {
         return new Promise((resolve, reject) => {
             const t = this.db.transaction([this.chunkStore], "readwrite");
             const store = t.objectStore(this.chunkStore);
-            const request = store.add({ 
-                videoId, 
-                blob, 
-                index: Number(index), 
-                segment: Number(segment) 
+            const request = store.add({
+                videoId,
+                blob,
+                index: Number(index),
+                segment: Number(segment)
             });
             request.onsuccess = () => resolve();
             request.onerror = (e) => reject(e.target.error);
         });
     }
 
-    // Recupera informações para Resume (Contagem e Último Segmento)
     async getResumeInfo(videoId) {
         if (!this.db) await this.init();
         const chunks = await this._getAllChunks(videoId);
         if (!chunks || chunks.length === 0) return { count: 0, lastSegment: 0 };
-        
-        // Pega o maior índice e o maior segmento
+
         chunks.sort((a, b) => a.index - b.index);
         const lastChunk = chunks[chunks.length - 1];
-        
-        return { 
-            count: chunks.length, // ou lastChunk.index + 1
-            lastSegment: lastChunk.segment || 0 
+
+        return {
+            count: chunks.length,
+            lastSegment: lastChunk.segment || 0
         };
     }
 
@@ -70,22 +68,22 @@ export class VideoStorage {
         return new Promise((resolve, reject) => {
             const t = this.db.transaction([this.metaStore], "readwrite");
             const store = t.objectStore(this.metaStore);
-            const request = store.add({ id: videoId, fileName, createdAt: new Date() });
+            const request = store.add({
+                id: videoId,
+                fileName,
+                createdAt: new Date(),
+                status: "finished"
+            });
             request.onsuccess = () => resolve();
             request.onerror = (e) => reject(e.target.error);
         });
     }
 
-    /**
-     * Retorna os segmentos separados (Array de Blobs) em vez de um blob sujo.
-     * Isso permite que o FFmpeg limpe cada parte antes de juntar.
-     */
     async getVideoSegments(videoId) {
         if (!this.db) await this.init();
         const chunks = await this._getAllChunks(videoId);
         if (!chunks.length) throw new Error("Sem dados.");
 
-        // Agrupa por segmento
         const segments = {};
         chunks.forEach(c => {
             const segId = c.segment || 0;
@@ -93,43 +91,30 @@ export class VideoStorage {
             segments[segId].push(c);
         });
 
-        // Cria um Blob para cada segmento
         const result = [];
         Object.keys(segments).sort((a, b) => a - b).forEach(segId => {
             const segChunks = segments[segId];
-            segChunks.sort((a, b) => a.index - b.index); // Garante ordem interna
+            segChunks.sort((a, b) => a.index - b.index);
             const blobParts = segChunks.map(c => c.blob);
             result.push(new Blob(blobParts, { type: segChunks[0].blob.type }));
         });
 
-        return result; // [BlobPart1, BlobPart2, ...]
+        return result;
     }
 
-    /**
-     * Salva o Blob completo como um único chunk no IndexedDB.
-     * Usado pelo AssetManager.
-     */
     async saveVideo(videoId, blob) {
         return this.saveChunk(videoId, blob, 0, 0);
     }
 
-    /**
-     * Recupera o vídeo completo como um único Blob.
-     * Junta todos os chunks de todos os segmentos em ordem correta.
-     */
     async getVideo(videoId) {
         if (!this.db) await this.init();
-        
-        // 1. Pega todos os pedaços do banco de dados
+
         const chunks = await this._getAllChunks(videoId);
-        
         if (!chunks || chunks.length === 0) {
             console.warn(`VideoStorage: Nenhum chunk encontrado para o ID ${videoId}`);
             return null;
         }
 
-        // 2. Ordena os pedaços para garantir a sequência do vídeo
-        // Primeiro pelo número do segmento, depois pelo índice dentro do segmento
         chunks.sort((a, b) => {
             const segA = a.segment || 0;
             const segB = b.segment || 0;
@@ -137,12 +122,15 @@ export class VideoStorage {
             return a.index - b.index;
         });
 
-        // 3. Extrai apenas os dados brutos (Blobs)
         const blobParts = chunks.map(c => c.blob);
-        
-        // 4. Cria um novo Blob único com o tipo do primeiro pedaço (ex: video/webm)
         const mimeType = chunks[0].blob.type;
-        return new Blob(blobParts, { type: mimeType });
+
+        try {
+            return new Blob(blobParts, { type: mimeType });
+        } catch (e) {
+            console.error("Erro ao reconstruir Blob do vídeo:", e);
+            throw e;
+        }
     }
 
     _getAllChunks(videoId) {

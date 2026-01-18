@@ -23,8 +23,28 @@ const ACTIONS = {
 const state = {
     playbackTabs: new Map(),
     driveService: new DriveService(),
-    videoStorage: new VideoStorage()
+    videoStorage: new VideoStorage(),
+    activeRecordingTabId: null,
+    isProcessingVideo: false
 };
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+    if (tabId === state.activeRecordingTabId) {
+        resetRecordingState();
+    }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (tabId === state.activeRecordingTabId && changeInfo.status === 'loading') {
+        resetRecordingState();
+    }
+});
+
+function resetRecordingState() {
+    state.activeRecordingTabId = null;
+    state.isProcessingVideo = false;
+    updateIcon("default");
+}
 
 chrome.action.onClicked.addListener(async (tab) => {
     if (!tab.url || !tab.url.startsWith("http")) return;
@@ -65,7 +85,7 @@ chrome.commands.onCommand.addListener(async (command) => {
     try {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tabs && tabs.length > 0) {
-            chrome.tabs.sendMessage(tabs[0].id, { action: "keyboard_command", command: command }).catch(() => {});
+            chrome.tabs.sendMessage(tabs[0].id, { action: "keyboard_command", command: command }).catch(() => { });
         }
     } catch (error) { console.error("Erro atalho:", error); }
 });
@@ -74,9 +94,17 @@ async function handleMessage(msg, sender) {
     const senderTabId = sender?.tab?.id;
 
     switch (msg.action) {
+        case "GET_RECORDING_STATUS":
+            return {
+                isBusy: state.activeRecordingTabId !== null || state.isProcessingVideo,
+                reason: state.isProcessingVideo ? "processing" : "recording"
+            };
         case ACTIONS.GET_AUTH_TOKEN: return getAuthToken();
         case ACTIONS.REQUEST_DEVICES: return sendMessageToTab(senderTabId, msg);
         case ACTIONS.REQUEST_RECORDING:
+            if (state.activeRecordingTabId !== null || state.isProcessingVideo) {
+                return { error: "A extensão já está ocupada." };
+            }
             if (msg.tabId) {
                 await ensureContentScript(msg.tabId);
                 return sendMessageToTab(msg.tabId, msg);
@@ -93,20 +121,20 @@ async function handleMessage(msg, sender) {
             return createPlaybackTab(sourceId);
 
         case ACTIONS.CLOSE_PLAYBACK_TAB:
-             for (const [src, play] of state.playbackTabs.entries()) {
-                 if (play === msg.playbackTab) {
-                     chrome.tabs.remove(play).catch(() => {});
-                     state.playbackTabs.delete(src);
-                 }
-             }
+            for (const [src, play] of state.playbackTabs.entries()) {
+                if (play === msg.playbackTab) {
+                    chrome.tabs.remove(play).catch(() => { });
+                    state.playbackTabs.delete(src);
+                }
+            }
             return { success: true };
 
         case ACTIONS.CLOSE_TABS: return closeAllPlaybackTabs();
-        
+
         case ACTIONS.WEBRTC_OFFER:
         case ACTIONS.WEBRTC_CANDIDATE:
             state.playbackTabs.forEach(playbackId => {
-                chrome.tabs.sendMessage(playbackId, msg).catch(() => {});
+                chrome.tabs.sendMessage(playbackId, msg).catch(() => { });
             });
             break;
 
@@ -118,7 +146,7 @@ async function handleMessage(msg, sender) {
         case "requestStream":
             return new Promise((resolve) => {
                 const targetTab = msg.tabId || senderTabId;
-                chrome.tabCapture.getMediaStreamId({ 
+                chrome.tabCapture.getMediaStreamId({
                     consumerTabId: targetTab,
                     targetTabId: targetTab
                 }, (streamId) => {
@@ -131,13 +159,14 @@ async function handleMessage(msg, sender) {
             });
 
         case ACTIONS.CHANGE_ICON: updateIcon(msg.type); break;
-        
+
         case ACTIONS.SAVE_CHUNK:
+            state.isProcessingVideo = true;
             const chunkBlob = new Blob([new Uint8Array(msg.data)]);
             // Passa o segment para o storage
             await state.videoStorage.saveChunk(msg.videoId, chunkBlob, msg.index, msg.segment);
             return { success: true };
-            
+
         case ACTIONS.GET_RESUME_INFO:
             return await state.videoStorage.getResumeInfo(msg.videoId);
 
@@ -145,6 +174,7 @@ async function handleMessage(msg, sender) {
             await state.videoStorage.finishVideo(msg.videoId, "video");
             await chrome.storage.local.set({ videoId: msg.videoId, videoTimeout: 0 });
             await chrome.tabs.create({ url: chrome.runtime.getURL("src/editor/editor.html") });
+            resetRecordingState();
             return { success: true };
     }
 }
@@ -153,13 +183,13 @@ async function handleMessage(msg, sender) {
 async function createPlaybackTab(sourceTabId) {
     if (state.playbackTabs.has(sourceTabId)) {
         const oldTabId = state.playbackTabs.get(sourceTabId);
-        try { await chrome.tabs.remove(oldTabId); } catch(e) {}
+        try { await chrome.tabs.remove(oldTabId); } catch (e) { }
         state.playbackTabs.delete(sourceTabId);
     }
     await chrome.storage.local.set({ tabId: sourceTabId });
-    const tab = await chrome.tabs.create({ 
-        url: chrome.runtime.getURL("src/playback/playback.html"), 
-        active: false, pinned: true, index: 0 
+    const tab = await chrome.tabs.create({
+        url: chrome.runtime.getURL("src/playback/playback.html"),
+        active: false, pinned: true, index: 0
     });
     state.playbackTabs.set(sourceTabId, tab.id);
     return { playbackTab: tab.id };
@@ -167,7 +197,7 @@ async function createPlaybackTab(sourceTabId) {
 
 async function closeAllPlaybackTabs() {
     const ids = Array.from(state.playbackTabs.values());
-    if (ids.length > 0) await chrome.tabs.remove(ids).catch(() => {});
+    if (ids.length > 0) await chrome.tabs.remove(ids).catch(() => { });
     state.playbackTabs.clear();
     return { success: true };
 }
