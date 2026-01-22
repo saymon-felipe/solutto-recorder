@@ -9,10 +9,6 @@ const ACTIONS = {
     GET_STATUS: "GET_RECORDING_STATUS"
 };
 
-/**
- * Sincronizado com SoluttoConstants.STORAGE para garantir 
- * que o Timer e o Checkbox persistam corretamente em toda a extensão.
- */
 const STORAGE_KEYS = {
     CAMERA: "cameraSelect",
     MIC: "microphoneSelect",
@@ -36,38 +32,89 @@ const ui = {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
-    ui.startBtn.disabled = true;
-
     const status = await checkGlobalStatus();
 
-    await loadPreferences();
-
-    if (!status.isBusy) {
+    if (status.isBusy && status.reason === "recording") {
+        showRecordingState(status.recordingTabId);
+    } else if (status.isBusy && status.reason === "processing") {
+        showProcessingState();
+    } else {
+        ui.startBtn.disabled = true;
+        await loadPreferences();
         await refreshDevicesLocal();
         setupListeners();
     }
 });
 
 /**
- * Consulta o estado do Service Worker para evitar conflitos de gravação.
+ * Consulta o estado do Service Worker
  */
 async function checkGlobalStatus() {
     return new Promise((resolve) => {
         chrome.runtime.sendMessage({ action: ACTIONS.GET_STATUS }, (response) => {
             if (response && response.isBusy) {
-                ui.startBtn.disabled = true;
-                ui.startBtn.innerHTML = '<i class="fa-solid fa-ban"></i> Indisponível';
-                if (ui.errorMsg) {
-                    ui.errorMsg.style.display = 'block';
-                    ui.errorMsg.innerHTML = `<i class="fa-solid fa-lock"></i> ${response.reason === "processing" ? "Processando vídeo..." : "Já gravando em outra aba."
-                        }`;
-                }
-                resolve({ isBusy: true });
+                resolve({ 
+                    isBusy: true, 
+                    reason: response.reason,
+                    recordingTabId: response.recordingTabId 
+                });
             } else {
                 resolve({ isBusy: false });
             }
         });
     });
+}
+
+function showProcessingState() {
+    ui.startBtn.disabled = true;
+    ui.startBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processando Vídeo...';
+    if (ui.errorMsg) {
+        ui.errorMsg.style.display = 'block';
+        ui.errorMsg.innerHTML = 'Aguarde a finalização do vídeo anterior.';
+    }
+}
+
+function showRecordingState(recordingTabId) {
+    const settingsDiv = document.querySelector('.settings-group');
+    const sourceDiv = document.querySelector('.select-source-container');
+    
+    if(settingsDiv) settingsDiv.style.display = 'none';
+    if(sourceDiv) sourceDiv.style.display = 'none';
+
+    ui.startBtn.disabled = false;
+    ui.startBtn.classList.add('stop-mode');
+    ui.startBtn.innerHTML = '<i class="fa-solid fa-square"></i> PARAR GRAVAÇÃO';
+    
+    const newBtn = ui.startBtn.cloneNode(true);
+    ui.startBtn.parentNode.replaceChild(newBtn, ui.startBtn);
+    ui.startBtn = newBtn;
+
+    ui.startBtn.addEventListener('click', () => {
+        ui.startBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Parando...';
+        ui.startBtn.disabled = true;
+        
+        const stopPayload = { 
+            action: "keyboard_command", 
+            command: "stop"
+        };
+
+        if (recordingTabId) {
+            chrome.tabs.sendMessage(recordingTabId, stopPayload, (resp) => {
+                setTimeout(() => window.close(), 500); 
+            });
+        } else {
+            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+                if(tabs[0]) chrome.tabs.sendMessage(tabs[0].id, stopPayload);
+                window.close();
+            });
+        }
+    });
+
+    if (ui.errorMsg) {
+        ui.errorMsg.style.display = 'block';
+        ui.errorMsg.style.color = '#e74c3c';
+        ui.errorMsg.innerHTML = '<i class="fa-solid fa-circle fa-beat"></i> Gravando em andamento...';
+    }
 }
 
 /**
@@ -202,9 +249,6 @@ async function handleStart() {
     });
 }
 
-/**
- * Pede permissão e lista dispositivos locais.
- */
 async function refreshDevicesLocal() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });

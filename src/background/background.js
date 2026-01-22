@@ -16,8 +16,9 @@ const ACTIONS = {
     UPLOAD_FILE: "upload-file",
     KILL_UI: "kill",
     SAVE_CHUNK: "save_chunk",
-    GET_RESUME_INFO: "get_resume_info", // Substitui get_chunk_count
-    FINISH_VIDEO: "finish_video"
+    GET_RESUME_INFO: "get_resume_info",
+    FINISH_VIDEO: "finish_video",
+    STOP_RECORDING: "stop_recording_command" 
 };
 
 const state = {
@@ -41,6 +42,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 function resetRecordingState() {
+    console.log("[Background] Resetando estado da gravação.");
     state.activeRecordingTabId = null;
     state.isProcessingVideo = false;
     updateIcon("default");
@@ -83,9 +85,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.commands.onCommand.addListener(async (command) => {
     try {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tabs && tabs.length > 0) {
-            chrome.tabs.sendMessage(tabs[0].id, { action: "keyboard_command", command: command }).catch(() => { });
+        const targetId = state.activeRecordingTabId;
+        if (targetId) {
+             chrome.tabs.sendMessage(targetId, { action: "keyboard_command", command: command }).catch(() => { });
+        } else {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tabs && tabs.length > 0) {
+                chrome.tabs.sendMessage(tabs[0].id, { action: "keyboard_command", command: command }).catch(() => { });
+            }
         }
     } catch (error) { console.error("Erro atalho:", error); }
 });
@@ -97,19 +104,23 @@ async function handleMessage(msg, sender) {
         case "GET_RECORDING_STATUS":
             return {
                 isBusy: state.activeRecordingTabId !== null || state.isProcessingVideo,
-                reason: state.isProcessingVideo ? "processing" : "recording"
+                reason: state.isProcessingVideo ? "processing" : "recording",
+                recordingTabId: state.activeRecordingTabId // Importante para o Popup saber quem parar
             };
         case ACTIONS.GET_AUTH_TOKEN: return getAuthToken();
         case ACTIONS.REQUEST_DEVICES: return sendMessageToTab(senderTabId, msg);
+        
         case ACTIONS.REQUEST_RECORDING:
             if (state.activeRecordingTabId !== null || state.isProcessingVideo) {
                 return { error: "A extensão já está ocupada." };
             }
             if (msg.tabId) {
+                state.activeRecordingTabId = msg.tabId; // Marca a aba como gravando
                 await ensureContentScript(msg.tabId);
                 return sendMessageToTab(msg.tabId, msg);
             }
             break;
+
         case ACTIONS.UPLOAD_FILE: return handleDriveUpload(msg);
         case ACTIONS.OPEN_EDITOR:
             await chrome.storage.local.set({ videoId: msg.videoId, videoTimeout: msg.videoTimeout });
@@ -158,12 +169,13 @@ async function handleMessage(msg, sender) {
                 });
             });
 
-        case ACTIONS.CHANGE_ICON: updateIcon(msg.type); break;
+        case ACTIONS.CHANGE_ICON: 
+            updateIcon(msg.type); 
+            break;
 
         case ACTIONS.SAVE_CHUNK:
             state.isProcessingVideo = true;
             const chunkBlob = new Blob([new Uint8Array(msg.data)]);
-            // Passa o segment para o storage
             await state.videoStorage.saveChunk(msg.videoId, chunkBlob, msg.index, msg.segment);
             return { success: true };
 

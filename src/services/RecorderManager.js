@@ -1,6 +1,6 @@
 /**
  * RecorderManager - Gerenciador de Gravação.
- * ATUALIZADO: Fluxo reordenado (UI -> Webcam -> Countdown -> REC) e Segmentos.
+ * CORRIGIDO: Persistência via chrome.storage.local para suportar navegação entre domínios.
  */
 (function () {
     const C = window.SoluttoConstants;
@@ -10,23 +10,19 @@
         constructor() {
             this.mediaRecorder = null;
             this.stream = null;
-            this.status = "idle"; 
+            this.status = "idle";
             this.elapsedSeconds = 0;
             this.timerInterval = null;
             this.recordingType = null;
             this.onStopCallback = null;
-            
+
             this.currentVideoId = null;
             this.chunkIndex = 0;
             this.currentSegment = 0;
-            this.sessionOptions = null; 
+            this.sessionOptions = null;
 
             this.ui = UI.getInstance();
             this.onUserActionCallback = null;
-
-            window.addEventListener('beforeunload', () => {
-                if (this.status !== 'idle') this._saveSessionState();
-            });
         }
 
         recoverState(videoId, elapsedSeconds, recordingType, options) {
@@ -35,40 +31,36 @@
             this.elapsedSeconds = typeof elapsedSeconds === 'number' ? elapsedSeconds : 0;
             this.recordingType = recordingType;
             this.sessionOptions = options || {};
-            this.status = "paused"; 
-            
+            this.status = "paused";
+
             this._syncResumeInfo();
         }
 
         async _syncResumeInfo() {
-             if (!this.currentVideoId) return;
-             try {
-                 const info = await chrome.runtime.sendMessage({ 
-                     action: "get_resume_info", 
-                     videoId: this.currentVideoId 
-                 });
-                 
-                 this.chunkIndex = info.count || 0;
-                 this.currentSegment = info.lastSegment || 0;
-                 
-                 console.log(`[Recorder] Sync: Chunks=${this.chunkIndex}, LastSegment=${this.currentSegment}`);
-             } catch (e) {
-                 console.error("[Recorder] Erro sync:", e);
-             }
+            if (!this.currentVideoId) return;
+            try {
+                const info = await chrome.runtime.sendMessage({
+                    action: "get_resume_info",
+                    videoId: this.currentVideoId
+                });
+
+                this.chunkIndex = info.count || 0;
+                this.currentSegment = info.lastSegment || 0;
+
+                console.log(`[Recorder] Sync: Chunks=${this.chunkIndex}, LastSegment=${this.currentSegment}`);
+            } catch (e) {
+                console.error("[Recorder] Erro sync:", e);
+            }
         }
 
-        /**
-         * Inicia gravação.
-         * @param {Function} onUIReadyCallback - Chamado após a UI montar, mas ANTES do countdown. Usado para injetar webcam.
-         */
         async start(stream, options, onStopCallback = null, onUIReadyCallback = null, existingVideoId = null) {
             if (this.status === "recording") return;
 
             this.stream = stream;
-            this.sessionOptions = options; 
+            this.sessionOptions = options;
             this.recordingType = options.type || "screen";
-            this.onStopCallback = onStopCallback; 
-            
+            this.onStopCallback = onStopCallback;
+
             const timeoutSeconds = parseInt(options.timeout || 0);
 
             if (existingVideoId) {
@@ -85,7 +77,7 @@
                 this.elapsedSeconds = 0;
             }
 
-            this._saveSessionState();
+            await this._saveSessionState();
 
             const mediaOptions = this._getRecorderOptions();
             try {
@@ -104,6 +96,7 @@
             const videoTrack = stream.getVideoTracks()[0];
             if (videoTrack) {
                 videoTrack.onended = () => {
+                    // Se o track morre mas não foi o usuário que parou (ex: aba fechada sem querer, ou navegação de frame)
                     if (this.status !== "idle") this.stop();
                 };
             }
@@ -118,15 +111,13 @@
                 await this.ui.showCountdown(timeoutSeconds);
             }
 
-            // 4. INICIA GRAVAÇÃO
             this.mediaRecorder.start(C.RECORDER.TIMESLICE_MS);
             this.status = "recording";
-            
+
             this._startTimer(!existingVideoId);
-            
+
             chrome.runtime.sendMessage({ action: C.ACTIONS.CHANGE_ICON, type: "recording" });
-            
-            // Garante visual atualizado
+
             this.ui.updateTimer(this.elapsedSeconds);
             if (existingVideoId) {
                 this.ui.togglePauseState(false);
@@ -137,9 +128,8 @@
             try {
                 const buffer = await blob.arrayBuffer();
                 const dataArray = Array.from(new Uint8Array(buffer));
-                
                 const indexToSend = this.chunkIndex++;
-                
+
                 chrome.runtime.sendMessage({
                     action: "save_chunk",
                     videoId: this.currentVideoId,
@@ -175,10 +165,10 @@
             if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
                 this.mediaRecorder.stop();
             }
-            
+
             this._stopTimer();
-            this._clearSessionState();
-            
+            await this._clearSessionState();
+
             await new Promise(r => setTimeout(r, 800));
 
             chrome.runtime.sendMessage({
@@ -189,12 +179,12 @@
             this._cleanup();
         }
 
-        cancel() {
+        async cancel() {
             if (this.mediaRecorder) {
                 this.mediaRecorder.onstop = null;
                 this.mediaRecorder.stop();
             }
-            this._clearSessionState();
+            await this._clearSessionState();
             this._cleanup();
         }
 
@@ -210,7 +200,7 @@
                 case C.ACTIONS.CANCEL_RECORDING: this.cancel(); break;
             }
         }
-        
+
         bindActionHandler(callback) {
             this.onUserActionCallback = callback;
         }
@@ -220,7 +210,7 @@
             this.ui.cleanup();
             if (this.stream) this.stream.getTracks().forEach(track => track.stop());
             if (this.onStopCallback) this.onStopCallback();
-            
+
             this.mediaRecorder = null;
             this.stream = null;
             this.status = "idle";
@@ -234,7 +224,7 @@
             this.timerInterval = setInterval(() => {
                 this.elapsedSeconds++;
                 this.ui.updateTimer(this.elapsedSeconds);
-                this._saveSessionState(); 
+                this._saveSessionState();
             }, 1000);
         }
 
@@ -255,7 +245,7 @@
             return {};
         }
 
-        _saveSessionState() {
+        async _saveSessionState() {
             if (!this.currentVideoId) return;
             const state = {
                 videoId: this.currentVideoId,
@@ -265,11 +255,12 @@
                 timestamp: Date.now(),
                 options: this.sessionOptions
             };
-            sessionStorage.setItem('solutto_rec_state', JSON.stringify(state));
+            
+            await chrome.storage.local.set({ 'solutto_rec_state': state });
         }
 
-        _clearSessionState() {
-            sessionStorage.removeItem('solutto_rec_state');
+        async _clearSessionState() {
+            await chrome.storage.local.remove('solutto_rec_state');
         }
     }
 
